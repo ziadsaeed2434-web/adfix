@@ -19,11 +19,13 @@ jobs:
           # تنظيف أي مسار قديم
           rm -rf ~/theos
           
-          # تثبيت أدوات Theos بدون سحب الـ submodules التلقائية التي تسبب المشاكل
-          git clone --no-recursive https://github.com/theos/theos.git ~/theos
+          # سحب الـ Theos بكامل ملفاته الأساسية (مع الـ submodules الضرورية)
+          git clone --recursive https://github.com/theos/theos.git ~/theos
           
-          # حذف مجلد الـ sdks الفارغ لو وجد، ثم سحب الـ SDKs الحقيقية بشكل نظيف
+          # إذا وُجد مجلد الـ sdks مسبقاً، نقوم بحذفه أولاً لضمان عدم حدوث خطأ التعارض
           rm -rf ~/theos/sdks
+          
+          # سحب الـ SDKs النظيفة والخفيفة
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
 
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
