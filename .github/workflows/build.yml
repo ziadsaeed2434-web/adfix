@@ -14,22 +14,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git make clang
 
-      - name: Setup Environment
+      - name: Setup Theos
         run: |
-          # نستخدم مجلد داخل مسار العمل الحالي للمشروع لضمان أنه ليس محمياً
-          export THEOS=$GITHUB_WORKSPACE/theos_env
-          git clone --recursive https://github.com/theos/theos.git $THEOS
-          git clone https://github.com/theos/sdks.git $THEOS/sdks
-          echo "THEOS=$THEOS" >> $GITHUB_ENV
-          echo "$THEOS/bin" >> $GITHUB_PATH
+          git clone --recursive https://github.com/theos/theos.git ~/theos
+          git clone https://github.com/theos/sdks.git ~/theos/sdks
+          echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
+          echo "/home/runner/theos/bin" >> $GITHUB_PATH
 
       - name: Compile Tweak
         run: |
-          # استخدام المتغير المعرف في الخطوة السابقة
-          make CC=clang CXX=clang++ THEOS=$GITHUB_WORKSPACE/theos_env
+          export PATH=/home/runner/theos/bin:$PATH
+          make
 
       - name: Upload Dylib Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AdFixerPro-Dylib
-          path: .theos/obj/debug/AdFixerPro.dylib
+          path: .theos/obj/AdFixerPro.dylib
