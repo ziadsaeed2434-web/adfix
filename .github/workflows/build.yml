@@ -16,17 +16,17 @@ jobs:
 
       - name: Setup Environment
         run: |
-          # استخدام مجلد جديد كلياً لتجنب تعارض الملفات الموجودة مسبقاً
-          export THEOS_ROOT=$HOME/my_theos
-          git clone --recursive https://github.com/theos/theos.git $THEOS_ROOT
-          git clone https://github.com/theos/sdks.git $THEOS_ROOT/sdks
-          echo "THEOS=$THEOS_ROOT" >> $GITHUB_ENV
-          echo "$THEOS_ROOT/bin" >> $GITHUB_PATH
+          # نستخدم مجلد داخل مسار العمل الحالي للمشروع لضمان أنه ليس محمياً
+          export THEOS=$GITHUB_WORKSPACE/theos_env
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+          git clone https://github.com/theos/sdks.git $THEOS/sdks
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+          echo "$THEOS/bin" >> $GITHUB_PATH
 
       - name: Compile Tweak
         run: |
-          # استخدام المترجم المدمج مباشرة لضمان عدم وجود أخطاء مسارات
-          make CC=clang CXX=clang++
+          # استخدام المتغير المعرف في الخطوة السابقة
+          make CC=clang CXX=clang++ THEOS=$GITHUB_WORKSPACE/theos_env
 
       - name: Upload Dylib Artifact
         uses: actions/upload-artifact@v4
