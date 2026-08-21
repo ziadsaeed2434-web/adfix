@@ -9,14 +9,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Setup Theos
+      - name: Setup Theos & SDKs
         run: |
-          if [ ! -d "$HOME/theos" ]; then
-            git clone --recursive https://github.com/theos/theos.git ~/theos
-          fi
-          if [ ! -d "$HOME/theos/sdks" ]; then
-            git clone https://github.com/theos/sdks.git ~/theos/sdks
-          fi
+          git clone --recursive https://github.com/theos/theos.git ~/theos
+          git clone https://github.com/theos/sdks.git ~/theos/sdks
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
 
       - name: Compile Tweak
