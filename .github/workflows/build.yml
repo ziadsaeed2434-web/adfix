@@ -12,14 +12,16 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git make clang
+          sudo apt-get install -y build-essential git make clang curl
 
-      - name: Setup Theos & SDKs
+      - name: Setup Theos, SDKs & Toolchain
         run: |
           rm -rf ~/theos
           git clone --recursive https://github.com/theos/theos.git ~/theos
           rm -rf ~/theos/sdks
           git clone https://github.com/theos/sdks.git ~/theos/sdks
+          # تثبيت أداة الـ Toolchain المفقودة للينكس
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos-toolchain.sh)" || true
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
 
       - name: Compile Tweak
