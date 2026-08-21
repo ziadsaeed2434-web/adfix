@@ -11,13 +11,17 @@ jobs:
 
       - name: Setup Theos
         run: |
-          git clone --recursive https://github.com/theos/theos.git ~/theos
-          git clone https://github.com/theos/sdks.git ~/theos/sdks
-          echo "THEOS=~/theos" >> $GITHUB_ENV
+          if [ ! -d "$HOME/theos" ]; then
+            git clone --recursive https://github.com/theos/theos.git ~/theos
+          fi
+          if [ ! -d "$HOME/theos/sdks" ]; then
+            git clone https://github.com/theos/sdks.git ~/theos/sdks
+          fi
+          echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
 
       - name: Compile Tweak
         run: |
-          export PATH=$HOME/theos/bin:$PATH
+          export PATH=/home/runner/theos/bin:$PATH
           make
 
       - name: Upload Dylib Artifact
