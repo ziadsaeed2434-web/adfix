@@ -12,12 +12,22 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git make clang
+          sudo apt-get install -y build-essential git make clang curl unzip
 
-      - name: Setup Theos
+      - name: Setup Theos & SDK
         run: |
-          git clone --recursive https://github.com/theos/theos.git ~/theos
-          git clone https://github.com/theos/sdks.git ~/theos/sdks
+          # حذف أي مسار قديم تماماً
+          rm -rf ~/theos
+          
+          # تثبيت الـ Theos الأساسي بدون الـ sdks التلقائية لتجنب التعارض
+          git clone https://github.com/theos/theos.git ~/theos
+          
+          # إنشاء مجلد الـ sdks وجلب أحدث ملف خفيف مباشرة
+          mkdir -p ~/theos/sdks
+          curl -L -o ~/theos/sdks/sdk.zip https://github.com/theos/sdks/releases/download/latest/iPhoneOS14.5.sdk.zip
+          unzip -q ~/theos/sdks/sdk.zip -d ~/theos/sdks/
+          rm ~/theos/sdks/sdk.zip
+
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
           echo "/home/runner/theos/bin" >> $GITHUB_PATH
 
