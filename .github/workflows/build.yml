@@ -14,16 +14,16 @@ jobs:
 
     - name: Setup Theos
       run: |
-        git clone --recursive https://github.com/theos/theos.git /opt/theos
-        git clone --depth=1 https://github.com/theos/sdks.git /opt/theos/sdks
+        git clone --recursive https://github.com/theos/theos.git ~/theos
+        git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
 
     - name: Build Tweak
       run: |
-        export THEOS=/opt/theos
+        export THEOS=~/theos
         make
 
     - name: Upload Dylib Artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
         name: ProAdManager-dylib
         path: .theos/obj/debug/*.dylib
