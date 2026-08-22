@@ -1,89 +1,121 @@
-#import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <Security/Security.h>
 
-@interface ProAdManager : NSObject
-+ (instancetype)sharedInstance;
-- (NSString *)getCurrentIDFA;
-- (void)showDashboard;
-- (void)createPersistentButton;
-@end
-
-static UIWindow *floatingWindow = nil;
-
-@implementation ProAdManager
-
-+ (instancetype)sharedInstance {
-    static ProAdManager *shared = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ shared = [[ProAdManager alloc] init]; });
-    return shared;
-}
-
-// توليد IDFA جديد كلياً في كل مرة يُطلب فيها أو يتم فتح التطبيق
-- (NSString *)getCurrentIDFA {
-    return [[NSUUID UUID] UUIDString];
-}
-
-- (void)showDashboard {
-    UIWindow *window = [UIApplication sharedApplication].windows.firstObject;
-    UIViewController *rootVC = window.rootViewController;
-    while (rootVC.presentedViewController) {
-        rootVC = rootVC.presentedViewController;
+// 1. تنظيف ملفات التطبيق المحلية (Sandbox) بالكامل
+void clearAppSandbox() {
+    NSString *homeDir = NSHomeDirectory();
+    NSArray *foldersToClean = @[
+        @"Documents",
+        @"Library/Caches",
+        @"Library/Preferences",
+        @"Library/Application Support",
+        @"tmp"
+    ];
+    
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    
+    for (NSString *folder in foldersToClean) {
+        NSString *folderPath = [homeDir stringByAppendingPathComponent:folder];
+        if ([fileManager fileExistsAtPath:folderPath]) {
+            NSArray *contents = [fileManager contentsOfDirectoryAtPath:folderPath error:nil];
+            for (NSString *file in contents) {
+                NSString *fullPath = [folderPath stringByAppendingPathComponent:file];
+                [fileManager removeItemAtPath:fullPath error:nil];
+            }
+        }
     }
-
-    NSString *msg = [NSString stringWithFormat:
-                     @"🔥 معرف الإعلانات (IDFA) يتجدد تلقائياً:\n\n"
-                     @"🆔 IDFA الحالي لهذه الجلسة:\n%@", 
-                     [self getCurrentIDFA]];
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🛡️ لوحة تحكم الإعلانات" 
-                                                                   message:msg 
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:@"إغلاق" style:UIAlertActionStyleCancel handler:nil]];
-    
-    [rootVC presentViewController:alert animated:YES completion:nil];
 }
 
-- (void)createPersistentButton {
-    if (floatingWindow) return;
-
-    floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(20, 100, 130, 40)];
-    floatingWindow.windowLevel = UIWindowLevelStatusBar + 100;
-    floatingWindow.hidden = NO;
-    floatingWindow.backgroundColor = [UIColor clearColor];
-
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-    btn.frame = floatingWindow.bounds;
-    [btn setTitle:@"🛡️ أدوات" forState:UIControlStateNormal];
-    [btn setBackgroundColor:[UIColor blackColor]];
-    [btn setTitleColor:[UIColor greenColor] forState:UIControlStateNormal];
-    btn.layer.cornerRadius = 10;
-    btn.layer.borderWidth = 1.0;
-    btn.layer.borderColor = [UIColor greenColor].CGColor;
-    
-    [btn addTarget:self action:@selector(showDashboard) forControlEvents:UIControlEventTouchUpInside];
-    
-    UIViewController *btnVC = [[UIViewController alloc] init];
-    [btnVC.view addSubview:btn];
-    floatingWindow.rootViewController = btnVC;
+// 2. مسح الإعدادات المؤقتة NSUserDefaults
+void clearUserDefaults() {
+    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+    if (bundleIdentifier) {
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+    }
 }
+
+// 3. تنظيف الـ Keychain بالكامل مع استثناء حسابك ونقاطك (userIDKey)
+void clearKeychainExceptToken() {
+    NSString *serviceToKeep = @"com.codebysms";
+    NSString *accountToKeep = @"userIDKey";
+
+    NSArray *secItemClasses = @[
+        (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecClassInternetPassword
+    ];
+
+    for (id secClass in secItemClasses) {
+        NSDictionary *query = @{
+            (__bridge id)kSecClass: secClass,
+            (__bridge id)kSecReturnAttributes: @YES,
+            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
+        };
+
+        CFArrayRef items = NULL;
+        if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&items) == errSecSuccess) {
+            NSArray *itemsArray = (__bridge_transfer NSArray *)items;
+
+            for (NSDictionary *itemDict in itemsArray) {
+                NSString *service = itemDict[(__bridge id)kSecAttrService];
+                NSString *account = itemDict[(__bridge id)kSecAttrAccount];
+
+                // حذف كل شيء تابع للتطبيق ما عدا مفتاح الحساب المستثنى
+                if ([service isEqualToString:serviceToKeep] && ![account isEqualToString:accountToKeep]) {
+                    NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:@{
+                        (__bridge id)kSecClass: secClass,
+                        (__bridge id)kSecAttrService: service,
+                        (__bridge id)kSecAttrAccount: account
+                    }];
+                    SecItemDelete((__bridge CFDictionaryRef)delQuery);
+                }
+            }
+        }
+    }
+}
+
+// 4. واجهة البرمجية للزر العائم وعملية التنفيذ
+@interface ResetHelperWindow : NSObject
++ (void)addButtonToWindow:(UIWindow *)window;
 @end
 
-// --- خداع الـ IDFA وجعله يتغير باستمرار ---
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    // يعطي التطبيق معرف إعلانات جديد كلياً في كل مرة يستعلم عنه
-    return [[NSUUID alloc] initWithUUIDString:[[ProAdManager sharedInstance] getCurrentIDFA]];
-}
-- (BOOL)isAdvertisingTrackingEnabled {
-    return YES;
-}
-%end
+@implementation ResetHelperWindow
 
-// تشغيل الزر الثابت عند فتح التطبيق
-%ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[ProAdManager sharedInstance] createPersistentButton];
-    });
++ (void)addButtonToWindow:(UIWindow *)window {
+    // منع تكرار إنشاء الزر إذا كان موجوداً مسبقاً
+    if ([window viewWithTag:9999]) return;
+
+    UIButton *resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    resetButton.frame = CGRectMake(15, 50, 140, 35);
+    [resetButton setTitle:@"Reset App 🔄" forState:UIControlStateNormal];
+    resetButton.backgroundColor = [UIColor colorWithRed:1.0 green:0.0 blue:0.0 alpha:0.85];
+    [resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    resetButton.layer.cornerRadius = 8;
+    resetButton.tag = 9999;
+    
+    // ربط الزر بدالة التنفيذ عند الضغط
+    [resetButton addTarget:self action:@selector(performFullReset) forControlEvents:UIControlEventTouchUpInside];
+    
+    [window addSubview:resetButton];
+    [window bringSubviewToFront:resetButton];
 }
+
++ (void)performFullReset {
+    clearAppSandbox();
+    clearUserDefaults();
+    clearKeychainExceptToken();
+    
+    // إغلاق التطبيق ليفتح نظيفاً بالكامل في المرة القادمة
+    exit(0);
+}
+
+@end
+
+// 5. الهوك لإظهار الزر فور فتح التطبيق
+%hook UIWindow
+
+- (void)makeKeyAndVisible {
+    %orig;
+    [ResetHelperWindow addButtonToWindow:self];
+}
+
+%end
