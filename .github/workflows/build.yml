@@ -12,12 +12,15 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git make ldid
+          sudo apt-get install -y build-essential git make curl unzip
 
-      - name: Setup Theos
+      - name: Setup Theos & SDKs
         run: |
+          rm -rf ~/theos
           git clone --recursive https://github.com/theos/theos.git ~/theos
+          rm -rf ~/theos/sdks
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
+          
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
           echo "/home/runner/theos/bin" >> $GITHUB_PATH
 
