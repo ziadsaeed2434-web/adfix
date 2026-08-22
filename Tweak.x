@@ -4,13 +4,14 @@
 #import <SystemConfiguration/SystemConfiguration.h>
 
 static NSString *currentSessionIDFA = nil;
-static BOOL autoCleanEnabled = YES;
+static BOOL autoCleanEnabled = NO;
 
 @interface ProAdManagerController : NSObject
 + (instancetype)sharedInstance;
 - (void)showFloatingButton;
 - (NSString *)getOrCreateUUID;
 - (void)wipeAppData;
+- (void)generateNewIDFA;
 @end
 
 @implementation ProAdManagerController {
@@ -25,15 +26,20 @@ static BOOL autoCleanEnabled = YES;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         sharedInstance = [[self alloc] init];
+        [sharedInstance generateNewIDFA];
     });
     return sharedInstance;
+}
+
+- (void)generateNewIDFA {
+    currentSessionIDFA = [[NSUUID UUID] UUIDString];
 }
 
 - (void)wipeAppData {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *home = NSHomeDirectory();
     NSArray *paths = @[@"Documents", @"Library/Caches", @"Library/Preferences", @"tmp"];
-    
+
     for (NSString *p in paths) {
         NSString *fullPath = [home stringByAppendingPathComponent:p];
         for (NSString *file in [fm contentsOfDirectoryAtPath:fullPath error:nil]) {
@@ -45,13 +51,9 @@ static BOOL autoCleanEnabled = YES;
 }
 
 - (NSString *)getOrCreateUUID {
-    static dispatch_once_t token;
-    dispatch_once(&token, ^{
-        if (autoCleanEnabled) {
-            [self wipeAppData];
-        }
-        currentSessionIDFA = [[NSUUID UUID] UUIDString];
-    });
+    if (!currentSessionIDFA) {
+        [self generateNewIDFA];
+    }
     return currentSessionIDFA;
 }
 
@@ -68,11 +70,11 @@ static BOOL autoCleanEnabled = YES;
     floatingBtn.layer.cornerRadius = 27.5;
     floatingBtn.layer.borderWidth = 1.5;
     floatingBtn.layer.borderColor = [UIColor systemGreenColor].CGColor;
-    
+
     floatingBtn.layer.shadowColor = [UIColor systemGreenColor].CGColor;
     floatingBtn.layer.shadowRadius = 8;
     floatingBtn.layer.shadowOpacity = 0.6;
-    
+
     [floatingBtn addTarget:self action:@selector(toggleMenuPanel) forControlEvents:UIControlEventTouchUpInside];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(dragButton:)];
@@ -81,7 +83,7 @@ static BOOL autoCleanEnabled = YES;
     [window addSubview:floatingBtn];
 }
 
-- (void)dragButton:(UIPanGestureRecognizer * )pan {
+- (void)dragButton:(UIPanGestureRecognizer *)pan {
     UIWindow *window = [UIApplication sharedApplication].keyWindow;
     CGPoint translation = [pan translationInView:window];
     CGPoint center = floatingBtn.center;
@@ -106,7 +108,7 @@ static BOOL autoCleanEnabled = YES;
     menuPanel.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.12 alpha:0.92];
     menuPanel.layer.cornerRadius = 24;
     menuPanel.layer.borderWidth = 1;
-    menuPanel.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.15].CGColor;
+    menuPanel.layer.borderColor = (__bridge CGColorRef)([UIColor colorWithWhite:1.0 alpha:0.15]);
     menuPanel.transform = CGAffineTransformMakeScale(0.8, 0.8);
     menuPanel.alpha = 0;
 
@@ -125,7 +127,7 @@ static BOOL autoCleanEnabled = YES;
     [menuPanel addSubview:statusLabel];
 
     UILabel *switchLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 185, 200, 30)];
-    switchLabel.text = @"مسح الداتا عند الفتح:";
+    switchLabel.text = @"مسح الداتا عند التوليد اليدوي:";
     switchLabel.textColor = [UIColor lightGrayColor];
     switchLabel.font = [UIFont systemFontOfSize:13];
     [menuPanel addSubview:switchLabel];
@@ -176,12 +178,12 @@ static BOOL autoCleanEnabled = YES;
 }
 
 - (void)manualRegenerate {
-    currentSessionIDFA = [[NSUUID UUID] UUIDString];
+    [self generateNewIDFA];
     if (autoCleanEnabled) {
         [self wipeAppData];
     }
     [self updateStatusText];
-    
+
     statusLabel.textColor = [UIColor systemCyanColor];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         statusLabel.textColor = [UIColor systemGreenColor];
