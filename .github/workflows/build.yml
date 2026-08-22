@@ -1,43 +1,29 @@
-name: Build Tweak
+name: Build iOS Tweak dylib
 
-on: [push]
+on:
+  push:
+    branches: [ main, master ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+    - name: Checkout Code
+      uses: actions/checkout@v3
 
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential git make clang curl unzip
+    - name: Setup Theos
+      run: |
+        git clone --recursive https://github.com/theos/theos.git /opt/theos
+        git clone --depth=1 https://github.com/theos/sdks.git /opt/theos/sdks
 
-      - name: Setup Theos & System Clang Link
-        run: |
-          rm -rf /tmp/theos
-          mkdir -p /tmp/theos
+    - name: Build Tweak
+      run: |
+        export THEOS=/opt/theos
+        make
 
-          # تثبيت Theos الأساسي والـ SDKs فقط
-          git clone --recursive https://github.com/theos/theos.git /tmp/theos
-          git clone --depth=1 https://github.com/theos/sdks.git /tmp/theos/sdks
-
-          # ربط مترجم النظام مباشرة ليتطابق مع ما تبحث عنه Theos بدون أخطاء تحميل
-          mkdir -p /tmp/theos/toolchain/linux/iphone/bin
-          ln -s /usr/bin/clang /tmp/theos/toolchain/linux/iphone/bin/clang
-          ln -s /usr/bin/clang++ /tmp/theos/toolchain/linux/iphone/bin/clang++
-
-          echo "THEOS=/tmp/theos" >> $GITHUB_ENV
-          echo "/tmp/theos/bin" >> $GITHUB_PATH
-
-      - name: Compile Tweak
-        run: |
-          export PATH=/tmp/theos/bin:$PATH
-          make
-
-      - name: Upload Dylib Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AdFixerPro-Dylib
-          path: .theos/obj/AdFixerPro.dylib
+    - name: Upload Dylib Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ProAdManager-dylib
+        path: .theos/obj/debug/*.dylib
