@@ -12,22 +12,14 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git make clang curl
+          sudo apt-get install -y build-essential git make clang
 
-      - name: Setup Theos & Toolchain
+      - name: Setup Theos & SDKs
         run: |
-          # تنظيف أي مسار قديم
           rm -rf ~/theos
-          
-          # سحب الـ Theos
           git clone --recursive https://github.com/theos/theos.git ~/theos
-          
-          # تنظيف وسحب الـ SDKs بشكل نظيف
           rm -rf ~/theos/sdks
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
-
-          # تثبيت الـ toolchain الخاص بلينكس لكي يعمل الـ clang بشكل صحيح
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos-toolchain.sh)" || true
 
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
           echo "/home/runner/theos/bin" >> $GITHUB_PATH
@@ -35,8 +27,9 @@ jobs:
       - name: Compile Tweak
         run: |
           export PATH=/home/runner/theos/bin:$PATH
-          make
-
+          # إجبار make على استخدام مترجم النظام وعدم البحث عن الـ toolchain المفقود
+          make CC=clang CXX=clang++
+          
       - name: Upload Dylib Artifact
         uses: actions/upload-artifact@v4
         with:
