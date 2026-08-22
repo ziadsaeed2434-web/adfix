@@ -12,21 +12,22 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git make clang
+          sudo apt-get install -y build-essential git make clang curl
 
-      - name: Setup Theos & SDKs
+      - name: Setup Theos & Toolchain
         run: |
           # تنظيف أي مسار قديم
           rm -rf ~/theos
           
-          # سحب الـ Theos بكامل ملفاته الأساسية (مع الـ submodules الضرورية)
+          # سحب الـ Theos
           git clone --recursive https://github.com/theos/theos.git ~/theos
           
-          # إذا وُجد مجلد الـ sdks مسبقاً، نقوم بحذفه أولاً لضمان عدم حدوث خطأ التعارض
+          # تنظيف وسحب الـ SDKs بشكل نظيف
           rm -rf ~/theos/sdks
-          
-          # سحب الـ SDKs النظيفة والخفيفة
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
+
+          # تثبيت الـ toolchain الخاص بلينكس لكي يعمل الـ clang بشكل صحيح
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos-toolchain.sh)" || true
 
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
           echo "/home/runner/theos/bin" >> $GITHUB_PATH
