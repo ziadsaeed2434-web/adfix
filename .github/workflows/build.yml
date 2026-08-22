@@ -14,20 +14,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git make curl unzip
 
-      - name: Setup Theos & Toolchain
+      - name: Setup Theos in Temp Directory
         run: |
-          git clone --recursive https://github.com/theos/theos.git ~/theos
-          git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
-          
-          # استنساخ الـ Toolchain الخاص بـ Linux مباشرة بشكل صحيح
-          git clone --depth=1 https://github.com/theos/toolchain-linux.git ~/theos/toolchain/linux/iphone
+          # مسح وتجهيز مسار جديد كلياً في الـ tmp لتجنب أي مشاكل تخزين مؤقت
+          rm -rf /tmp/theos
+          mkdir -p /tmp/theos
 
-          echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
-          echo "/home/runner/theos/bin" >> $GITHUB_PATH
+          git clone --recursive https://github.com/theos/theos.git /tmp/theos
+          git clone --depth=1 https://github.com/theos/sdks.git /tmp/theos/sdks
+          git clone --depth=1 https://github.com/theos/toolchain-linux.git /tmp/theos/toolchain/linux/iphone
+
+          echo "THEOS=/tmp/theos" >> $GITHUB_ENV
+          echo "/tmp/theos/bin" >> $GITHUB_PATH
 
       - name: Compile Tweak
         run: |
-          export PATH=/home/runner/theos/bin:$PATH
+          export PATH=/tmp/theos/bin:$PATH
           make
 
       - name: Upload Dylib Artifact
