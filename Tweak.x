@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <Security/Security.h>
+#import <SystemConfiguration/SystemConfiguration.h>
 
 @interface ProAdManager : NSObject
 + (instancetype)sharedInstance;
@@ -8,9 +9,12 @@
 - (NSString *)getCleanIDFV;
 - (void)showDashboard;
 - (void)wipeDataKeepKeychain;
+- (void)createPersistentButton;
 @end
 
-@implementation ProAdManager
+@implementation ProAdManager {
+    UIWindow *floatingWindow;
+}
 
 + (instancetype)sharedInstance {
     static ProAdManager *shared = nil;
@@ -92,10 +96,48 @@
         }
     }
     
-    // ملاحظة هامة: نحن لا نمسح الـ Keychain نهائياً، مما يترك بيانات الحساب والنقاط المخزنة فيه سليمة تماماً.
+    // ملاحظة: الـ Keychain يبقى سليماً لحفظ النقاط والجلسات
     
     // 3. إعادة تشغيل التطبيق
     exit(0);
+}
+
+- (void)createPersistentButton {
+    if (floatingWindow) return;
+
+    if (@available(iOS 13.0, *)) {
+        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (scene.activationState == UISceneActivationStateForegroundActive) {
+                floatingWindow = [[UIWindow alloc] initWithWindowScene:scene];
+                break;
+            }
+        }
+    }
+    
+    if (!floatingWindow) {
+        floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(15, 110, 140, 42)];
+    }
+
+    floatingWindow.windowLevel = UIWindowLevelAlert + 1;
+    floatingWindow.hidden = NO;
+    floatingWindow.backgroundColor = [UIColor clearColor];
+
+    UIViewController *vc = [[UIViewController alloc] init];
+    floatingWindow.rootViewController = vc;
+
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [btn setFrame:CGRectMake(0, 0, 140, 42)];
+    [btn setTitle:@"🛡️ أدوات الإعلانات" forState:UIControlStateNormal];
+    [btn setBackgroundColor:[UIColor colorWithRed:0.05 green:0.05 blue:0.05 alpha:0.9]];
+    [btn setTitleColor:[UIColor greenColor] forState:UIControlStateNormal];
+    btn.layer.cornerRadius = 12;
+    btn.layer.borderWidth = 1.2;
+    btn.layer.borderColor = [UIColor greenColor].CGColor;
+
+    [btn addTarget:self action:@selector(showDashboard) forControlEvents:UIControlEventTouchUpInside];
+    [vc.view addSubview:btn];
+    
+    floatingWindow.frame = CGRectMake(15, 110, 140, 42);
 }
 
 @end
@@ -135,22 +177,9 @@
 }
 %end
 
-// --- 4. زر التحكم العائم ---
+// --- 4. تشغيل الزر بشكل دائم لا يختفي أبداً ---
 %ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *window = [UIApplication sharedApplication].keyWindow;
-        if (!window) return;
-
-        UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-        [btn setFrame:CGRectMake(15, 110, 140, 42)];
-        [btn setTitle:@"🛡️ أدوات الإعلانات" forState:UIControlStateNormal];
-        [btn setBackgroundColor:[UIColor colorWithRed:0.05 green:0.05 blue:0.05 alpha:0.9]];
-        [btn setTitleColor:[UIColor greenColor] forState:UIControlStateNormal];
-        btn.layer.cornerRadius = 12;
-        btn.layer.borderWidth = 1.2;
-        btn.layer.borderColor = [UIColor greenColor].CGColor;
-        
-        [btn addTarget:[ProAdManager sharedInstance] action:@selector(showDashboard) forControlEvents:UIControlEventTouchUpInside];
-        [window addSubview:btn];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[ProAdManager sharedInstance] createPersistentButton];
     });
 }
