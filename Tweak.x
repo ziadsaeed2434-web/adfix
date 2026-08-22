@@ -1,7 +1,5 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#include <sys/socket.h>
-#include <netdb.h>
 
 @interface ProAdManager : NSObject
 + (instancetype)sharedInstance;
@@ -106,7 +104,8 @@ static UIWindow *floatingWindow = nil;
     btn.frame = floatingWindow.bounds;
     [btn setTitle:@"🛡️ أدوات" forState:UIControlStateNormal];
     [btn setBackgroundColor:[UIColor blackColor]];
-    [btn setTitleColor:[UIColor greenColor] forState:UIColor.whiteColor];
+    // تم تصحيح خطأ اللون هنا:
+    [btn setTitleColor:[UIColor greenColor] forState:UIControlStateNormal];
     btn.layer.cornerRadius = 10;
     btn.layer.borderWidth = 1.0;
     btn.layer.borderColor = [UIColor greenColor].CGColor;
@@ -139,35 +138,10 @@ static UIWindow *floatingWindow = nil;
 }
 %end
 
-// --- 3. منع التطبيق من كشف الـ VPN والـ Proxy تماماً ---
+// --- 3. منع التطبيق من كشف الـ VPN والـ Proxy ---
 %hook NSURLSessionConfiguration
 - (NSDictionary *)connectionProxyDictionary {
-    // إخفاء أي بروكسي أو VPN عن النظام
     return nil;
-}
-%end
-
-// منع فحص إعدادات النظام للشبكة والبروكسي
-%subclass ProxyBypassDictionary : NSDictionary
-- (id)objectForKey:(id)aKey {
-    if ([aKey isKindOfClass:[NSString class]]) {
-        if ([(NSString *)aKey isEqualToString:@"HTTPEnable"] || 
-            [(NSString *)aKey isEqualToString:@"HTTPProxy"] || 
-            [(NSString *)aKey isEqualToString:@"HTTPPort"] ||
-            [(NSString *)aKey isEqualToString:@"SOCKSEnable"] ||
-            [(NSString *)aKey isEqualToString:@"SOCKSProxy"]) {
-            return nil;
-        }
-    }
-    return %orig;
-}
-%end
-
-// خداع وظائف فحص الـ CFNetwork لمنع كشف الـ VPN
-%hook CFNetworkCopySystemProxySettings
-CFDictionaryRef _ented_CFNetworkCopySystemProxySettings(void) {
-    // إرجاع إعدادات فارغة تدل على عدم وجود أي VPN أو بروكسي
-    return (__bridge CFDictionaryRef)@{};
 }
 %end
 
