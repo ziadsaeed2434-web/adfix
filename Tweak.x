@@ -71,7 +71,7 @@ static UIWindow *floatingWindow = nil;
     }
 
     NSString *msg = [NSString stringWithFormat:
-                     @"🔥 حماية الهوية والـ VPN نشطة:\n\n"
+                     @"🔥 حماية الهوية والـ SDKs نشطة:\n\n"
                      @"🆔 IDFA:\n%@\n\n"
                      @"📱 IDFV:\n%@\n\n"
                      @"🔑 UDID الوهمي:\n%@", 
@@ -104,7 +104,6 @@ static UIWindow *floatingWindow = nil;
     btn.frame = floatingWindow.bounds;
     [btn setTitle:@"🛡️ أدوات" forState:UIControlStateNormal];
     [btn setBackgroundColor:[UIColor blackColor]];
-    // تم تصحيح خطأ اللون هنا:
     [btn setTitleColor:[UIColor greenColor] forState:UIControlStateNormal];
     btn.layer.cornerRadius = 10;
     btn.layer.borderWidth = 1.0;
@@ -138,14 +137,27 @@ static UIWindow *floatingWindow = nil;
 }
 %end
 
-// --- 3. منع التطبيق من كشف الـ VPN والـ Proxy ---
+// --- 3. منع كشف الـ VPN والـ Proxy ---
 %hook NSURLSessionConfiguration
 - (NSDictionary *)connectionProxyDictionary {
     return nil;
 }
 %end
 
-// --- 4. منع اختفاء الإعلانات عند الضغط عليها ---
+// --- 4. تجاوز حماية مكتبات الإعلانات (AppLovin & InMobi) ---
+%hook ALSdk
+- (BOOL)isInitialized {
+    return YES;
+}
+%end
+
+%hook InMobiSdk
++ (BOOL)isInitialized {
+    return YES;
+}
+%end
+
+// --- 5. منع إخفاء الإعلانات أو إلغائها برمجياً ---
 %hook UIView
 - (void)setAlpha:(CGFloat)alpha {
     if (alpha == 0.0) {
@@ -153,6 +165,9 @@ static UIWindow *floatingWindow = nil;
     } else {
         %orig;
     }
+}
+- (void)setHidden:(BOOL)hidden {
+    %orig(NO);
 }
 %end
 
