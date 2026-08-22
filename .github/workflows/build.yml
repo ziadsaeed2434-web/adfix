@@ -14,15 +14,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git make curl unzip
 
-      - name: Setup Theos in Temp Directory
+      - name: Setup Theos & Toolchain safely
         run: |
-          # مسح وتجهيز مسار جديد كلياً في الـ tmp لتجنب أي مشاكل تخزين مؤقت
+          # تنظيف كامل للمجلدات القديمة
           rm -rf /tmp/theos
           mkdir -p /tmp/theos
 
+          # استنساخ ثيوس الأساسي
           git clone --recursive https://github.com/theos/theos.git /tmp/theos
-          git clone --depth=1 https://github.com/theos/sdks.git /tmp/theos/sdks
-          git clone --depth=1 https://github.com/theos/toolchain-linux.git /tmp/theos/toolchain/linux/iphone
+
+          # التحقق من عدم وجود الـ sdks مسبقاً قبل استنساخها لتجنب الخطأ تماماً
+          if [ ! -d "/tmp/theos/sdks" ]; then
+            git clone --depth=1 https://github.com/theos/sdks.git /tmp/theos/sdks
+          fi
+
+          # التحقق من الـ toolchain قبل استنساخه
+          if [ ! -d "/tmp/theos/toolchain/linux/iphone" ]; then
+            git clone --depth=1 https://github.com/theos/toolchain-linux.git /tmp/theos/toolchain/linux/iphone
+          fi
 
           echo "THEOS=/tmp/theos" >> $GITHUB_ENV
           echo "/tmp/theos/bin" >> $GITHUB_PATH
