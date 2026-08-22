@@ -1,5 +1,4 @@
 #import <UIKit/UIKit.h>
-#import <Security/Security.h>
 
 // 1. تنظيف ملفات التطبيق المحلية (Sandbox) بالكامل
 void clearAppSandbox() {
@@ -31,53 +30,11 @@ void clearUserDefaults() {
     NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleIdentifier) {
         [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+        [[NSUserDefaults standardUserDefaults] synchronize];
     }
 }
 
-// 3. تنظيف الـ Keychain بالكامل مع استثناء حسابك ونقاطك (userIDKey)
-void clearKeychainExceptToken() {
-    NSString *serviceToKeep = @"com.codebysms";
-    NSString *accountToKeep = @"userIDKey";
-
-    NSArray *secItemClasses = @[
-        (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecClassInternetPassword
-    ];
-
-    for (id secClass in secItemClasses) {
-        NSDictionary *query = @{
-            (__bridge id)kSecClass: secClass,
-            (__bridge id)kSecReturnAttributes: @YES,
-            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
-        };
-
-        CFArrayRef items = NULL;
-        if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&items) == errSecSuccess) {
-            // تم تعديل هذا السطر ليوافق عدم تفعيل نظام ARC وتجنب الخطأ
-            NSArray *itemsArray = (__bridge NSArray *)items;
-
-            for (NSDictionary *itemDict in itemsArray) {
-                NSString *service = itemDict[(__bridge id)kSecAttrService];
-                NSString *account = itemDict[(__bridge id)kSecAttrAccount];
-
-                // حذف كل شيء تابع للتطبيق ما عدا مفتاح الحساب المستثنى
-                if ([service isEqualToString:serviceToKeep] && ![account isEqualToString:accountToKeep]) {
-                    NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:@{
-                        (__bridge id)kSecClass: secClass,
-                        (__bridge id)kSecAttrService: service,
-                        (__bridge id)kSecAttrAccount: account
-                    }];
-                    SecItemDelete((__bridge CFDictionaryRef)delQuery);
-                }
-            }
-            if (items) {
-                CFRelease(items);
-            }
-        }
-    }
-}
-
-// 4. واجهة البرمجية للزر العائم وعملية التنفيذ
+// 3. واجهة الزر العائم
 @interface ResetHelperWindow : NSObject
 + (void)addButtonToWindow:(UIWindow *)window;
 @end
@@ -85,7 +42,6 @@ void clearKeychainExceptToken() {
 @implementation ResetHelperWindow
 
 + (void)addButtonToWindow:(UIWindow *)window {
-    // منع تكرار إنشاء الزر إذا كان موجوداً مسبقاً
     if ([window viewWithTag:9999]) return;
 
     UIButton *resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -96,7 +52,7 @@ void clearKeychainExceptToken() {
     resetButton.layer.cornerRadius = 8;
     resetButton.tag = 9999;
     
-    // ربط الزر بدالة التنفيذ عند الضغط
+    // عند الضغط، يتم التنظيف العميق بدون لمس الـ Keychain
     [resetButton addTarget:self action:@selector(performFullReset) forControlEvents:UIControlEventTouchUpInside];
     
     [window addSubview:resetButton];
@@ -104,17 +60,17 @@ void clearKeychainExceptToken() {
 }
 
 + (void)performFullReset {
+    // التنظيف الشامل للملفات
     clearAppSandbox();
     clearUserDefaults();
-    clearKeychainExceptToken();
     
-    // إغلاق التطبيق ليفتح نظيفاً بالكامل في المرة القادمة
+    // لا يتم لمس الـ Keychain نهائياً لضمان عدم فقدان أي بيانات
     exit(0);
 }
 
 @end
 
-// 5. الهوك لإظهار الزر فور فتح التطبيق
+// 4. الهوك لإظهار الزر فور فتح التطبيق
 %hook UIWindow
 
 - (void)makeKeyAndVisible {
