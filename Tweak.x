@@ -39,7 +39,7 @@ static BOOL autoCleanEnabled = NO;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *home = NSHomeDirectory();
     NSArray *paths = @[@"Documents", @"Library/Caches", @"Library/Preferences", @"tmp"];
-
+    
     for (NSString *p in paths) {
         NSString *fullPath = [home stringByAppendingPathComponent:p];
         for (NSString *file in [fm contentsOfDirectoryAtPath:fullPath error:nil]) {
@@ -69,12 +69,12 @@ static BOOL autoCleanEnabled = NO;
     floatingBtn.titleLabel.font = [UIFont systemFontOfSize:24];
     floatingBtn.layer.cornerRadius = 27.5;
     floatingBtn.layer.borderWidth = 1.5;
-    floatingBtn.layer.borderColor = [UIColor systemGreenColor].CGColor;
-
-    floatingBtn.layer.shadowColor = [UIColor systemGreenColor].CGColor;
+    floatingBtn.layer.borderColor = [UIColor greenColor].CGColor;
+    
+    floatingBtn.layer.shadowColor = [UIColor greenColor].CGColor;
     floatingBtn.layer.shadowRadius = 8;
     floatingBtn.layer.shadowOpacity = 0.6;
-
+    
     [floatingBtn addTarget:self action:@selector(toggleMenuPanel) forControlEvents:UIControlEventTouchUpInside];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(dragButton:)];
@@ -120,7 +120,7 @@ static BOOL autoCleanEnabled = NO;
     [menuPanel addSubview:title];
 
     statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 60, menuPanel.bounds.size.width - 40, 110)];
-    statusLabel.textColor = [UIColor systemGreenColor];
+    statusLabel.textColor = [UIColor greenColor];
     statusLabel.font = [UIFont fontWithName:@"Courier-Bold" size:11];
     statusLabel.numberOfLines = 0;
     [self updateStatusText];
@@ -139,7 +139,7 @@ static BOOL autoCleanEnabled = NO;
 
     UIButton *regenBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     regenBtn.frame = CGRectMake(20, 235, menuPanel.bounds.size.width - 40, 44);
-    regenBtn.backgroundColor = [UIColor systemIndigoColor];
+    regenBtn.backgroundColor = [UIColor purpleColor];
     [regenBtn setTitle:@"🔄 توليد هوية جديدة الآن" forState:UIControlStateNormal];
     [regenBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     regenBtn.layer.cornerRadius = 14;
@@ -183,10 +183,10 @@ static BOOL autoCleanEnabled = NO;
         [self wipeAppData];
     }
     [self updateStatusText];
-
-    statusLabel.textColor = [UIColor systemCyanColor];
+    
+    statusLabel.textColor = [UIColor cyanColor];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        statusLabel.textColor = [UIColor systemGreenColor];
+        statusLabel.textColor = [UIColor greenColor];
     });
 }
 
