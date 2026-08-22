@@ -53,7 +53,8 @@ void clearKeychainExceptToken() {
 
         CFArrayRef items = NULL;
         if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&items) == errSecSuccess) {
-            NSArray *itemsArray = (__bridge_transfer NSArray *)items;
+            // تم تعديل هذا السطر ليوافق عدم تفعيل نظام ARC وتجنب الخطأ
+            NSArray *itemsArray = (__bridge NSArray *)items;
 
             for (NSDictionary *itemDict in itemsArray) {
                 NSString *service = itemDict[(__bridge id)kSecAttrService];
@@ -68,6 +69,9 @@ void clearKeychainExceptToken() {
                     }];
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 }
+            }
+            if (items) {
+                CFRelease(items);
             }
         }
     }
