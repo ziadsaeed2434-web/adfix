@@ -14,13 +14,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential git make curl unzip
 
-      - name: Setup Theos & SDKs
+      - name: Setup Theos, Toolchain & SDKs
         run: |
           rm -rf ~/theos
+          
+          # تثبيت Theos الأساسي
           git clone --recursive https://github.com/theos/theos.git ~/theos
+          
+          # تنظيف وسحب الـ SDKs
           rm -rf ~/theos/sdks
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
-          
+
+          # تثبيت الـ Toolchain الرسمي الخاص بلينكس لتجنيب خطأ الـ clang المفقود
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos-toolchain.sh)"
+
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
           echo "/home/runner/theos/bin" >> $GITHUB_PATH
 
