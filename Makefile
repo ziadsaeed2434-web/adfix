@@ -1,14 +1,8 @@
-TARGET := iphone:clang:latest:14.0
-ARCHS = arm64
-
+THEOS = /opt/theos
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = AdFixerPro
-
-AdFixerPro_FILES = Tweak.x
-AdFixerPro_FRAMEWORKS = UIKit Foundation
-
-ADDITIONAL_CFLAGS = -fobjc-arc -Wno-error -Wno-deprecated-declarations -Wno-unguarded-availability-new
-ADDITIONAL_LDFLAGS = -Wl,-dead_strip
+TWEAK_NAME = ProAdManager
+ProAdManager_FILES = Tweak.x
+ProAdManager_FRAMEWORKS = UIKit Foundation SystemConfiguration AdSupport
 
 include $(THEOS_MAKE_PATH)/tweak.mk
