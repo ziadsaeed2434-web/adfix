@@ -7,7 +7,6 @@ TWEAK_NAME = AdFixerPro
 AdFixerPro_FILES = Tweak.x
 AdFixerPro_FRAMEWORKS = UIKit Foundation
 
-# إضافة راية لتجاهل خطأ تحويل مؤشرات الألوان والأنواع تحت نظام ARC
-ADDITIONAL_CFLAGS = -fobjc-arc -Wno-error -Wno-deprecated-declarations -Wno-incompatible-pointer-types -Wno-unguarded-availability-new -Wno-error=objc-pointer-conversion
+ADDITIONAL_CFLAGS = -fobjc-arc -Wno-error -Wno-deprecated-declarations -Wno-unguarded-availability-new
 
 include $(THEOS_MAKE_PATH)/tweak.mk
