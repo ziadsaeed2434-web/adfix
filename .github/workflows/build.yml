@@ -12,20 +12,12 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git make clang
+          sudo apt-get install -y build-essential git make ldid
 
-      - name: Setup Theos & Fix Toolchain Path
+      - name: Setup Theos
         run: |
-          rm -rf ~/theos
           git clone --recursive https://github.com/theos/theos.git ~/theos
-          rm -rf ~/theos/sdks
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
-
-          # خدعة ربط مترجم النظام بالمكان الذي تبحث عنه Theos لحل خطأ 127 نهائياً
-          mkdir -p ~/theos/toolchain/linux/iphone/bin
-          ln -s /usr/bin/clang ~/theos/toolchain/linux/iphone/bin/clang
-          ln -s /usr/bin/clang++ ~/theos/toolchain/linux/iphone/bin/clang++
-
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
           echo "/home/runner/theos/bin" >> $GITHUB_PATH
 
