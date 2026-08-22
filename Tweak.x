@@ -1,81 +1,119 @@
 #import <UIKit/UIKit.h>
+#include <sys/utsname.h>
 
-// 1. تنظيف ملفات التطبيق المحلية (Sandbox) بالكامل
-void clearAppSandbox() {
-    NSString *homeDir = NSHomeDirectory();
-    NSArray *foldersToClean = @[
-        @"Documents",
-        @"Library/Caches",
-        @"Library/Preferences",
-        @"Library/Application Support",
-        @"tmp"
-    ];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    for (NSString *folder in foldersToClean) {
-        NSString *folderPath = [homeDir stringByAppendingPathComponent:folder];
-        if ([fileManager fileExistsAtPath:folderPath]) {
-            NSArray *contents = [fileManager contentsOfDirectoryAtPath:folderPath error:nil];
-            for (NSString *file in contents) {
-                NSString *fullPath = [folderPath stringByAppendingPathComponent:file];
-                [fileManager removeItemAtPath:fullPath error:nil];
-            }
-        }
-    }
-}
+// متغيرات للبصمة الكاملة
+static NSString *currentModel = @"iPhone16,2";
+static NSString *currentID = @"N/A";
+static NSString *currentSystemVersion = @"17.4";
+static NSString *currentDeviceName = @"iPhone";
 
-// 2. مسح الإعدادات المؤقتة NSUserDefaults
-void clearUserDefaults() {
-    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
-    if (bundleIdentifier) {
-        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-    }
-}
-
-// 3. واجهة الزر العائم
-@interface ResetHelperWindow : NSObject
-+ (void)addButtonToWindow:(UIWindow *)window;
+@interface FullFingerprintSpoofer : NSObject
++ * (void)randomizeFingerprint;
 @end
 
-@implementation ResetHelperWindow
-
-+ (void)addButtonToWindow:(UIWindow *)window {
-    if ([window viewWithTag:9999]) return;
-
-    UIButton *resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    resetButton.frame = CGRectMake(15, 50, 140, 35);
-    [resetButton setTitle:@"Reset App 🔄" forState:UIControlStateNormal];
-    resetButton.backgroundColor = [UIColor colorWithRed:1.0 green:0.0 blue:0.0 alpha:0.85];
-    [resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    resetButton.layer.cornerRadius = 8;
-    resetButton.tag = 9999;
+@implementation FullFingerprintSpoofer
++ (void)randomizeFingerprint {
+    // 1. موديلات عشوائية حديثة
+    NSArray *models = @[@"iPhone15,2", @"iPhone15,3", @"iPhone16,1", @"iPhone16,2", @"iPhone16,4"];
+    currentModel = models[arc4random_uniform(models.count)];
     
-    // عند الضغط، يتم التنظيف العميق بدون لمس الـ Keychain
-    [resetButton addTarget:self action:@selector(performFullReset) forControlEvents:UIControlEventTouchUpInside];
+    // 2. معرّف عشوائي فريد جديد كلياً
+    currentID = [[NSUUID UUID] UUIDString];
     
-    [window addSubview:resetButton];
-    [window bringSubviewToFront:resetButton];
+    // 3. إصدار نظام عشوائي قريب
+    NSArray *versions = @[@"17.2", @"17.3.1", @"17.4", @"17.5"];
+    currentSystemVersion = versions[arc4random_uniform(versions.count)];
+    
+    // 4. اسم جهاز عشوائي
+    NSArray *names = @[@"My iPhone", @"iPhone (2)", @"User's Device", @"Phone"];
+    currentDeviceName = names[arc4random_uniform(names.count)];
 }
-
-+ (void)performFullReset {
-    // التنظيف الشامل للملفات
-    clearAppSandbox();
-    clearUserDefaults();
-    
-    // لا يتم لمس الـ Keychain نهائياً لضمان عدم فقدان أي بيانات
-    exit(0);
-}
-
 @end
 
-// 4. الهوك لإظهار الزر فور فتح التطبيق
+// 1. تزييف هويات UIDevice بالكامل
+%hook UIDevice
+- (NSString *)model { return currentModel; }
+- (NSString *)localizedModel { return currentModel; }
+- (NSString *)systemName { return @"iOS"; }
+- (NSString *)systemVersion { return currentSystemVersion; }
+- (NSString *)name { return currentDeviceName; }
+- (NSString *)identifierForVendor { return [NSUUID UUIDFromBytes:[currentID UTF8String]]; } // تحويل آمن للـ ID
+%end
+
+// 2. تزييف الـ Hardware والميموري والأنوية (عبر NSProcessInfo)
+%hook NSProcessInfo
+- (NSUInteger)activeProcessorCount {
+    // تغيير عدد أنوية المعالج عشوائياً بين 4 و 6
+    return 4 + arc4random_uniform(3);
+}
+- (unsigned long long)physicalMemory {
+    // تزييف حجم الذاكرة العشوائية (RAM) لتبدو كأنها جهاز مختلف
+    return (arc4random_uniform(2) == 0) ? 6ULL * 1024ULL * 1024ULL * 1024ULL : 8ULL * 1024ULL * 1024ULL * 1024ULL;
+}
+- (NSString *)hostName {
+    return [NSString stringWithFormat:@"iPhone-%d", arc4random_uniform(9000) + 1000];
+}
+%end
+
+// 3. تزييف الشاشة ودقتها (UIScreen) لمنع البصمة البصرية
+%hook UIScreen
+- (CGRect)bounds {
+    CGRect b = %orig;
+    // تغيير طفيف جداً في الأبعاد يغير البصمة الرياضية للشاشة دون التأثير على الواجهة
+    b.size.width += (arc4random_uniform(2) == 0 ? 0.01 : -0.01);
+    return b;
+}
+- (CGFloat)scale {
+    return 3.0;
+}
+%end
+
+// 4. تزييف uname (المستوى المنخفض للنظام الذي تكشفه بعض السكربتات المتقدمة)
+%hookf(int, uname, struct utsname *name) {
+    int result = %orig(name);
+    if (result == 0 && name) {
+        // حقن الموديل المزيف في مستوى الـ Kernel/System C
+        [currentModel getCString:name->machine maxLength:sizeof(name->machine) encoding:NSUTF8StringEncoding];
+    }
+    return result;
+}
+
+// 5. زر الفحص وإدارة التوليد عند فتح التطبيق
+%hook UIApplication
+- (BOOL)application:(id)application didFinishLaunchingWithOptions:(id)launchOptions {
+    [FullFingerprintSpoofer randomizeFingerprint];
+    return %orig;
+}
+%end
+
 %hook UIWindow
-
 - (void)makeKeyAndVisible {
     %orig;
-    [ResetHelperWindow addButtonToWindow:self];
+    if (![self viewWithTag:999]) {
+        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+        btn.frame = CGRectMake(15, 60, 130, 32);
+        btn.backgroundColor = [UIColor darkGrayColor];
+        btn.alpha = 0.8;
+        btn.layer.cornerRadius = 6;
+        [btn setTitle:@"Fingerprint 🔍" forState:UIControlStateNormal];
+        [btn.titleLabel setFont:[UIFont boldSystemFontOfSize:11]];
+        [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        btn.tag = 999;
+        
+        [btn addTarget:self action:@selector(showFullFingerprint) forControlEvents:UIControlEventTouchUpInside];
+        [self addSubview:btn];
+        [self bringSubviewToFront:btn];
+    }
 }
 
+%new
+- (void)showFullFingerprint {
+    NSString *details = [NSString stringWithFormat:@"Model: %@\nVersion: %@\nID: %@", currentModel, currentSystemVersion, [currentID substringToIndex:8]];
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Full Fingerprint Active" 
+                                                    message:details 
+                                                   delegate:nil 
+                                          cancelButtonTitle:@"OK" 
+                                          otherButtonTitles:nil];
+    [alert show];
+}
 %end
