@@ -1,4 +1,4 @@
-THEOS = /opt/theos
+# استخدام مسار الـ Theos المصدّر من النظام مباشرة
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = ProAdManager
