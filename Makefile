@@ -9,5 +9,6 @@ AdFixerPro_FILES = Tweak.x
 AdFixerPro_FRAMEWORKS = UIKit Foundation
 
 ADDITIONAL_CFLAGS = -fobjc-arc -Wno-error -Wno-deprecated-declarations -Wno-unguarded-availability-new
+ADDITIONAL_LDFLAGS = -Wl,-dead_strip
 
 include $(THEOS_MAKE_PATH)/tweak.mk
