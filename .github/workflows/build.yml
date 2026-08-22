@@ -12,21 +12,19 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git make clang curl
+          sudo apt-get install -y build-essential git make clang
 
-      - name: Setup Theos, Toolchain & SDKs
+      - name: Setup Theos & Fix Toolchain Path
         run: |
           rm -rf ~/theos
-          
-          # تثبيت Theos كاملاً
           git clone --recursive https://github.com/theos/theos.git ~/theos
-          
-          # تنظيف وسحب الـ SDKs
           rm -rf ~/theos/sdks
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
 
-          # تثبيت الـ Toolchain الرسمي للينكس الخاص بـ Theos (هذا هو الحل للخطأ 127)
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos-toolchain.sh)"
+          # خدعة ربط مترجم النظام بالمكان الذي تبحث عنه Theos لحل خطأ 127 نهائياً
+          mkdir -p ~/theos/toolchain/linux/iphone/bin
+          ln -s /usr/bin/clang ~/theos/toolchain/linux/iphone/bin/clang
+          ln -s /usr/bin/clang++ ~/theos/toolchain/linux/iphone/bin/clang++
 
           echo "THEOS=/home/runner/theos" >> $GITHUB_ENV
           echo "/home/runner/theos/bin" >> $GITHUB_PATH
