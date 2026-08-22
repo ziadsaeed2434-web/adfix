@@ -1,5 +1,7 @@
-# استخدام مسار الـ Theos المصدّر من النظام مباشرة
 include $(THEOS)/makefiles/common.mk
+
+TARGET = iphone:clang:latest:14.0
+ARCHS = arm64
 
 TWEAK_NAME = ProAdManager
 ProAdManager_FILES = Tweak.x
