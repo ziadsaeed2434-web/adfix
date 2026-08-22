@@ -12,26 +12,21 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git make curl unzip
+          sudo apt-get install -y build-essential git make clang curl unzip
 
-      - name: Setup Theos & Toolchain safely
+      - name: Setup Theos & System Clang Link
         run: |
-          # تنظيف كامل للمجلدات القديمة
           rm -rf /tmp/theos
           mkdir -p /tmp/theos
 
-          # استنساخ ثيوس الأساسي
+          # تثبيت Theos الأساسي والـ SDKs فقط
           git clone --recursive https://github.com/theos/theos.git /tmp/theos
+          git clone --depth=1 https://github.com/theos/sdks.git /tmp/theos/sdks
 
-          # التحقق من عدم وجود الـ sdks مسبقاً قبل استنساخها لتجنب الخطأ تماماً
-          if [ ! -d "/tmp/theos/sdks" ]; then
-            git clone --depth=1 https://github.com/theos/sdks.git /tmp/theos/sdks
-          fi
-
-          # التحقق من الـ toolchain قبل استنساخه
-          if [ ! -d "/tmp/theos/toolchain/linux/iphone" ]; then
-            git clone --depth=1 https://github.com/theos/toolchain-linux.git /tmp/theos/toolchain/linux/iphone
-          fi
+          # ربط مترجم النظام مباشرة ليتطابق مع ما تبحث عنه Theos بدون أخطاء تحميل
+          mkdir -p /tmp/theos/toolchain/linux/iphone/bin
+          ln -s /usr/bin/clang /tmp/theos/toolchain/linux/iphone/bin/clang
+          ln -s /usr/bin/clang++ /tmp/theos/toolchain/linux/iphone/bin/clang++
 
           echo "THEOS=/tmp/theos" >> $GITHUB_ENV
           echo "/tmp/theos/bin" >> $GITHUB_PATH
