@@ -106,7 +106,7 @@ static BOOL autoCleanEnabled = YES;
     menuPanel.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.12 alpha:0.92];
     menuPanel.layer.cornerRadius = 24;
     menuPanel.layer.borderWidth = 1;
-    menuPanel.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.15];
+    menuPanel.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.15].CGColor;
     menuPanel.transform = CGAffineTransformMakeScale(0.8, 0.8);
     menuPanel.alpha = 0;
 
