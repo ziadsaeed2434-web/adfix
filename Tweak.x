@@ -3,12 +3,12 @@
 
 // متغيرات للبصمة الكاملة
 static NSString *currentModel = @"iPhone16,2";
-static NSString *currentID = @"N/A";
+static NSString *currentID = @"00000000-0000-0000-0000-000000000000";
 static NSString *currentSystemVersion = @"17.4";
 static NSString *currentDeviceName = @"iPhone";
 
 @interface FullFingerprintSpoofer : NSObject
-+ * (void)randomizeFingerprint;
++ (void)randomizeFingerprint;
 @end
 
 @implementation FullFingerprintSpoofer
@@ -37,17 +37,15 @@ static NSString *currentDeviceName = @"iPhone";
 - (NSString *)systemName { return @"iOS"; }
 - (NSString *)systemVersion { return currentSystemVersion; }
 - (NSString *)name { return currentDeviceName; }
-- (NSString *)identifierForVendor { return [NSUUID UUIDFromBytes:[currentID UTF8String]]; } // تحويل آمن للـ ID
+- (NSString *)identifierForVendor { return currentID; } // إرجاع النص مباشرة كـ NSString
 %end
 
 // 2. تزييف الـ Hardware والميموري والأنوية (عبر NSProcessInfo)
 %hook NSProcessInfo
 - (NSUInteger)activeProcessorCount {
-    // تغيير عدد أنوية المعالج عشوائياً بين 4 و 6
     return 4 + arc4random_uniform(3);
 }
 - (unsigned long long)physicalMemory {
-    // تزييف حجم الذاكرة العشوائية (RAM) لتبدو كأنها جهاز مختلف
     return (arc4random_uniform(2) == 0) ? 6ULL * 1024ULL * 1024ULL * 1024ULL : 8ULL * 1024ULL * 1024ULL * 1024ULL;
 }
 - (NSString *)hostName {
@@ -59,7 +57,6 @@ static NSString *currentDeviceName = @"iPhone";
 %hook UIScreen
 - (CGRect)bounds {
     CGRect b = %orig;
-    // تغيير طفيف جداً في الأبعاد يغير البصمة الرياضية للشاشة دون التأثير على الواجهة
     b.size.width += (arc4random_uniform(2) == 0 ? 0.01 : -0.01);
     return b;
 }
@@ -68,17 +65,16 @@ static NSString *currentDeviceName = @"iPhone";
 }
 %end
 
-// 4. تزييف uname (المستوى المنخفض للنظام الذي تكشفه بعض السكربتات المتقدمة)
+// 4. تزييف uname للمستوى المنخفض للنظام
 %hookf(int, uname, struct utsname *name) {
     int result = %orig(name);
     if (result == 0 && name) {
-        // حقن الموديل المزيف في مستوى الـ Kernel/System C
         [currentModel getCString:name->machine maxLength:sizeof(name->machine) encoding:NSUTF8StringEncoding];
     }
     return result;
 }
 
-// 5. زر الفحص وإدارة التوليد عند فتح التطبيق
+// 5. إدارة التوليد عند فتح التطبيق والزر العائم المتوافق مع الإصدارات الحديثة
 %hook UIApplication
 - (BOOL)application:(id)application didFinishLaunchingWithOptions:(id)launchOptions {
     [FullFingerprintSpoofer randomizeFingerprint];
@@ -109,11 +105,17 @@ static NSString *currentDeviceName = @"iPhone";
 %new
 - (void)showFullFingerprint {
     NSString *details = [NSString stringWithFormat:@"Model: %@\nVersion: %@\nID: %@", currentModel, currentSystemVersion, [currentID substringToIndex:8]];
-    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Full Fingerprint Active" 
-                                                    message:details 
-                                                   delegate:nil 
-                                          cancelButtonTitle:@"OK" 
-                                          otherButtonTitles:nil];
-    [alert show];
+    
+    // استخدام الطريقة الحديثة لتجنب أخطاء التحذيرات في البناء
+    UIViewController *rootVC = self.rootViewController;
+    while (rootVC.presentedViewController) {
+        rootVC = rootVC.presentedViewController;
+    }
+    
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Full Fingerprint Active" 
+                                                                    message:details 
+                                                             preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [rootVC presentViewController:alert animated:YES completion:nil];
 }
 %end
