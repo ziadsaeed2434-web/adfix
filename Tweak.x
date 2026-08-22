@@ -1,20 +1,21 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <Security/Security.h>
-#import <SystemConfiguration/SystemConfiguration.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 @interface ProAdManager : NSObject
 + (instancetype)sharedInstance;
 - (NSString *)getCleanIDFA;
 - (NSString *)getCleanIDFV;
+- (NSString *)getCleanUDID;
 - (void)showDashboard;
-- (void)wipeDataKeepKeychain;
 - (void)createPersistentButton;
+- (void)rotateAllIDs;
 @end
 
-@implementation ProAdManager {
-    UIWindow *floatingWindow;
-}
+static UIWindow *floatingWindow = nil;
+
+@implementation ProAdManager
 
 + (instancetype)sharedInstance {
     static ProAdManager *shared = nil;
@@ -45,32 +46,47 @@
     return val;
 }
 
-- (void)rotateIDs {
+- (NSString *)getCleanUDID {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *val = [defaults stringForKey:@"pro_fake_udid"];
+    if (!val) {
+        val = [[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""];
+        [defaults setObject:val forKey:@"pro_fake_udid"];
+        [defaults synchronize];
+    }
+    return val;
+}
+
+- (void)rotateAllIDs {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     [defaults setObject:[[NSUUID UUID] UUIDString] forKey:@"pro_fake_idfa"];
     [defaults setObject:[[NSUUID UUID] UUIDString] forKey:@"pro_fake_idfv"];
+    [defaults setObject:[[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""] forKey:@"pro_fake_udid"];
     [defaults synchronize];
 }
 
 - (void)showDashboard {
-    UIWindow *window = [UIApplication sharedApplication].keyWindow;
+    UIWindow *window = [UIApplication sharedApplication].windows.firstObject;
     UIViewController *rootVC = window.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
 
     NSString *msg = [NSString stringWithFormat:
-                     @"🔥 أداة الحماية والإعلانات نشطة\n\n"
-                     @"🆔 IDFA الحالي:\n%@\n\n"
-                     @"📱 IDFV الحالي:\n%@", 
-                     [self getCleanIDFA], [self getCleanIDFV]];
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🛡️ لوحة تحكم الإعلانات" 
+                     @"🔥 حماية الهوية والـ VPN نشطة:\n\n"
+                     @"🆔 IDFA:\n%@\n\n"
+                     @"📱 IDFV:\n%@\n\n"
+                     @"🔑 UDID الوهمي:\n%@", 
+                     [self getCleanIDFA], [self getCleanIDFV], [self getCleanUDID]];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🛡️ لوحة التحكم الشاملة" 
                                                                    message:msg 
                                                             preferredStyle:UIAlertControllerStyleAlert];
     
-    [alert addAction:[UIAlertAction actionWithTitle:@"🔄 مسح الداتا (مع الحفاظ على الـ Keychain)" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-        [self wipeDataKeepKeychain];
+    [alert addAction:[UIAlertAction actionWithTitle:@"🔄 تدوير المعرفات ومسح الداتا" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [self rotateAllIDs];
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
+        exit(0);
     }]];
     
     [alert addAction:[UIAlertAction actionWithTitle:@"إغلاق" style:UIAlertActionStyleCancel handler:nil]];
@@ -78,71 +94,32 @@
     [rootVC presentViewController:alert animated:YES completion:nil];
 }
 
-- (void)wipeDataKeepKeychain {
-    // 1. تدوير معرفات الإعلانات ليعتبرك الإعلان مستخدما جديدا
-    [self rotateIDs];
-    
-    // 2. مسح ملفات التفضيلات و UserDefaults (الداتا العادية)
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *home = NSHomeDirectory();
-    NSString *prefsPath = [home stringByAppendingPathComponent:@"Library/Preferences"];
-    for (NSString *file in [fm contentsOfDirectoryAtPath:prefsPath error:nil]) {
-        if ([file containsString:bundleID]) {
-            [fm removeItemAtPath:[prefsPath stringByAppendingPathComponent:file] error:nil];
-        }
-    }
-    
-    // ملاحظة: الـ Keychain يبقى سليماً لحفظ النقاط والجلسات
-    
-    // 3. إعادة تشغيل التطبيق
-    exit(0);
-}
-
 - (void)createPersistentButton {
     if (floatingWindow) return;
 
-    if (@available(iOS 13.0, *)) {
-        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
-            if (scene.activationState == UISceneActivationStateForegroundActive) {
-                floatingWindow = [[UIWindow alloc] initWithWindowScene:scene];
-                break;
-            }
-        }
-    }
-    
-    if (!floatingWindow) {
-        floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(15, 110, 140, 42)];
-    }
-
-    floatingWindow.windowLevel = UIWindowLevelAlert + 1;
+    floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(20, 100, 130, 40)];
+    floatingWindow.windowLevel = UIWindowLevelStatusBar + 100;
     floatingWindow.hidden = NO;
     floatingWindow.backgroundColor = [UIColor clearColor];
 
-    UIViewController *vc = [[UIViewController alloc] init];
-    floatingWindow.rootViewController = vc;
-
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [btn setFrame:CGRectMake(0, 0, 140, 42)];
-    [btn setTitle:@"🛡️ أدوات الإعلانات" forState:UIControlStateNormal];
-    [btn setBackgroundColor:[UIColor colorWithRed:0.05 green:0.05 blue:0.05 alpha:0.9]];
-    [btn setTitleColor:[UIColor greenColor] forState:UIControlStateNormal];
-    btn.layer.cornerRadius = 12;
-    btn.layer.borderWidth = 1.2;
+    btn.frame = floatingWindow.bounds;
+    [btn setTitle:@"🛡️ أدوات" forState:UIControlStateNormal];
+    [btn setBackgroundColor:[UIColor blackColor]];
+    [btn setTitleColor:[UIColor greenColor] forState:UIColor.whiteColor];
+    btn.layer.cornerRadius = 10;
+    btn.layer.borderWidth = 1.0;
     btn.layer.borderColor = [UIColor greenColor].CGColor;
-
-    [btn addTarget:self action:@selector(showDashboard) forControlEvents:UIControlEventTouchUpInside];
-    [vc.view addSubview:btn];
     
-    floatingWindow.frame = CGRectMake(15, 110, 140, 42);
+    [btn addTarget:self action:@selector(showDashboard) forControlEvents:UIControlEventTouchUpInside];
+    
+    UIViewController *btnVC = [[UIViewController alloc] init];
+    [btnVC.view addSubview:btn];
+    floatingWindow.rootViewController = btnVC;
 }
-
 @end
 
-// --- 1. خداع نظام الإعلانات (IDFA) ---
+// --- 1. خداع الـ IDFA ---
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     return [[NSUUID alloc] initWithUUIDString:[[ProAdManager sharedInstance] getCleanIDFA]];
@@ -152,24 +129,33 @@
 }
 %end
 
-// --- 2. خداع معرف البائع (IDFV) ---
+// --- 2. خداع الـ IDFV والـ UDID ---
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:[[ProAdManager sharedInstance] getCleanIDFV]];
 }
+- (NSString *)uniqueIdentifier {
+    return [[ProAdManager sharedInstance] getCleanUDID];
+}
 %end
 
-// --- 3. منع كشف الـ VPN والبروكسي ---
+// --- 3. منع التطبيق من كشف الـ VPN والـ Proxy تماماً ---
 %hook NSURLSessionConfiguration
 - (NSDictionary *)connectionProxyDictionary {
+    // إخفاء أي بروكسي أو VPN عن النظام
     return nil;
 }
 %end
 
-%hook NSDictionary
+// منع فحص إعدادات النظام للشبكة والبروكسي
+%subclass ProxyBypassDictionary : NSDictionary
 - (id)objectForKey:(id)aKey {
     if ([aKey isKindOfClass:[NSString class]]) {
-        if ([(NSString *)aKey isEqualToString:@"HTTPEnable"] || [(NSString *)aKey isEqualToString:@"HTTPProxy"]) {
+        if ([(NSString *)aKey isEqualToString:@"HTTPEnable"] || 
+            [(NSString *)aKey isEqualToString:@"HTTPProxy"] || 
+            [(NSString *)aKey isEqualToString:@"HTTPPort"] ||
+            [(NSString *)aKey isEqualToString:@"SOCKSEnable"] ||
+            [(NSString *)aKey isEqualToString:@"SOCKSProxy"]) {
             return nil;
         }
     }
@@ -177,9 +163,28 @@
 }
 %end
 
-// --- 4. تشغيل الزر بشكل دائم لا يختفي أبداً ---
+// خداع وظائف فحص الـ CFNetwork لمنع كشف الـ VPN
+%hook CFNetworkCopySystemProxySettings
+CFDictionaryRef _ented_CFNetworkCopySystemProxySettings(void) {
+    // إرجاع إعدادات فارغة تدل على عدم وجود أي VPN أو بروكسي
+    return (__bridge CFDictionaryRef)@{};
+}
+%end
+
+// --- 4. منع اختفاء الإعلانات عند الضغط عليها ---
+%hook UIView
+- (void)setAlpha:(CGFloat)alpha {
+    if (alpha == 0.0) {
+        %orig(1.0);
+    } else {
+        %orig;
+    }
+}
+%end
+
+// تشغيل الزر الثابت
 %ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[ProAdManager sharedInstance] createPersistentButton];
     });
 }
