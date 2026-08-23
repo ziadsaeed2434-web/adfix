@@ -1,5 +1,14 @@
 #import <Foundation/Foundation.h>
 
+// تعريفات تفصيلية لتجنب أخطاء المترجم (Compiler Warnings/Errors)
+@interface NSObject (AdAdditions)
+- (void)adInstanceDidReward;
+- (void)unityAdsDidFinish:(id)arg1 withFinishState:(long long)arg2;
+- (void)vungleRewardedAdDidReward:(id)arg1;
+- (void)didRewardWithAdID:(id)arg1 reward:(long long)arg2;
+- (void)onVideoAdRewarded:(id)arg1;
+@end
+
 // ==========================================
 // 1. شبكة IronSource / LevelPlay
 // ==========================================
@@ -97,13 +106,12 @@
 %hook MTGRewardAdManager
 
 - (BOOL)isVideoReadyToPlayWithPlacementId:(id)arg1 unitId:(id)arg2 {
-    return YES; // إجبار الفيديو على أن يكون جاهزاً دائماً
+    return YES;
 }
 
 - (void)showVideoWithPlacementId:(id)arg1 unitId:(id)arg2 userId:(id)arg3 delegate:(id)arg4 viewController:(id)arg5 {
     %orig(arg1, arg2, arg3, arg4, arg5);
     
-    // محاكاة منح المكافأة عبر الـ Delegate الخاص بـ Mintegral
     id delegate = arg4;
     if (delegate && [delegate respondsToSelector:@selector(onVideoAdRewarded:)]) {
         [delegate onVideoAdRewarded:arg1];
