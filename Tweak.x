@@ -1,34 +1,29 @@
 #import <WebKit/WebKit.h>
 
-// تسريع أوقات وحركات الإعلانات التفاعلية (Playable Ads) حصرياً
 %hook WKWebView
 
 - (void)layoutSubviews {
     %orig;
     
-    // سكربت JavaScript يسرع دورات الـ Animation والمؤقتات داخل الإعلان التفاعلي
-    NSString *speedUpScript = 
-    @"if (!window._isSpeedUpInjected) {"
-    "   window._isSpeedUpInjected = true;"
-    "   "
-    "   // تسريع الحركات والعروض المرئية بداخل الإعلان"
-    "   var originalRAF = window.requestAnimationFrame;"
-    "   window.requestAnimationFrame = function(callback) {"
-    "       return originalRAF(function() {"
-    "           callback();"
-    "           callback();" // تسريع الإطار مرتين
-    "           callback();" // تسريع الإطار 3 مرات لتنتهي اللعبة المصغرة فوراً
-    "       });"
-    "   };"
-    "   "
-    "   // تقليص وتقريب أوقات الانتظار والمؤقتات الداخلية (Timers) إلى أقصى سرعة"
-    "   var originalSetTimeout = window.setTimeout;"
-    "   window.setTimeout = function(func, delay) {"
-    "       return originalSetTimeout(func, 10); " // جعل أي انتظار ينتهي في 10 ملي ثانية فقط
-    "   };"
+    // سكربت لإجبار عناصر الإغلاق والتخطي المخفية على الظهور والتفعيل فوراً
+    NSString *forceUnlockScript = 
+    @"var allElements = document.querySelectorAll('*');"
+     "for (var i = 0; i < allElements.length; i++) {"
+     "   var el = allElements[i];"
+     "   var cls = el.className ? el.className.toString().toLowerCase() : '';"
+     "   var id = el.id ? el.id.toString().toLowerCase() : '';"
+     "   "
+     "   // البحث عن أي عنصر له علاقة بالإغلاق، التخطي، أو الـ Close حتى لو كان مخفياً"
+     "   if (cls.includes('close') || cls.includes('skip') || cls.includes('dismiss') || id.includes('close') || id.includes('skip') || el.innerText === 'X' || el.innerText === '×') {"
+     "       el.style.display = 'block';"
+     "       el.style.visibility = 'visible';"
+     "       el.style.opacity = '1';"
+     "       el.style.pointerEvents = 'auto';"
+     "       el.click();"
+     "   }"
     "}";
     
-    [self evaluateJavaScript:speedUpScript completionHandler:nil];
+    [self evaluateJavaScript:forceUnlockScript completionHandler:nil];
 }
 
 %end
