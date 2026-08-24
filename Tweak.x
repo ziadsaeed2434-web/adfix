@@ -1,34 +1,51 @@
+#import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 
-// اعتراض أي مشغل فيديو (AVPlayer) يبدأ داخل التطبيق (والذي تستخدمه إعلانات Unity لتشغيل الفيديو)
+// تسريع إعلانات الفيديو فقط عبر تتبع رابط المصدر
 %hook AVPlayer
 
 - (void)play {
     %orig;
-    // التحقق إذا كان المشغل يخص إعلانات أو رابط إعلاني، نقوم بمضاعفة السرعة
-    // أو يمكننا تطبيق السرعة على جميع مشغلات الفيديو الخاصة بالإعلانات فوراً
-    self.rate = 8.0; // تسريع الفيديو إلى 8 أضعاف سرعته الطبيعية! (سينتهي إعلان الـ 30 ثانية في أقل من 4 ثوانٍ)
-}
-
-- (void)setRate:(float)rate {
-    // إجبار السرعة على البقاء عالية حتى لو حاول مشغل الإعلان إعادتها للوضع الطبيعي (1.0)
-    if (rate < 8.0) {
-        %orig(8.0);
-    } else {
-        %orig(rate);
+    
+    AVPlayerItem *currentItem = self.currentItem;
+    if (currentItem) {
+        AVAsset *asset = currentItem.asset;
+        if ([asset isKindOfClass:[AVURLAsset class]]) {
+            NSString *videoURLString = [((AVURLAsset *)asset).URL absoluteString];
+            
+            // التحقق مما إذا كان الفيديو ينتمي لشبكة إعلانات Unity أو روابط دعائية
+            if ([videoURLString containsString:@"iads.unity3d.com"] || 
+                [videoURLString containsString:@"unityads"] || 
+                [videoURLString containsString:@"ads"] || 
+                [videoURLString containsString:@"reward"] ||
+                [videoURLString containsString:@"promo"]) {
+                
+                // تسريع الإعلان فقط إلى 8 أضعاف سرعته
+                self.rate = 8.0;
+            }
+        }
     }
 }
 
-%end
-
-// اعتراض مشغلات الويب الخاصة بـ Unity Ads لزيادة سرعة وسائط الفيديو إن وجدت
-%hook UADSWebView
-
-- (void)webView:(id)arg1 didFinishNavigation:(id)arg2 {
-    %orig;
-    // حقن سكربت JavaScript يسرع أي عنصر فيديو (HTML5 Video) موجود داخل إعلان الـ WebView
-    NSString *speedScript = @"var videos = document.querySelectorAll('video'); for(var i=0; i<videos.length; i++){ videos[i].playbackRate = 8.0; videos[i].muted = true; }";
-    [self evaluateJavaScript:speedScript completionHandler:nil];
+- (void)setRate:(float)rate {
+    AVPlayerItem *currentItem = self.currentItem;
+    if (currentItem) {
+        AVAsset *asset = currentItem.asset;
+        if ([asset isKindOfClass:[AVURLAsset class]]) {
+            NSString *videoURLString = [((AVURLAsset *)asset).URL absoluteString];
+            
+            if ([videoURLString containsString:@"iads.unity3d.com"] || 
+                [videoURLString containsString:@"unityads"] || 
+                [videoURLString containsString:@"ads"] || 
+                [videoURLString containsString:@"reward"]) {
+                if (rate < 8.0) {
+                    %orig(8.0);
+                    return;
+                }
+            }
+        }
+    }
+    %orig(rate);
 }
 
 %end
