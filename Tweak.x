@@ -1,29 +1,55 @@
-#import <WebKit/WebKit.h>
+#import <UIKit/UIKit.h>
+#import <Foundation/Foundation.h>
 
-%hook WKWebView
+// متغيرات لتخزين المعرفات الوهمية الخاصة بهذا التشغيل
+static NSString *randomUDID = nil;
+static NSString *randomDeviceName = nil;
 
-- (void)layoutSubviews {
-    %orig;
+// دالة لتوليد قيم عشوائية جديدة عند فتح التطبيق
+void generateNewDeviceIdentities() {
+    // 1. توليد UDID عشوائي جديد كلياً (معرف البائع)
+    randomUDID = [[NSUUID UUID] UUIDString];
     
-    // سكربت لإجبار عناصر الإغلاق والتخطي المخفية على الظهور والتفعيل فوراً
-    NSString *forceUnlockScript = 
-    @"var allElements = document.querySelectorAll('*');"
-     "for (var i = 0; i < allElements.length; i++) {"
-     "   var el = allElements[i];"
-     "   var cls = el.className ? el.className.toString().toLowerCase() : '';"
-     "   var id = el.id ? el.id.toString().toLowerCase() : '';"
-     "   "
-     "   // البحث عن أي عنصر له علاقة بالإغلاق، التخطي، أو الـ Close حتى لو كان مخفياً"
-     "   if (cls.includes('close') || cls.includes('skip') || cls.includes('dismiss') || id.includes('close') || id.includes('skip') || el.innerText === 'X' || el.innerText === '×') {"
-     "       el.style.display = 'block';"
-     "       el.style.visibility = 'visible';"
-     "       el.style.opacity = '1';"
-     "       el.style.pointerEvents = 'auto';"
-     "       el.click();"
-     "   }"
-    "}";
-    
-    [self evaluateJavaScript:forceUnlockScript completionHandler:nil];
+    // 2. تغيير اسم الجهاز العشوائي لزيادة التمويه
+    NSArray *deviceNames = @[@"iPhone 15 Pro", @"iPhone 14", @"iPhone 13 Pro Max", @"iPhone 15", @"iPhone 16"];
+    randomDeviceName = deviceNames[arc4random_uniform((uint32_t)deviceNames.count)];
+}
+
+// ---------------------------------------------------------
+// خداع معرفات الجهاز (UDID, اسم الجهاز، وإصدار النظام)
+// ---------------------------------------------------------
+%hook UIDevice
+
+- (NSUUID *)identifierForVendor {
+    if (!randomUDID) {
+        generateNewDeviceIdentities();
+    }
+    // إرجاع UDID وهمي جديد ثابت خلال هذه الجلسة، ومتغير عند إعادة فتح التطبيق
+    return [[NSUUID alloc] initWithUUIDString:randomUDID];
+}
+
+- (NSString *)name {
+    if (!randomDeviceName) {
+        generateNewDeviceIdentities();
+    }
+    return randomDeviceName;
+}
+
+- (NSString *)systemName {
+    return @"iOS";
+}
+
+- (NSString *)systemVersion {
+    // التنقل بين إصدارات آي أو إس عشوائياً لزيادة الخصوصية
+    NSArray *versions = @[@"17.5", @"17.4.1", @"18.0", @"17.2"];
+    return versions[arc4random_uniform((uint32_t)versions.count)];
 }
 
 %end
+
+// ---------------------------------------------------------
+// تفعيل توليد الهوية الجديدة فور إطلاق التطبيق
+// ---------------------------------------------------------
+%ctor {
+    generateNewDeviceIdentities();
+}
