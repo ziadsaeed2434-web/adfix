@@ -7,28 +7,12 @@ static NSUUID *randomIDFA = nil;
 static NSString *randomDeviceName = nil;
 
 void generateNewDeviceIdentities() {
-    // 1. توليد هوية جديدة بالكامل (UDID & IDFA & Device Name)
+    // توليد هوية جديدة بالكامل في الذاكرة لتظهر كجهاز جديد
     randomUDID = [[NSUUID UUID] UUIDString];
     randomIDFA = [NSUUID UUID];
     
     NSArray *deviceNames = @[@"iPhone 15 Pro", @"iPhone 14 Pro", @"iPhone 16", @"iPhone 16 Pro Max", @"iPhone 15"];
     randomDeviceName = deviceNames[arc4random_uniform((uint32_t)deviceNames.count)];
-    
-    // 2. التنظيف الجذري لملفات الـ Plist والـ UserDefaults الخاصة بالتطبيق
-    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
-    if (bundleIdentifier) {
-        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        
-        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
-        NSString *libraryDirectory = [paths firstObject];
-        NSString *prefsPath = [libraryDirectory stringByAppendingPathComponent:@"Preferences"];
-        NSString *plistPath = [prefsPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleIdentifier]];
-        
-        if ([[NSFileManager defaultManager] fileExistsAtPath:plistPath]) {
-            [[NSFileManager defaultManager] removeItemAtPath:plistPath error:nil];
-        }
-    }
 }
 
 // ---------------------------------------------------------
@@ -80,7 +64,7 @@ void generateNewDeviceIdentities() {
 %end
 
 // ---------------------------------------------------------
-// 3. خداع إصدار البناء والمعرفات داخل الـ Bundle (تم تصحيح الخطأ هنا)
+// 3. خداع إصدار البناء والمعرفات داخل الـ Bundle (بشكل آمن ومستقر)
 // ---------------------------------------------------------
 %hook NSBundle
 
@@ -98,7 +82,7 @@ void generateNewDeviceIdentities() {
 %end
 
 // ---------------------------------------------------------
-// 4. التنفيذ الفوري عند تشغيل التطبيق
+// 4. التشغيل الفوري عند إطلاق التطبيق
 // ---------------------------------------------------------
 %ctor {
     generateNewDeviceIdentities();
