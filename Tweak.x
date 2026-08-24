@@ -1,22 +1,39 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <AdSupport/ASIdentifierManager.h>
 
-// متغيرات لتخزين المعرفات الوهمية الخاصة بهذا التشغيل
 static NSString *randomUDID = nil;
+static NSUUID *randomIDFA = nil;
 static NSString *randomDeviceName = nil;
 
-// دالة لتوليد قيم عشوائية جديدة عند فتح التطبيق
 void generateNewDeviceIdentities() {
-    // 1. توليد UDID عشوائي جديد كلياً (معرف البائع)
+    // 1. توليد هوية جديدة بالكامل (UDID & IDFA & Device Name)
     randomUDID = [[NSUUID UUID] UUIDString];
+    randomIDFA = [NSUUID UUID];
     
-    // 2. تغيير اسم الجهاز العشوائي لزيادة التمويه
-    NSArray *deviceNames = @[@"iPhone 15 Pro", @"iPhone 14", @"iPhone 13 Pro Max", @"iPhone 15", @"iPhone 16"];
+    NSArray *deviceNames = @[@"iPhone 15 Pro", @"iPhone 14 Pro", @"iPhone 16", @"iPhone 16 Pro Max", @"iPhone 15"];
     randomDeviceName = deviceNames[arc4random_uniform((uint32_t)deviceNames.count)];
+    
+    // 2. التنظيف الجذري لملفات الـ Plist والـ UserDefaults الخاصة بالتطبيق لضمان صفحة نظيفة
+    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+    if (bundleIdentifier) {
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        
+        // مسح ملفات الإعدادات المخزنة في مسار الـ Preferences للملف الشخصي للتطبيق
+        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+        NSString *libraryDirectory = [paths firstObject];
+        NSString *prefsPath = [libraryDirectory stringByAppendingPathComponent:@"Preferences"];
+        NSString *plistPath = [prefsPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleIdentifier]];
+        
+        if ([[NSFileManager defaultManager] fileExistsAtPath:plistPath]) {
+            [[NSFileManager defaultManager] removeItemAtPath:plistPath error:nil];
+        }
+    }
 }
 
 // ---------------------------------------------------------
-// خداع معرفات الجهاز (UDID, اسم الجهاز، وإصدار النظام)
+// 1. خداع معرفات الجهاز الأساسية (UDID & IDFV)
 // ---------------------------------------------------------
 %hook UIDevice
 
@@ -24,7 +41,6 @@ void generateNewDeviceIdentities() {
     if (!randomUDID) {
         generateNewDeviceIdentities();
     }
-    // إرجاع UDID وهمي جديد ثابت خلال هذه الجلسة، ومتغير عند إعادة فتح التطبيق
     return [[NSUUID alloc] initWithUUIDString:randomUDID];
 }
 
@@ -40,15 +56,46 @@ void generateNewDeviceIdentities() {
 }
 
 - (NSString *)systemVersion {
-    // التنقل بين إصدارات آي أو إس عشوائياً لزيادة الخصوصية
-    NSArray *versions = @[@"17.5", @"17.4.1", @"18.0", @"17.2"];
+    NSArray *versions = @[@"17.5.1", @"18.1", @"17.4.1", @"18.0"];
     return versions[arc4random_uniform((uint32_t)versions.count)];
 }
 
 %end
 
 // ---------------------------------------------------------
-// تفعيل توليد الهوية الجديدة فور إطلاق التطبيق
+// 2. خداع معرف الإعلانات (IDFA)
+// ---------------------------------------------------------
+%hook ASIdentifierManager
+
+- (NSUUID *)advertisingIdentifier {
+    if (!randomIDFA) {
+        generateNewDeviceIdentities();
+    }
+    return randomIDFA;
+}
+
+- (BOOL)isAdvertisingTrackingEnabled {
+    return YES;
+}
+
+%end
+
+// ---------------------------------------------------------
+// 3. خداع إصدار البناء والمعرفات داخل الـ Bundle
+// ---------------------------------------------------------
+%hook NSBundle
+
+- (NSDictionary *)infoDictionary {
+    NSMutableDictionary *dict = [%orig mutableCopy];
+    dict[@"CFBundleVersion"] = [NSString stringWithFormat:@"%d.0", arc4random_uniform(10) + 1];
+    dict[@"CFBundleShortVersionString"] = @"3.0.0";
+    return dict;
+}
+
+%end
+
+// ---------------------------------------------------------
+// 4. التنفيذ الفوري عند تشغيل التطبيق
 // ---------------------------------------------------------
 %ctor {
     generateNewDeviceIdentities();
