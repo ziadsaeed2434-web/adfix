@@ -1,89 +1,55 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
-#import <AdSupport/ASIdentifierManager.h>
 
-static NSString *randomUDID = nil;
-static NSUUID *randomIDFA = nil;
-static NSString *randomDeviceName = nil;
+static NSString *generatedUUID = nil;
 
-void generateNewDeviceIdentities() {
-    // توليد هوية جديدة بالكامل في الذاكرة لتظهر كجهاز جديد
-    randomUDID = [[NSUUID UUID] UUIDString];
-    randomIDFA = [NSUUID UUID];
+%ctor {
+    // توليد معرف جديد كلياً نظيف تماماً عند كل عملية إقلاع
+    generatedUUID = [[NSUUID UUID] UUIDString];
     
-    NSArray *deviceNames = @[@"iPhone 15 Pro", @"iPhone 14 Pro", @"iPhone 16", @"iPhone 16 Pro Max", @"iPhone 15"];
-    randomDeviceName = deviceNames[arc4random_uniform((uint32_t)deviceNames.count)];
+    // مسح مفاتيح الجلسة المؤقتة الخاصة بالتطبيق بلطف وبدون إحداث أي استثناء أو كراش
+    @autoreleasepool {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        if (bundleID) {
+            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
+        }
+    }
 }
 
-// ---------------------------------------------------------
-// 1. خداع معرفات الجهاز الأساسية (UDID & IDFV)
-// ---------------------------------------------------------
 %hook UIDevice
 
+// خداع معرف البائع بمعرف جديد كلياً مع كل تشغيل
 - (NSUUID *)identifierForVendor {
-    if (!randomUDID) {
-        generateNewDeviceIdentities();
-    }
-    return [[NSUUID alloc] initWithUUIDString:randomUDID];
+    return [[NSUUID alloc] initWithUUIDString:generatedUUID];
 }
 
 - (NSString *)name {
-    if (!randomDeviceName) {
-        generateNewDeviceIdentities();
-    }
-    return randomDeviceName;
-}
-
-- (NSString *)systemName {
-    return @"iOS";
+    return @"iPhone";
 }
 
 - (NSString *)systemVersion {
-    NSArray *versions = @[@"17.5.1", @"18.1", @"17.4.1", @"18.0"];
-    return versions[arc4random_uniform((uint32_t)versions.count)];
+    return @"17.5.1";
 }
 
 %end
 
-// ---------------------------------------------------------
-// 2. خداع معرف الإعلانات (IDFA)
-// ---------------------------------------------------------
-%hook ASIdentifierManager
+// خداع طبقة قراءة الكفض (NSUserDefaults) لمنع التطبيق من استرجاع البصمة القديمة
+%hook NSUserDefaults
 
-- (NSUUID *)advertisingIdentifier {
-    if (!randomIDFA) {
-        generateNewDeviceIdentities();
-    }
-    return randomIDFA;
-}
-
-- (BOOL)isAdvertisingTrackingEnabled {
-    return YES;
-}
-
-%end
-
-// ---------------------------------------------------------
-// 3. خداع إصدار البناء والمعرفات داخل الـ Bundle (بشكل آمن ومستقر)
-// ---------------------------------------------------------
-%hook NSBundle
-
-- (NSDictionary *)infoDictionary {
-    NSDictionary *origDict = %orig;
-    if (!origDict) {
+- (id)objectForKey:(NSString *)defaultName {
+    // إذا حاول التطبيق استدعاء مفاتيح لها علاقة بالـ DeviceID أو الـ Token القديم، نقوم بتصفيرها
+    if ([defaultName containsString:@"device"] || [defaultName containsString:@"udid"] || [defaultName containsString:@"uuid"] || [defaultName containsString:@"guid"]) {
         return nil;
     }
-    NSMutableDictionary *dict = [origDict mutableCopy];
-    dict[@"CFBundleVersion"] = [NSString stringWithFormat:@"%d.0", arc4random_uniform(10) + 1];
-    dict[@"CFBundleShortVersionString"] = @"3.0.0";
-    return [dict copy];
+    return %orig;
+}
+
+- (void)setObject:(id)value forKey:(NSString *)defaultName {
+    // منع حفظ معرف الجهاز القديم محلياً لكي يظل التطبيق في حالة "جهاز جديد" دائماً
+    if ([defaultName containsString:@"device"] || [defaultName containsString:@"udid"] || [defaultName containsString:@"uuid"]) {
+        return;
+    }
+    %orig;
 }
 
 %end
-
-// ---------------------------------------------------------
-// 4. التشغيل الفوري عند إطلاق التطبيق
-// ---------------------------------------------------------
-%ctor {
-    generateNewDeviceIdentities();
-}
