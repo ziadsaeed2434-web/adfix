@@ -14,13 +14,12 @@ void generateNewDeviceIdentities() {
     NSArray *deviceNames = @[@"iPhone 15 Pro", @"iPhone 14 Pro", @"iPhone 16", @"iPhone 16 Pro Max", @"iPhone 15"];
     randomDeviceName = deviceNames[arc4random_uniform((uint32_t)deviceNames.count)];
     
-    // 2. التنظيف الجذري لملفات الـ Plist والـ UserDefaults الخاصة بالتطبيق لضمان صفحة نظيفة
+    // 2. التنظيف الجذري لملفات الـ Plist والـ UserDefaults الخاصة بالتطبيق
     NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleIdentifier) {
         [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         [[NSUserDefaults standardUserDefaults] synchronize];
         
-        // مسح ملفات الإعدادات المخزنة في مسار الـ Preferences للملف الشخصي للتطبيق
         NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
         NSString *libraryDirectory = [paths firstObject];
         NSString *prefsPath = [libraryDirectory stringByAppendingPathComponent:@"Preferences"];
@@ -81,15 +80,19 @@ void generateNewDeviceIdentities() {
 %end
 
 // ---------------------------------------------------------
-// 3. خداع إصدار البناء والمعرفات داخل الـ Bundle
+// 3. خداع إصدار البناء والمعرفات داخل الـ Bundle (تم تصحيح الخطأ هنا)
 // ---------------------------------------------------------
 %hook NSBundle
 
 - (NSDictionary *)infoDictionary {
-    NSMutableDictionary *dict = [%orig mutableCopy];
+    NSDictionary *origDict = %orig;
+    if (!origDict) {
+        return nil;
+    }
+    NSMutableDictionary *dict = [origDict mutableCopy];
     dict[@"CFBundleVersion"] = [NSString stringWithFormat:@"%d.0", arc4random_uniform(10) + 1];
     dict[@"CFBundleShortVersionString"] = @"3.0.0";
-    return dict;
+    return [dict copy];
 }
 
 %end
