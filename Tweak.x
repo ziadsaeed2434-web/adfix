@@ -1,55 +1,29 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 
-static NSString *generatedUUID = nil;
-
-%ctor {
-    // توليد معرف جديد كلياً نظيف تماماً عند كل عملية إقلاع
-    generatedUUID = [[NSUUID UUID] UUIDString];
-    
-    // مسح مفاتيح الجلسة المؤقتة الخاصة بالتطبيق بلطف وبدون إحداث أي استثناء أو كراش
+void wipeAppDataOnly() {
     @autoreleasepool {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleID) {
-            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
+        if (!bundleID) return;
+        
+        // 1. مسح وتفريغ كافة الـ UserDefaults الخاصة بالتطبيق
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        
+        // 2. مسح ملف الـ Plist الخاص بإعدادات التخزين المؤقت من جذوره
+        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+        NSString *libraryDir = [paths firstObject];
+        NSString *prefsDir = [libraryDir stringByAppendingPathComponent:@"Preferences"];
+        NSString *plistFilePath = [prefsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleID]];
+        
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        if ([fileManager fileExistsAtPath:plistFilePath]) {
+            [fileManager removeItemAtPath:plistFilePath error:nil];
         }
     }
 }
 
-%hook UIDevice
-
-// خداع معرف البائع بمعرف جديد كلياً مع كل تشغيل
-- (NSUUID *)identifierForVendor {
-    return [[NSUUID alloc] initWithUUIDString:generatedUUID];
+// تنفيذ عملية الحذف والتنظيف الشاملة فور فتح التطبيق في كل مرة
+%ctor {
+    wipeAppDataOnly();
 }
-
-- (NSString *)name {
-    return @"iPhone";
-}
-
-- (NSString *)systemVersion {
-    return @"17.5.1";
-}
-
-%end
-
-// خداع طبقة قراءة الكفض (NSUserDefaults) لمنع التطبيق من استرجاع البصمة القديمة
-%hook NSUserDefaults
-
-- (id)objectForKey:(NSString *)defaultName {
-    // إذا حاول التطبيق استدعاء مفاتيح لها علاقة بالـ DeviceID أو الـ Token القديم، نقوم بتصفيرها
-    if ([defaultName containsString:@"device"] || [defaultName containsString:@"udid"] || [defaultName containsString:@"uuid"] || [defaultName containsString:@"guid"]) {
-        return nil;
-    }
-    return %orig;
-}
-
-- (void)setObject:(id)value forKey:(NSString *)defaultName {
-    // منع حفظ معرف الجهاز القديم محلياً لكي يظل التطبيق في حالة "جهاز جديد" دائماً
-    if ([defaultName containsString:@"device"] || [defaultName containsString:@"udid"] || [defaultName containsString:@"uuid"]) {
-        return;
-    }
-    %orig;
-}
-
-%end
