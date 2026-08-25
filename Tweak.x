@@ -36,7 +36,6 @@ void generateGreeceRandomSession() {
 @implementation DebugMenuManager
 
 + (void)showDebugInfo {
-    // جلب أحدث نافذة نشطة لعرض القائمة عليها
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *topController = keyWindow.rootViewController;
     while (topController.presentedViewController) {
@@ -64,16 +63,13 @@ void generateGreeceRandomSession() {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (floatingWindow) return;
         
-        // إنشاء نافذة مستقلة للزر لضمان عدم اختفائه عند التنقل بين الشاشات
         floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(20, 100, 60, 60)];
-        floatingWindow.windowLevel = UIWindowLevelAlert + 1; // جعلها في أعلى طبقة ممكنة فوق كل شيء
+        floatingWindow.windowLevel = UIWindowLevelAlert + 1;
         floatingWindow.backgroundColor = [UIColor clearColor];
         
-        // إنشاء الـ ViewController الخاص بالنافذة
         UIViewController *vc = [[UIViewController alloc] init];
         floatingWindow.rootViewController = vc;
         
-        // إنشاء زر التحكم العائم
         UIButton *floatButton = [UIButton buttonWithType:UIButtonTypeCustom];
         floatButton.frame = CGRectMake(0, 0, 60, 60);
         floatButton.backgroundColor = [UIColor systemBlueColor];
@@ -87,8 +83,6 @@ void generateGreeceRandomSession() {
         [floatButton addTarget:self action:@selector(showDebugInfo) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:floatButton];
-        
-        // إظهار النافذة وجعلها مرئية وثابتة
         [floatingWindow makeKeyAndVisible];
     });
 }
@@ -130,11 +124,11 @@ void generateGreeceRandomSession() {
 %end
 
 // ---------------------------------------------------------
-// 2. خداع الشبكة وتتبع الطلبات الصادرة
+// 2. خداع الشبكة وتتبع الطلبات الصادرة (تم تصحيح صيغة الدالة)
 // ---------------------------------------------------------
 %hook NSURLConnection
 
-+ (nullable NSData *)sendSynchronousRequest:(NSURLRequest *)request returningResponse:(NSURLResponse * _Nullable * _Nullable)response error:(NSError * _Nullable * _Nullable)error {
++ (NSData * _Nullable)sendSynchronousRequest:(NSURLRequest * _Nonnull)request returningResponse:(NSURLResponse * _Nullable * _Nullable)response error:(NSError * _Nullable * _Nullable)error {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     [mutableReq setValue:greeceFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:greeceFakeIP forHTTPHeaderField:@"Client-IP"];
