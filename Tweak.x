@@ -58,14 +58,14 @@ void initializeUniqueIP() {
     sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
 }
 
-// User-Agents حديثة ومتنوعة لنظام iOS
+// User-Agents محدثة لإصدارات iOS 26 وما فوق
 void initializeRandomUserAgent() {
     NSArray *agents = @[
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148",
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148",
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148",
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148",
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148",
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 25_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/25.5 Mobile/15E148"
     ];
     currentRandomUserAgent = agents[arc4random_uniform((uint32_t)agents.count)];
 }
@@ -208,31 +208,6 @@ void executeInstantMasterReset() {
 }
 - (CLLocation *)location {
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-}
-%end
-
-// خطاف تهيئة الاتصالات لإجبار التطبيق على توجيه الطلبات عبر الـ IP والبروكسي الوهمي
-%hook NSURLSessionConfiguration
-- (void)setConnectionProxyDictionary:(NSDictionary *)connectionProxyDictionary {
-    NSDictionary *proxySettings = @{
-        (__bridge NSString *)kCFNetworkProxiesHTTPEnable : @YES,
-        (__bridge NSString *)kCFNetworkProxiesHTTPProxy : sessionFakeIP,
-        (__bridge NSString *)kCFNetworkProxiesHTTPPort : @80,
-        (__bridge NSString *)kCFNetworkProxiesHTTPSEnable : @YES,
-        (__bridge NSString *)kCFNetworkProxiesHTTPSProxy : sessionFakeIP,
-        (__bridge NSString *)kCFNetworkProxiesHTTPSPort : @443
-    };
-    %orig(proxySettings);
-}
-- (NSDictionary *)connectionProxyDictionary {
-    return @{
-        (__bridge NSString *)kCFNetworkProxiesHTTPEnable : @YES,
-        (__bridge NSString *)kCFNetworkProxiesHTTPProxy : sessionFakeIP,
-        (__bridge NSString *)kCFNetworkProxiesHTTPPort : @80,
-        (__bridge NSString *)kCFNetworkProxiesHTTPSEnable : @YES,
-        (__bridge NSString *)kCFNetworkProxiesHTTPSProxy : sessionFakeIP,
-        (__bridge NSString *)kCFNetworkProxiesHTTPSPort : @443
-    };
 }
 %end
 
