@@ -57,7 +57,6 @@ void executeCleanWithoutKeychain() {
     NSString *homeDirectory = NSHomeDirectory();
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
-    // مسح كافة الملفات والمجلدات (الكاش، الكوكيز، Documents، المجلدات المؤقتة، وغيرها)
     NSArray *foldersToClean = @[
         [homeDirectory stringByAppendingPathComponent:@"Library/Caches"],
         [homeDirectory stringByAppendingPathComponent:@"Documents"],
@@ -79,7 +78,6 @@ void executeCleanWithoutKeychain() {
         }
     }
     
-    // إغلاق فوري للتطبيق
     exit(0);
 }
 
@@ -175,10 +173,11 @@ void executeCleanWithoutKeychain() {
     });
 }
 
-// تقديم الوقت ساعتين افتراضياً
+// تصحيح دالة الوقت لتجنب أخطاء البناء مع Theos
 %hook NSDate
-+ (id)date {
-    return [%orig dateByAddingTimeInterval:simulatedTimeOffset];
++ (NSDate *)date {
+    NSDate *origDate = %orig;
+    return [origDate dateByAddingTimeInterval:simulatedTimeOffset];
 }
 - (NSTimeInterval)timeIntervalSinceReferenceDate {
     return %orig + simulatedTimeOffset;
