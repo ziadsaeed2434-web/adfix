@@ -1,32 +1,55 @@
+#import <CoreLocation/CoreLocation.h>
 #import <UIKit/UIKit.h>
 #import <AdSupport/ASIdentifierManager.h>
 
-// متغيرات لتخزين معرفات الجلسة الحالية
+static double currentLat = 0.0;
+static double currentLon = 0.0;
+static NSString *sessionFakeIP = @"";
 static NSString *currentRandomUDID = nil;
 static NSUUID *currentRandomIDFA = nil;
 
-// دالة توليد UDID عشوائي جديد
-NSString* generateRandomUDIDString() {
-    return [[NSUUID UUID] UUIDString];
+double randomInRange(double min, double max) {
+    return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
-// دالة توليد IDFA عشوائي جديد
-NSUUID* generateRandomIDFAUUID() {
-    return [NSUUID UUID];
+void updateAtlantaLocation() {
+    currentLat = randomInRange(33.7000, 33.8000);
+    currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// تهيئة الهوية الجديدة وتخزينها في UserDefaults لضمان ثباتها طوال الجلسة الحالية حتى يتم الضغط على الزر
-void initializeNewDeviceIdentity() {
+// دمج البادئات الناجحة مع توليد IP فريد كلياً
+void initializeUniqueIP() {
+    NSArray *verifiedSuccessfulPrefixes = @[@"98.207", @"75.142", @"67.180"];
+    NSString *selectedPrefix = verifiedSuccessfulPrefixes[arc4random_uniform((uint32_t)verifiedSuccessfulPrefixes.count)];
+    
+    static unsigned long long counter = 1000;
+    counter++;
+    
+    NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
+    unsigned long long uniqueSeed = (unsigned long long)timeSeed + counter + arc4random_uniform(77777);
+    
+    int third = (int)(uniqueSeed % 250) + 1;
+    int fourth = (int)((uniqueSeed / 250) % 250) + 1;
+    
+    if (third == fourth) {
+        fourth = (fourth % 200) + 40;
+    }
+    
+    sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
+}
+
+// إدارة هوية الجهاز (UDID & IDFA) وثباتها خلال الجلسة
+void initializeDeviceIdentity() {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *savedUDID = [defaults stringForKey:@"CustomSpoofedUDID"];
-    NSString *savedIDFAstr = [defaults stringForKey:@"CustomSpoofedIDFA"];
+    NSString *savedUDID = [defaults stringForKey:@"MasterSpoofedUDID"];
+    NSString *savedIDFAstr = [defaults stringForKey:@"MasterSpoofedIDFA"];
     
     if (!savedUDID || !savedIDFAstr) {
-        currentRandomUDID = generateRandomUDIDString();
-        currentRandomIDFA = generateRandomIDFAUUID();
+        currentRandomUDID = [[NSUUID UUID] UUIDString];
+        currentRandomIDFA = [NSUUID UUID];
         
-        [defaults setObject:currentRandomUDID forKey:@"CustomSpoofedUDID"];
-        [defaults setObject:[currentRandomIDFA UUIDString] forKey:@"CustomSpoofedIDFA"];
+        [defaults setObject:currentRandomUDID forKey:@"MasterSpoofedUDID"];
+        [defaults setObject:[currentRandomIDFA UUIDString] forKey:@"MasterSpoofedIDFA"];
         [defaults synchronize];
     } else {
         currentRandomUDID = savedUDID;
@@ -34,18 +57,19 @@ void initializeNewDeviceIdentity() {
     }
 }
 
-// دالة تنظيف وحذف بيانات التطبيق (Cache & Documents)
-void clearAppDataAndResetIdentity() {
-    // 1. توليد هوية جديدة وحفظها
-    currentRandomUDID = generateRandomUDIDString();
-    currentRandomIDFA = generateRandomIDFAUUID();
-    
+// الوظيفة الشاملة عند الضغط على الزر: توليد هوية جديدة، إيبات جديدة، حذف البيانات، وإغلاق التطبيق
+void executeMasterReset() {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    [defaults setObject:currentRandomUDID forKey:@"CustomSpoofedUDID"];
-    [defaults setObject:[currentRandomIDFA UUIDString] forKey:@"CustomSpoofedIDFA"];
+    
+    // 1. توليد هوية جديدة كلياً
+    NSString *newUDID = [[NSUUID UUID] UUIDString];
+    NSUUID *newIDFA = [NSUUID UUID];
+    
+    [defaults setObject:newUDID forKey:@"MasterSpoofedUDID"];
+    [defaults setObject:[newIDFA UUIDString] forKey:@"MasterSpoofedIDFA"];
     [defaults synchronize];
     
-    // 2. مسح الكاش وملفات المستندات المؤقتة الخاصة بالتطبيق
+    // 2. مسح ملفات الكاش والمستندات الخاصة بالتطبيق
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     NSString *cachesDirectory = [paths objectAtIndex:0];
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -57,7 +81,6 @@ void clearAppDataAndResetIdentity() {
         [fileManager removeItemAtPath:filePath error:nil];
     }
     
-    // مسح مجلد Documents أيضاً إن وجد لتنظيف البيانات تماماً
     NSArray *docPaths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     NSString *docDirectory = [docPaths objectAtIndex:0];
     NSArray *docFiles = [fileManager contentsOfDirectoryAtPath:docDirectory error:&error];
@@ -66,19 +89,17 @@ void clearAppDataAndResetIdentity() {
         [fileManager removeItemAtPath:filePath error:nil];
     }
     
-    NSLog(@"[ResetTweak] تم تغيير المعرفات وحذف بيانات التطبيق بنجاح.");
-    
-    // 3. إنهاء التطبيق تماماً لإعادة التشغيل بهوية جديدة نظيفة
+    // 3. إغلاق التطبيق لتطبيق التغييرات (IP وموقع وجهاز جديد بالكامل)
     exit(0);
 }
 
-// نافذة الزر العائم لكي يظهر فوق كل الشاشات
-@interface ResetWindow : UIWindow
+// الواجهة العائمة والزر المتحرك
+@interface MasterWindow : UIWindow
 @end
 
-@implementation ResetWindow
+@implementation MasterWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn = [self viewWithTag:888999];
+    UIView *btn = [self viewWithTag:777888];
     if (btn && CGRectContainsPoint(btn.frame, point)) {
         return YES;
     }
@@ -86,17 +107,17 @@ void clearAppDataAndResetIdentity() {
 }
 @end
 
-@interface ResetManager : NSObject
-@property (strong, nonatomic) ResetWindow *floatingWindow;
+@interface MasterManager : NSObject
+@property (strong, nonatomic) MasterWindow *floatingWindow;
 @property (strong, nonatomic) UIButton *resetBtn;
 + (instancetype)sharedInstance;
 - (void)setupFloatingButton;
 @end
 
-@implementation ResetManager
+@implementation MasterManager
 
 + (instancetype)sharedInstance {
-    static ResetManager *sharedInstance = nil;
+    static MasterManager *sharedInstance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         sharedInstance = [[self alloc] init];
@@ -109,8 +130,8 @@ void clearAppDataAndResetIdentity() {
         if (self.floatingWindow) return;
         
         CGRect screenBounds = [UIScreen mainScreen].bounds;
-        self.floatingWindow = [[ResetWindow alloc] initWithFrame:screenBounds];
-        self.floatingWindow.windowLevel = UIWindowLevelAlert + 2000;
+        self.floatingWindow = [[MasterWindow alloc] initWithFrame:screenBounds];
+        self.floatingWindow.windowLevel = UIWindowLevelAlert + 3000;
         self.floatingWindow.hidden = NO;
         self.floatingWindow.backgroundColor = [UIColor clearColor];
         
@@ -118,11 +139,11 @@ void clearAppDataAndResetIdentity() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // تصميم الزر (مكتوب عليه RESET بلون مميز لسهولة الاستخدام)
+        // زر أحمر مميز مكتوب عليه RESET
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.resetBtn.tag = 888999;
-        self.resetBtn.frame = CGRectMake(20, 200, 65, 65);
-        self.resetBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:0.9]; // لون أحمر تحذيري للريست
+        self.resetBtn.tag = 777888;
+        self.resetBtn.frame = CGRectMake(20, 180, 65, 65);
+        self.resetBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:0.9];
         [self.resetBtn setTitle:@"RESET" forState:UIControlStateNormal];
         [self.resetBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         self.resetBtn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
@@ -132,12 +153,10 @@ void clearAppDataAndResetIdentity() {
         self.resetBtn.layer.shadowOpacity = 0.6;
         self.resetBtn.layer.shadowRadius = 5;
         
-        // إمكانية سحب وتحريك الزر في أي مكان بالشاشة
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.resetBtn addGestureRecognizer:pan];
         
-        // تنفيذ عملية الحذف والتغيير عند الضغط على الزر
-        [self.resetBtn addTarget:self action:@selector(executeResetAction) forControlEvents:UIControlEventTouchUpInside];
+        [self.resetBtn addTarget:self action:@selector(confirmAndReset) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.resetBtn];
     });
@@ -158,19 +177,18 @@ void clearAppDataAndResetIdentity() {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 
-- (void)executeResetAction {
-    // إظهار تنبيه بسيط قبل التنفيذ الإجباري
+- (void)confirmAndReset {
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = keyWindow.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
     
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"إعادة ضبط الهوية" message:@"سيتم تغيير UDID و IDFA، حذف الكاش، وإعادة تشغيل التطبيق فوراً. هل أنت متأكد؟" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"إعادة ضبط كاملة" message:@"سيتم تغيير الموقع، توليـد IP أمريكي جديد، تبديل معرفات الجهاز، حذف الكاش، وإعادة تشغيل التطبيق فوراً. هل تريد المتابعة؟" preferredStyle:UIAlertControllerStyleAlert];
     
     [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"نعم، نفذ" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-        clearAppDataAndResetIdentity();
+    [alert addAction:[UIAlertAction actionWithTitle:@"نعم، نفذ الكل" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
+        executeMasterReset();
     }]];
     
     [rootVC presentViewController:alert animated:YES completion:nil];
@@ -179,27 +197,61 @@ void clearAppDataAndResetIdentity() {
 @end
 
 %ctor {
-    initializeNewDeviceIdentity();
+    updateAtlantaLocation();
+    initializeUniqueIP();
+    initializeDeviceIdentity();
+    
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[ResetManager sharedInstance] setupFloatingButton];
+        [[MasterManager sharedInstance] setupFloatingButton];
     });
 }
 
-// اعتراض UDID وإرجاع القيمة الوهمية الحالية
+// خطاف الموقع الجغرافي (أتلانطا)
+%hook CLLocationManager
+- (void)startUpdatingLocation {
+    updateAtlantaLocation();
+    CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
+    if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+        [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
+    }
+}
+- (CLLocation *)location {
+    updateAtlantaLocation();
+    return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
+}
+%end
+
+// خطاف الشبكة لحقن الـ IP الأمريكي الفريد وترويسات المتصفح
+%hook NSURLSession
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    
+    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+    
+    [mutableReq setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+    [mutableReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" forHTTPHeaderField:@"User-Agent"];
+    
+    return %orig(mutableReq, completionHandler);
+}
+%end
+
+// خطاف المعرفات لتغيير UDID
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     if (!currentRandomUDID) {
-        initializeNewDeviceIdentity();
+        initializeDeviceIdentity();
     }
     return [[NSUUID alloc] initWithUUIDString:currentRandomUDID];
 }
 %end
 
-// اعتراض IDFA وإرجاع القيمة الوهمية الحالية
+// خطاف المعرفات لتغيير IDFA
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     if (!currentRandomIDFA) {
-        initializeNewDeviceIdentity();
+        initializeDeviceIdentity();
     }
     return currentRandomIDFA;
 }
