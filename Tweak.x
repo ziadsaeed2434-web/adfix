@@ -1,13 +1,12 @@
 #import <CoreLocation/CoreLocation.h>
 #import <UIKit/UIKit.h>
 #import <AdSupport/ASIdentifierManager.h>
-#import <objc/runtime.h>
 
 static double currentLat = 0.0;
 static double currentLon = 0.0;
+static NSString *sessionFakeIP = @"";
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
-static NSString *sessionAtlantaIP = nil;
 
 double randomInRange(double min, double max) {
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
@@ -18,22 +17,20 @@ void updateAtlantaLocation() {
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// دالة توليد IP جديد يتغير في كل مرة يتم فيها فتح التطبيق (جلسة جديدة)
-NSString *getSessionAtlantaIP() {
-    if (!sessionAtlantaIP) {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        // توليد IP جديد فقط عند فتح التطبيق لأول مرة أو بعد إعادة تشغيله
-        NSArray *atlantaPrefixes = @[@"50.200", @"24.98", @"68.192", @"73.140", @"104.156", @"172.56", @"198.54", @"23.128"];
-        NSString *prefix = atlantaPrefixes[arc4random_uniform((uint32_t)atlantaPrefixes.count)];
-        int third = arc4random_uniform(254) + 1;
-        int fourth = arc4random_uniform(254) + 1;
-        sessionAtlantaIP = [NSString stringWithFormat:@"%@.%d.%d", prefix, third, fourth];
-        
-        // حفظه مؤقتاً لهذه الجلسة
-        [defaults setObject:sessionAtlantaIP forKey:@"AtlantaActiveSessionIP"];
-        [defaults synchronize];
-    }
-    return sessionAtlantaIP;
+// توليد IP فريد كلياً بالاعتماد على الـ Timestamp والـ Random الحقيقي داخل الكود لمنع التكرار نهائياً
+void initializePureCodeUniqueIP() {
+    NSArray *atlantaPrefixes = @[@"50.200", @"24.98", @"68.192", @"73.140", @"104.156", @"172.56", @"198.54", @"23.128", @"12.158", @"162.210", @"199.167", @"204.11", @"65.156"];
+    
+    NSString *prefix = atlantaPrefixes[arc4random_uniform((uint32_t)atlantaPrefixes.count)];
+    
+    // استخدام الوقت الحالي بدقة أجزاء من الثانية + عشوائية مطلقة لضمان عدم تكرار النتيجة برمجياً بأي شكل
+    NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
+    long long uniqueSeed = (long long)timeSeed + arc4random_uniform(999999);
+    
+    int third = (int)(uniqueSeed % 254) + 1;
+    int fourth = (int)((uniqueSeed / 254) % 254) + 1;
+    
+    sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", prefix, third, fourth];
 }
 
 void fetchRealIP() {
@@ -59,7 +56,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         path = [[path substringToIndex:30] stringByAppendingString:@"..."];
     }
     
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP الجلسة: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
+    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP فريد: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
     
     @synchronized(networkLogs) {
         [networkLogs insertObject:logEntry atIndex:0];
@@ -69,7 +66,6 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     }
 }
 
-// واجهة التقارير مع زر لتغيير الـ IP يدوياً إذا رغبت دون الحاجة لإغلاق التطبيق
 @interface AtlantaReportViewController : UIViewController
 @end
 
@@ -87,7 +83,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     NSString *idfaStr = [idfaUUID UUIDString];
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 نظام الـ IP (يتغير مع كل فتحة تطبيق):\nIP أتلانطا الحالي: %@\n\n🛡️ ايبى الشبكة الفعلي:\n%@", getSessionAtlantaIP(), currentRealIP];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الفريد (عبر خوارزمية الوقت الكودي):\n%@\n\n🛡️ ايبى الشبكة الفعلي:\n%@", sessionFakeIP, currentRealIP];
     NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
@@ -99,49 +95,26 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         }
     }
     
-    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 سجل الطلبات والآيبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
+    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 تفاصيل الطلبات والآيبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
     
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, self.view.bounds.size.width - 40, 0)];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 60, self.view.bounds.size.width - 40, 0)];
     label.text = fullReport;
     label.textColor = [UIColor whiteColor];
     label.font = [UIFont systemFontOfSize:13];
     label.numberOfLines = 0;
     [label sizeToFit];
     
-    scrollView.contentSize = CGSizeMake(self.view.bounds.size.width, label.frame.size.height + 140);
+    scrollView.contentSize = CGSizeMake(self.view.bounds.size.width, label.frame.size.height + 120);
     [scrollView addSubview:label];
     
-    // زر إغلاق اللوحة
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeBtn.frame = CGRectMake(20, 25, 80, 35);
+    closeBtn.frame = CGRectMake(20, 20, 80, 35);
     closeBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:1.0];
     [closeBtn setTitle:@"إغلاق" forState:UIControlStateNormal];
     [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     closeBtn.layer.cornerRadius = 8;
     [closeBtn addTarget:self action:@selector(dismissPopup) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:closeBtn];
-    
-    // زر إضافي لتغيير الـ IP فوراً دون الحاجة لإغلاق التطبيق (اختياري لك)
-    UIButton *changeIpBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    changeIpBtn.frame = CGRectMake(110, 25, 140, 35);
-    changeIpBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0];
-    [changeIpBtn setTitle:@"تغيير IP الجلسة" forState:UIControlStateNormal];
-    [changeIpBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    changeIpBtn.layer.cornerRadius = 8;
-    [changeIpBtn addTarget:self action:@selector(forceNewIP) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:changeIpBtn];
-}
-
-- (void)forceNewIP {
-    sessionAtlantaIP = nil; // مسح الجلسة الحالية
-    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"AtlantaActiveSessionIP"];
-    NSString *newIP = getSessionAtlantaIP(); // توليد جديد
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تم التغيير" message:[NSString stringWithFormat:@"تم توليد IP جديد لأتلانطا:\n%@", newIP] preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithActionTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        [self dismissViewControllerAnimated:YES completion:nil];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)dismissPopup {
@@ -153,7 +126,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 @end
 
 @implementation AtlantaWindow
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent)event {
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn = [self viewWithTag:999888];
     if (btn && CGRectContainsPoint(btn.frame, point)) {
         return YES;
@@ -245,57 +218,43 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 
 @end
 
-// --- تشغيل الـ Hook ---
-@interface CustomNetworkHook : NSObject
-@end
-
-@implementation CustomNetworkHook
-
-+ (void)load {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        updateAtlantaLocation();
-        fetchRealIP();
-        
-        // مسح الجلسة السابقة عند كل فتحة جديدة للتطبيق لضمان توليد IP جديد تماماً
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        [defaults removeObjectForKey:@"AtlantaActiveSessionIP"];
-        sessionAtlantaIP = nil;
-        
-        // جلب وتثبيت IP جديد لهذه الجلسة
-        getSessionAtlantaIP();
-        
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [[AtlantaInfoManager sharedInstance] setupFloatingButton];
-        });
-        
-        Class urlSessionClass = objc_getClass("NSURLSession");
-        SEL originalSel = @selector(dataTaskWithRequest:completionHandler:);
-        Method originalMethod = class_getInstanceMethod(urlSessionClass, originalSel);
-        
-        if (originalMethod) {
-            IMP originalIMP = method_getImplementation(originalMethod);
-            
-            NSURLSessionDataTask* (^swizzledBlock)(id, NSURLRequest *, void (^)(NSData *, NSURLResponse *, NSError *)) = ^NSURLSessionDataTask*(id slf, NSURLRequest *request, void (^completionHandler)(NSData *, NSURLResponse *, NSError *)) {
-                NSMutableURLRequest *mutableReq = [request mutableCopy];
-                
-                NSString *sessionIP = getSessionAtlantaIP();
-                [mutableReq setValue:sessionIP forHTTPHeaderField:@"X-Forwarded-For"];
-                [mutableReq setValue:sessionIP forHTTPHeaderField:@"Client-IP"];
-                [mutableReq setValue:sessionIP forHTTPHeaderField:@"X-Real-IP"];
-                
-                NSString *urlString = request.URL.absoluteString;
-                if (urlString) {
-                    logNetworkRequest(urlString, sessionIP, currentLat, currentLon);
-                }
-                
-                typedef NSURLSessionDataTask* (*OriginalFunc)(id, SEL, NSURLRequest *, void *);
-                return ((OriginalFunc)originalIMP)(slf, originalSel, mutableReq, completionHandler);
-            };
-            
-            method_setImplementation(originalMethod, imp_implementationWithBlock(swizzledBlock));
-        }
+%ctor {
+    updateAtlantaLocation();
+    initializePureCodeUniqueIP(); // توليد IP فريد بالاعتماد على خوارزمية الوقت والعشوائية المطلقة
+    fetchRealIP();
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[AtlantaInfoManager sharedInstance] setupFloatingButton];
     });
 }
 
-@end
+%hook CLLocationManager
+- (void)startUpdatingLocation {
+    updateAtlantaLocation();
+    CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
+    if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+        [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
+    }
+}
+- (CLLocation *)location {
+    updateAtlantaLocation();
+    return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
+}
+%end
+
+%hook NSURLSession
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    
+    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+    
+    NSString *urlString = request.URL.absoluteString;
+    if (urlString) {
+        logNetworkRequest(urlString, sessionFakeIP, currentLat, currentLon);
+    }
+    
+    return %orig(mutableReq, completionHandler);
+}
+%end
