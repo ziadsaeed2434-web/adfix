@@ -5,7 +5,7 @@ static double sessionLatitude = 0.0;
 static double sessionLongitude = 0.0;
 static NSString *sessionAtlantaIP = nil;
 static NSMutableArray *networkLogs = nil;
-static UIWindow *floatingLogWindow = nil; // نافذة مستقلة للزر لضمان عدم اختفائه أبدًا
+static UIWindow *floatingLogWindow = nil;
 
 static void initializeNewSessionData() {
     double randomLatOffset = ((arc4random_uniform(200) - 100) / 10000.0);
@@ -76,7 +76,6 @@ static void initializeNewSessionData() {
 }
 @end
 
-// تحريك الزر بإصبعك بكل سلاسة
 @interface DraggableButtonHandler : NSObject
 @end
 
@@ -89,13 +88,12 @@ static void initializeNewSessionData() {
 }
 @end
 
-// إنشاء نافذة مستقلة للزر لتكون ثابتة فوق أي صفحة أو فيو يتغير داخل التطبيق
 @interface FloatingButtonViewController : UIViewController
 @end
 
 @implementation FloatingButtonViewController
 - (void)viewDidLoad {
-    [super.viewDidLoad];
+    [super viewDidLoad]; // تم تصحيح طريقة الاستدعاء هنا للغة Objective-C الصحيحة
     
     UIButton *debugButton = [UIButton buttonWithType:UIButtonTypeCustom];
     [debugButton setTitle:@"IP Logs" forState:UIControlStateNormal];
@@ -112,16 +110,6 @@ static void initializeNewSessionData() {
     
     [self.view addSubview:debugButton];
 }
-
-// السماح للمس بالمرور عبر النافذة الشفافة لكي لا تعطل تفاعلك مع التطبيق، وتستجيب فقط للزر
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    for (UIView *subview in self.view.subviews) {
-        if (CGRectContainsPoint(subview.frame, point)) {
-            return YES;
-        }
-    }
-    return NO;
-}
 @end
 
 %hook UIWindow
@@ -129,7 +117,6 @@ static void initializeNewSessionData() {
 - (void)makeKeyAndVisible {
     %orig;
     
-    // إنشاء النافذة المستقلة للزر مرة واحدة فقط وتثبيتها للأبد فوق كل النوافذ
     if (!floatingLogWindow) {
         if (@available(iOS 13.0, *)) {
             for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
@@ -143,7 +130,7 @@ static void initializeNewSessionData() {
             floatingLogWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
         }
         
-        floatingLogWindow.windowLevel = UIWindowLevelAlert + 1000; // مستوى عالي جداً فوق كل شيء
+        floatingLogWindow.windowLevel = UIWindowLevelAlert + 1000;
         floatingLogWindow.backgroundColor = [UIColor clearColor];
         floatingLogWindow.rootViewController = [[FloatingButtonViewController alloc] init];
         [floatingLogWindow setHidden:NO];
@@ -152,14 +139,12 @@ static void initializeNewSessionData() {
 
 %end
 
-// تثبيت موقع أتلانتا
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
 }
 %end
 
-// إجبار إعدادات الشبكة على استخدام الآبي الجديد
 %hook NSURLSessionConfiguration
 
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
@@ -177,7 +162,6 @@ static void initializeNewSessionData() {
 
 %end
 
-// حقن الآبي في الطلبات وتسجيلها
 %hook NSMutableURLRequest
 
 - (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
