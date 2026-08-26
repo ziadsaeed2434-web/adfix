@@ -7,71 +7,80 @@ static double currentLon = 0.0;
 static NSString *sessionFakeIP = @"";
 static NSString *currentRandomUDID = nil;
 static NSUUID *currentRandomIDFA = nil;
+static NSString *currentRandomUserAgent = @"";
 
 double randomInRange(double min, double max) {
-    min = 33.7000;
-    max = 33.8000;
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
-void updateAtlantaLocation() {
-    currentLat = randomInRange(33.7000, 33.8000);
-    currentLon = randomInRange(-84.4500, -84.3500);
+// تنويع عشوائي للإحداثيات الجغرافية الأمريكية
+void updateRandomUSLocation() {
+    int cityChoice = arc4random_uniform(6);
+    switch (cityChoice) {
+        case 0: // نيويورك
+            currentLat = randomInRange(40.7128, 40.7828);
+            currentLon = randomInRange(-74.0060, -73.9350);
+            break;
+        case 1: // لوس أنجلوس
+            currentLat = randomInRange(34.0522, 34.1522);
+            currentLon = randomInRange(-118.2437, -118.3537);
+            break;
+        case 2: // شيكاغو
+            currentLat = randomInRange(41.8781, 41.9581);
+            currentLon = randomInRange(-87.6298, -87.7298);
+            break;
+        case 3: // هيوستن
+            currentLat = randomInRange(29.7604, 29.8604);
+            currentLon = randomInRange(-95.3698, -95.4698);
+            break;
+        case 4: // دالاس
+            currentLat = randomInRange(32.7767, 32.8767);
+            currentLon = randomInRange(-96.7970, -96.8970);
+            break;
+        default: // ميامي
+            currentLat = randomInRange(25.7617, 25.8617);
+            currentLon = randomInRange(-80.1918, -80.2918);
+            break;
+    }
 }
 
-// دمج البادئات الناجحة مع توليد IP فريد كلياً
+// توليد IP فريد وقوي مع توزيع البادئات
 void initializeUniqueIP() {
-    NSArray *verifiedSuccessfulPrefixes = @[@"98.207", @"75.142", @"67.180"];
+    NSArray *verifiedSuccessfulPrefixes = @[@"98.207", @"75.142", @"67.180", @"24.16", @"71.198", @"104.28", @"172.56", @"50.201", @"173.239"];
     NSString *selectedPrefix = verifiedSuccessfulPrefixes[arc4random_uniform((uint32_t)verifiedSuccessfulPrefixes.count)];
     
-    static unsigned long long counter = 2000;
-    counter++;
-    
     NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
-    unsigned long long uniqueSeed = (unsigned long long)timeSeed + counter + arc4random_uniform(55555);
+    unsigned long long uniqueSeed = (unsigned long long)timeSeed + arc4random_uniform(9999999);
     
-    int third = (int)(uniqueSeed % 250) + 1;
-    int fourth = (int)((uniqueSeed / 250) % 250) + 1;
-    
-    if (third == fourth) {
-        fourth = (fourth % 200) + 15;
-    }
+    int third = (int)(uniqueSeed % 245) + 5;
+    int fourth = (int)((uniqueSeed / 245) % 245) + 5;
     
     sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
 }
 
-// إدارة هوية الجهاز (UDID & IDFA) وثباتها خلال الجلسة
-void initializeDeviceIdentity() {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *savedUDID = [defaults stringForKey:@"MasterSpoofedUDID"];
-    NSString *savedIDFAstr = [defaults stringForKey:@"MasterSpoofedIDFA"];
-    
-    if (!savedUDID || !savedIDFAstr) {
-        currentRandomUDID = [[NSUUID UUID] UUIDString];
-        currentRandomIDFA = [NSUUID UUID];
-        
-        [defaults setObject:currentRandomUDID forKey:@"MasterSpoofedUDID"];
-        [defaults setObject:[currentRandomIDFA UUIDString] forKey:@"MasterSpoofedIDFA"];
-        [defaults synchronize];
-    } else {
-        currentRandomUDID = savedUDID;
-        currentRandomIDFA = [[NSUUID alloc] initWithUUIDString:savedIDFAstr];
-    }
+// User-Agents حديثة ومتنوعة لنظام iOS
+void initializeRandomUserAgent() {
+    NSArray *agents = @[
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148",
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148",
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148",
+        @"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    ];
+    currentRandomUserAgent = agents[arc4random_uniform((uint32_t)agents.count)];
 }
 
-// الوظيفة الشاملة والفورية عند الضغط على الزر (بدون تأكيد، حذف كل شيء ما عدا Keychain)
+// تهيئة الهوية والشبكة والموقع
+void initializeDeviceIdentity() {
+    currentRandomUDID = [[NSUUID UUID] UUIDString];
+    currentRandomIDFA = [NSUUID UUID];
+    initializeRandomUserAgent();
+    initializeUniqueIP();
+    updateRandomUSLocation();
+}
+
+// التنفيذ الفوري والمسح الشامل مع الخروج
 void executeInstantMasterReset() {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    
-    // 1. توليد هوية جديدة كلياً
-    NSString *newUDID = [[NSUUID UUID] UUIDString];
-    NSUUID *newIDFA = [NSUUID UUID];
-    
-    [defaults setObject:newUDID forKey:@"MasterSpoofedUDID"];
-    [defaults setObject:[newIDFA UUIDString] forKey:@"MasterSpoofedIDFA"];
-    [defaults synchronize];
-    
-    // 2. مسح شامل لكل ملفات ومجلدات التطبيق (Caches, Documents, Library, tmp) واستثناء Keychain
     NSString *homeDirectory = NSHomeDirectory();
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
@@ -80,25 +89,23 @@ void executeInstantMasterReset() {
         [homeDirectory stringByAppendingPathComponent:@"Documents"],
         [homeDirectory stringByAppendingPathComponent:@"Library/Application Support"],
         [homeDirectory stringByAppendingPathComponent:@"Library/Preferences"],
-        [homeDirectory stringByAppendingPathComponent:@"tmp"]
+        [homeDirectory stringByAppendingPathComponent:@"tmp"],
+        [homeDirectory stringByAppendingPathComponent:@"Library/Cookies"]
     ];
     
     for (NSString *folderPath in foldersToClean) {
         if ([fileManager fileExistsAtPath:folderPath]) {
             NSArray *contents = [fileManager contentsOfDirectoryAtPath:folderPath error:nil];
             for (NSString *file in contents) {
-                // استثناء ملفات إعدادات التويك أو النظام الخاصة بنا إذا لزم الأمر، أو حذف الكل
                 NSString *fullPath = [folderPath stringByAppendingPathComponent:file];
                 [fileManager removeItemAtPath:fullPath error:nil];
             }
         }
     }
     
-    // 3. إغلاق التطبيق فوراً وبدون أي انتظار
     exit(0);
 }
 
-// الواجهة العائمة والزر المتحرك
 @interface MasterWindow : UIWindow
 @end
 
@@ -144,7 +151,6 @@ void executeInstantMasterReset() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // زر أحمر مميز مكتوب عليه RESET
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 777888;
         self.resetBtn.frame = CGRectMake(20, 180, 65, 65);
@@ -161,7 +167,6 @@ void executeInstantMasterReset() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.resetBtn addGestureRecognizer:pan];
         
-        // تنفيذ عملية الحذف والخروج الفوري بدون إظهار أي قائمة تأكيد
         [self.resetBtn addTarget:self action:@selector(executeInstantMasterReset) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.resetBtn];
@@ -186,31 +191,52 @@ void executeInstantMasterReset() {
 @end
 
 %ctor {
-    updateAtlantaLocation();
-    initializeUniqueIP();
     initializeDeviceIdentity();
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[MasterManager sharedInstance] setupFloatingButton];
     });
 }
 
-// خطاف الموقع الجغرافي (أتلانطا)
+// خطاف الموقع الجغرافي الوهمي
 %hook CLLocationManager
 - (void)startUpdatingLocation {
-    updateAtlantaLocation();
     CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
     if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
         [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
     }
 }
 - (CLLocation *)location {
-    updateAtlantaLocation();
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
 }
 %end
 
-// خطاف الشبكة لحقن الـ IP الأمريكي الفريد وترويسات المتصفح
+// خطاف تهيئة الاتصالات لإجبار التطبيق على توجيه الطلبات عبر الـ IP والبروكسي الوهمي
+%hook NSURLSessionConfiguration
+- (void)setConnectionProxyDictionary:(NSDictionary *)connectionProxyDictionary {
+    NSDictionary *proxySettings = @{
+        (__bridge NSString *)kCFNetworkProxiesHTTPEnable : @YES,
+        (__bridge NSString *)kCFNetworkProxiesHTTPProxy : sessionFakeIP,
+        (__bridge NSString *)kCFNetworkProxiesHTTPPort : @80,
+        (__bridge NSString *)kCFNetworkProxiesHTTPSEnable : @YES,
+        (__bridge NSString *)kCFNetworkProxiesHTTPSProxy : sessionFakeIP,
+        (__bridge NSString *)kCFNetworkProxiesHTTPSPort : @443
+    };
+    %orig(proxySettings);
+}
+- (NSDictionary *)connectionProxyDictionary {
+    return @{
+        (__bridge NSString *)kCFNetworkProxiesHTTPEnable : @YES,
+        (__bridge NSString *)kCFNetworkProxiesHTTPProxy : sessionFakeIP,
+        (__bridge NSString *)kCFNetworkProxiesHTTPPort : @80,
+        (__bridge NSString *)kCFNetworkProxiesHTTPSEnable : @YES,
+        (__bridge NSString *)kCFNetworkProxiesHTTPSProxy : sessionFakeIP,
+        (__bridge NSString *)kCFNetworkProxiesHTTPSPort : @443
+    };
+}
+%end
+
+// خطاف طلبات الشبكة لحقن ترويسات الـ IP الوهمي والمتصفح الحديث
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
@@ -220,28 +246,22 @@ void executeInstantMasterReset() {
     [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
     
     [mutableReq setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
-    [mutableReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" forHTTPHeaderField:@"User-Agent"];
+    [mutableReq setValue:currentRandomUserAgent forHTTPHeaderField:@"User-Agent"];
     
     return %orig(mutableReq, completionHandler);
 }
 %end
 
-// خطاف المعرفات لتغيير UDID
+// تغيير الـ UDID
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
-    if (!currentRandomUDID) {
-        initializeDeviceIdentity();
-    }
     return [[NSUUID alloc] initWithUUIDString:currentRandomUDID];
 }
 %end
 
-// خطاف المعرفات لتغيير IDFA
+// تغيير الـ IDFA
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    if (!currentRandomIDFA) {
-        initializeDeviceIdentity();
-    }
     return currentRandomIDFA;
 }
 %end
