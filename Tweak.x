@@ -1,226 +1,164 @@
-#import <CoreLocation/CoreLocation.h>
 #import <UIKit/UIKit.h>
 #import <AdSupport/ASIdentifierManager.h>
+#import <CoreLocation/CoreLocation.h>
 
-static double currentLat = 0.0;
-static double currentLon = 0.0;
-static NSString *currentRandomUDID = nil;
-static NSUUID *currentRandomIDFA = nil;
-static NSString *currentRandomUserAgent = @"";
-static NSString *currentDynamicIP = @"";
-static NSTimeInterval simulatedTimeOffset = 0;
-
-double randomInRange(double min, double max) {
-    return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
-}
-
-void generateRandomAtlantaCoordinates() {
-    currentLat = 33.7490 + randomInRange(-0.0450, 0.0450);
-    currentLon = -84.3880 + randomInRange(-0.0450, 0.0450);
-}
-
-void generateDynamicAtlantaIP() {
-    NSArray *atlantaPrefixes = @[@"12.144", @"24.98", @"65.112", @"68.174", @"70.192", @"73.130", @"104.156", @"172.58"];
-    NSString *selectedPrefix = atlantaPrefixes[arc4random_uniform((uint32_t)atlantaPrefixes.count)];
-    
-    int third = arc4random_uniform(200) + 10;
-    int fourth = arc4random_uniform(240) + 5;
-    
-    currentDynamicIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
-}
-
-void generateDynamicUserAgent() {
-    NSArray *iosVersions = @[@"26_0", @"26_1", @"26_2", @"26_3", @"26_4"];
-    NSString *selectedVersion = iosVersions[arc4random_uniform((uint32_t)iosVersions.count)];
-    
-    currentRandomUserAgent = [NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/%@ Mobile/15E148 Safari/604.1", selectedVersion, [selectedVersion stringByReplacingOccurrencesOfString:@"_" withString:@"."]];
-}
-
-void randomizeEverything() {
-    currentRandomUDID = [[NSUUID UUID] UUIDString];
-    currentRandomIDFA = [NSUUID UUID];
-    generateRandomAtlantaCoordinates();
-    generateDynamicAtlantaIP();
-    generateDynamicUserAgent();
-    simulatedTimeOffset += 7200.0; // تقديم الوقت ساعتين
-}
-
-// التنفيذ الفوري: حذف كافة الملفات والمجلدات وتفريغ الإعدادات مع الحفاظ على الـ Keychain بالكامل
-void executeCleanWithoutKeychain() {
-    randomizeEverything();
-    
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (bundleID) {
-        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
-    }
-    
-    NSString *homeDirectory = NSHomeDirectory();
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    NSArray *foldersToClean = @[
-        [homeDirectory stringByAppendingPathComponent:@"Library/Caches"],
-        [homeDirectory stringByAppendingPathComponent:@"Documents"],
-        [homeDirectory stringByAppendingPathComponent:@"Library/Application Support"],
-        [homeDirectory stringByAppendingPathComponent:@"Library/Preferences"],
-        [homeDirectory stringByAppendingPathComponent:@"tmp"],
-        [homeDirectory stringByAppendingPathComponent:@"Library/Cookies"],
-        [homeDirectory stringByAppendingPathComponent:@"Library/WebKit"],
-        [homeDirectory stringByAppendingPathComponent:@"Library/Saved Application State"]
-    ];
-    
-    for (NSString *folderPath in foldersToClean) {
-        if ([fileManager fileExistsAtPath:folderPath]) {
-            NSArray *contents = [fileManager contentsOfDirectoryAtPath:folderPath error:nil];
-            for (NSString *file in contents) {
-                NSString *fullPath = [folderPath stringByAppendingPathComponent:file];
-                [fileManager removeItemAtPath:fullPath error:nil];
-            }
-        }
-    }
-    
-    exit(0);
-}
-
-@interface MasterWindow : UIWindow
-@end
-
-@implementation MasterWindow
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn = [self viewWithTag:777888];
-    if (btn && CGRectContainsPoint(btn.frame, point)) {
-        return YES;
-    }
-    return NO;
-}
-@end
-
-@interface MasterManager : NSObject
-@property (strong, nonatomic) MasterWindow *floatingWindow;
-@property (strong, nonatomic) UIButton *resetBtn;
+// مدير السجل الشامل على الشاشة
+@interface FullInspector : NSObject
 + (instancetype)sharedInstance;
-- (void)setupFloatingButton;
+- (void)logEvent:(NSString *)eventText;
 @end
 
-@implementation MasterManager
+@implementation FullInspector {
+    UITextView *_textView;
+    UIWindow *_inspectorWindow;
+    UIView *_containerView;
+}
 
 + (instancetype)sharedInstance {
-    static MasterManager *sharedInstance = nil;
+    static FullInspector *shared = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sharedInstance = [[self alloc] init];
+        shared = [[FullInspector alloc] init];
     });
-    return sharedInstance;
+    return shared;
 }
 
-- (void)setupFloatingButton {
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            CGRect screenBounds = [UIScreen mainScreen].bounds;
+            
+            // نافذة تغطي جزءاً كبيراً من الشاشة لتتمكن من القراءة بوضوح
+            self->_inspectorWindow = [[UIWindow alloc] initWithFrame:CGRectMake(10, 50, screenBounds.size.width - 20, 320)];
+            self->_inspectorWindow.windowLevel = UIWindowLevelAlert + 9999;
+            self->_inspectorWindow.hidden = NO;
+            self->_inspectorWindow.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.9];
+            self->_inspectorWindow.layer.cornerRadius = 14;
+            self->_inspectorWindow.layer.borderWidth = 1.5;
+            self->_inspectorWindow.layer.borderColor = [UIColor cyanColor].CGColor;
+            self->_inspectorWindow.layer.masksToBounds = YES;
+            
+            UIViewController *vc = [[UIViewController alloc] init];
+            vc.view.backgroundColor = [UIColor clearColor];
+            self->_inspectorWindow.rootViewController = vc;
+            
+            // شاشة النصوص القابلة للتمرير
+            self->_textView = [[UITextView alloc] initWithFrame:CGRectMake(5, 35, screenBounds.size.width - 30, 275)];
+            self->_textView.backgroundColor = [UIColor clearColor];
+            self->_textView.textColor = [UIColor cyanColor];
+            self->_textView.font = [UIFont fontWithName:@"Courier" size:10];
+            self->_textView.editable = NO;
+            self->_textView.text = @"[FullInspector] App Started. Monitoring everything...\n";
+            [vc.view addSubview:self->_textView];
+            
+            // زر نسخ السجل
+            UIButton *copyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+            copyBtn.frame = CGRectMake(10, 5, 80, 25);
+            [copyBtn setTitle:@"COPY LOGS" forState:UIControlStateNormal];
+            [copyBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            copyBtn.backgroundColor = [UIColor darkGrayColor];
+            copyBtn.titleLabel.font = [UIFont boldSystemFontOfSize:10];
+            copyBtn.layer.cornerRadius = 5;
+            [copyBtn addTarget:self action:@selector(copyLogs) forControlEvents:UIControlEventTouchUpInside];
+            [vc.view addSubview:copyBtn];
+            
+            // زر إخفاء/تصغير النافذة
+            UIButton *hideBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+            hideBtn.frame = CGRectMake(screenBounds.size.width - 100, 5, 75, 25);
+            [hideBtn setTitle:@"HIDE/SHOW" forState:UIControlStateNormal];
+            [hideBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            hideBtn.backgroundColor = [UIColor darkGrayColor];
+            hideBtn.titleLabel.font = [UIFont boldSystemFontOfSize:10];
+            hideBtn.layer.cornerRadius = 5;
+            [hideBtn addTarget:self action:@selector(toggleWindow) forControlEvents:UIControlEventTouchUpInside];
+            [vc.view addSubview:hideBtn];
+        });
+    }
+    return self;
+}
+
+- (void)logEvent:(NSString *)eventText {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.floatingWindow) return;
-        
-        CGRect screenBounds = [UIScreen mainScreen].bounds;
-        self.floatingWindow = [[MasterWindow alloc] initWithFrame:screenBounds];
-        self.floatingWindow.windowLevel = UIWindowLevelAlert + 3000;
-        self.floatingWindow.hidden = NO;
-        self.floatingWindow.backgroundColor = [UIColor clearColor];
-        
-        UIViewController *vc = [[UIViewController alloc] init];
-        vc.view.backgroundColor = [UIColor clearColor];
-        self.floatingWindow.rootViewController = vc;
-        
-        self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.resetBtn.tag = 777888;
-        self.resetBtn.frame = CGRectMake(20, 180, 65, 65);
-        self.resetBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:0.9];
-        [self.resetBtn setTitle:@"RESET" forState:UIControlStateNormal];
-        [self.resetBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.resetBtn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-        self.resetBtn.layer.cornerRadius = 32.5;
-        self.resetBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.resetBtn.layer.shadowOffset = CGSizeMake(0, 3);
-        self.resetBtn.layer.shadowOpacity = 0.6;
-        self.resetBtn.layer.shadowRadius = 5;
-        
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.resetBtn addGestureRecognizer:pan];
-        
-        [self.resetBtn addTarget:self action:@selector(executeCleanWithoutKeychain) forControlEvents:UIControlEventTouchUpInside];
-        
-        [vc.view addSubview:self.resetBtn];
+        if (self->_textView) {
+            NSString *current = self->_textView.text;
+            self->_textView.text = [NSString stringWithFormat:@"%@\n------------------\n%@", eventText, current];
+            if (self->_textView.text.length > 8000) {
+                self->_textView.text = [self->_textView.text substringToIndex:8000];
+            }
+        }
     });
 }
 
-- (void)handlePan:(UIPanGestureRecognizer * _Nonnull)gesture {
-    UIView *btn = gesture.view;
-    CGPoint translation = [gesture translationInView:btn.superview];
-    
-    CGFloat newX = btn.center.x + translation.x;
-    CGFloat newY = btn.center.y + translation.y;
-    
-    CGSize screenSize = [UIScreen mainScreen].bounds.size;
-    newX = MAX(35, MIN(screenSize.width - 35, newX));
-    newY = MAX(45, MIN(screenSize.height - 45, newY));
-    
-    btn.center = CGPointMake(newX, newY);
-    [gesture setTranslation:CGPointZero inView:btn.superview];
+- (void)copyLogs {
+    UIPasteboard.generalPasteboard.string = self->_textView.text;
+    [[FullInspector sharedInstance] logEvent:@"[INFO] Logs copied to clipboard!"];
+}
+
+- (void)toggleWindow {
+    self->_inspectorWindow.hidden = !self->_inspectorWindow.hidden;
 }
 
 @end
 
+// بدء المراقبة فور تشغيل التطبيق
 %ctor {
-    randomizeEverything();
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[MasterManager sharedInstance] setupFloatingButton];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[FullInspector sharedInstance] logEvent:@"[AppLaunch] Initialized successfully."];
     });
 }
 
-// تصحيح دالة الوقت لتجنب أخطاء البناء مع Theos
-%hook NSDate
-+ (NSDate *)date {
-    NSDate *origDate = %orig;
-    return [origDate dateByAddingTimeInterval:simulatedTimeOffset];
-}
-- (NSTimeInterval)timeIntervalSinceReferenceDate {
-    return %orig + simulatedTimeOffset;
-}
-%end
-
-// إحداثيات أتلانطا
-%hook CLLocationManager
-- (void)startUpdatingLocation {
-    CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-    if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-        [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
-    }
-}
-- (CLLocation *)location {
-    return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-}
-%end
-
-// ترويسات الشبكة والـ IP الوهمي
+// 1. مراقبة طلبات الشبكة بالكامل (الروابط، الاستجابة، الأخطاء)
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    NSString *urlString = request.URL.absoluteString;
     
-    [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
-    [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"Client-IP"];
-    [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"X-Real-IP"];
-    [mutableReq setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
-    [mutableReq setValue:currentRandomUserAgent forHTTPHeaderField:@"User-Agent"];
+    // تسجيل أي رابط يمر بالشبكة
+    [[FullInspector sharedInstance] logEvent:[NSString stringWithFormat:@"[NET REQ] Method: %@\nURL: %@", request.HTTPMethod, urlString]];
     
-    return %orig(mutableReq, completionHandler);
+    void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+        if (error) {
+            [[FullInspector sharedInstance] logEvent:[NSString stringWithFormat:@"[NET ERR] %@", error.localizedDescription]];
+        } else {
+            NSString *respBody = @"";
+            if (data && data.length < 300) {
+                respBody = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"[Binary Data]";
+            } else {
+                Mo: respBody = [NSString stringWithFormat:@"[Data size: %lu bytes]", (unsigned long)data.length];
+            }
+            [[FullInspector sharedInstance] logEvent:[NSString stringWithFormat:@"[NET RESP] Code:ld\nBody: %@", (long)httpResp.statusCode, respBody]];
+        }
+        if (completionHandler) {
+            completionHandler(data, response, error);
+        }
+    };
+    
+    return %orig(request, wrappedHandler);
 }
 %end
 
-// تغيير الهوية
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return [[NSUUID alloc] initWithUUIDString:currentRandomUDID];
-}
-%end
-
+// 2. مراقبة معرفات الجهاز (متى يطلب التطبيق الـ IDFA أو UDID)
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    return currentRandomIDFA;
+    NSUUID *val = %orig;
+    [[FullInspector sharedInstance] logEvent:[NSString stringWithFormat:@"[HOOK] ASIdentifierManager requested IDFA -> %@", val.UUIDString]];
+    return val;
+}
+%end
+
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
+    NSUUID *val = %orig;
+    [[FullInspector sharedInstance] logEvent:[NSString stringWithFormat:@"[HOOK] UIDevice requested IDFV -> %@", val.UUIDString]];
+    return val;
+}
+%end
+
+// 3. مراقبة الموقع الجغرافي
+%hook CLLocationManager
+- (void)startUpdatingLocation {
+    [[FullInspector sharedInstance] logEvent:@"[HOOK] CLLocationManager requested GPS Location update."];
+    %orig;
 }
 %end
