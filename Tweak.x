@@ -8,20 +8,18 @@ static NSString *currentRandomUDID = nil;
 static NSUUID *currentRandomIDFA = nil;
 static NSString *currentRandomUserAgent = @"";
 static NSString *currentDynamicIP = @"";
+static NSTimeInterval simulatedTimeOffset = 0;
 
 double randomInRange(double min, double max) {
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
-// توليد إحداثيات عشوائية ومتغيرة داخل مدينة أتلانطا
 void generateRandomAtlantaCoordinates() {
     currentLat = 33.7490 + randomInRange(-0.0450, 0.0450);
     currentLon = -84.3880 + randomInRange(-0.0450, 0.0450);
 }
 
-// توليد IP أمريكي جديد وحقيقي خاص بشبكات أتلانطا مع كل ريسيت
 void generateDynamicAtlantaIP() {
-    // بادئات شهيرة لشبكات الإنترنت والاتصالات في أتلانطا (مثل AT&T و Comcast)
     NSArray *atlantaPrefixes = @[@"12.144", @"24.98", @"65.112", @"68.174", @"70.192", @"73.130", @"104.156", @"172.58"];
     NSString *selectedPrefix = atlantaPrefixes[arc4random_uniform((uint32_t)atlantaPrefixes.count)];
     
@@ -31,7 +29,6 @@ void generateDynamicAtlantaIP() {
     currentDynamicIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
 }
 
-// توليد User-Agent عشوائي ومتغير بالكامل لإصدارات iOS الحديثة
 void generateDynamicUserAgent() {
     NSArray *iosVersions = @[@"26_0", @"26_1", @"26_2", @"26_3", @"26_4"];
     NSString *selectedVersion = iosVersions[arc4random_uniform((uint32_t)iosVersions.count)];
@@ -39,23 +36,28 @@ void generateDynamicUserAgent() {
     currentRandomUserAgent = [NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/%@ Mobile/15E148 Safari/604.1", selectedVersion, [selectedVersion stringByReplacingOccurrencesOfString:@"_" withString:@"."]];
 }
 
-// تحديث كل شيء بالكامل (IP جديد، موقع جديد، هوية جديدة، وبصمة جديدة)
 void randomizeEverything() {
     currentRandomUDID = [[NSUUID UUID] UUIDString];
     currentRandomIDFA = [NSUUID UUID];
     generateRandomAtlantaCoordinates();
     generateDynamicAtlantaIP();
     generateDynamicUserAgent();
+    simulatedTimeOffset += 7200.0; // تقديم الوقت ساعتين
 }
 
-// التنفيذ الفوري والمسح الجذري الشامل لكل أثر
-void executeInstantMasterReset() {
-    // تحديث الهوية والـ IP لتكون جديدة تماماً عند الفتح القادم
+// التنفيذ الفوري: حذف كافة الملفات والمجلدات وتفريغ الإعدادات مع الحفاظ على الـ Keychain بالكامل
+void executeCleanWithoutKeychain() {
     randomizeEverything();
+    
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    if (bundleID) {
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
+    }
     
     NSString *homeDirectory = NSHomeDirectory();
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
+    // مسح كافة الملفات والمجلدات (الكاش، الكوكيز، Documents، المجلدات المؤقتة، وغيرها)
     NSArray *foldersToClean = @[
         [homeDirectory stringByAppendingPathComponent:@"Library/Caches"],
         [homeDirectory stringByAppendingPathComponent:@"Documents"],
@@ -77,7 +79,7 @@ void executeInstantMasterReset() {
         }
     }
     
-    // إغلاق فوري ونظيف
+    // إغلاق فوري للتطبيق
     exit(0);
 }
 
@@ -142,7 +144,7 @@ void executeInstantMasterReset() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.resetBtn addGestureRecognizer:pan];
         
-        [self.resetBtn addTarget:self action:@selector(executeInstantMasterReset) forControlEvents:UIControlEventTouchUpInside];
+        [self.resetBtn addTarget:self action:@selector(executeCleanWithoutKeychain) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.resetBtn];
     });
@@ -173,7 +175,17 @@ void executeInstantMasterReset() {
     });
 }
 
-// حقن الإحداثيات المتغيرة داخل أتلانطا
+// تقديم الوقت ساعتين افتراضياً
+%hook NSDate
++ (id)date {
+    return [%orig dateByAddingTimeInterval:simulatedTimeOffset];
+}
+- (NSTimeInterval)timeIntervalSinceReferenceDate {
+    return %orig + simulatedTimeOffset;
+}
+%end
+
+// إحداثيات أتلانطا
 %hook CLLocationManager
 - (void)startUpdatingLocation {
     CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
@@ -186,16 +198,14 @@ void executeInstantMasterReset() {
 }
 %end
 
-// حقن الـ IP الجديد الخاص بأتلانطا وترويسات المتصفح في كل طلب شبكي
+// ترويسات الشبكة والـ IP الوهمي
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
-    // حقن الـ IP المتجدد في ترويسات الشبكة وتتبع الاتصال
     [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"Client-IP"];
     [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"X-Real-IP"];
-    
     [mutableReq setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
     [mutableReq setValue:currentRandomUserAgent forHTTPHeaderField:@"User-Agent"];
     
@@ -203,7 +213,7 @@ void executeInstantMasterReset() {
 }
 %end
 
-// تغيير معرفات الجهاز
+// تغيير الهوية
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:currentRandomUDID];
