@@ -5,7 +5,7 @@ static double sessionLatitude = 0.0;
 static double sessionLongitude = 0.0;
 static NSString *sessionAtlantaIP = nil;
 static NSMutableArray *networkLogs = nil;
-static UIButton *globalDebugButton = nil;
+static UIWindow *floatingLogWindow = nil; // نافذة مستقلة للزر لضمان عدم اختفائه أبدًا
 
 static void initializeNewSessionData() {
     double randomLatOffset = ((arc4random_uniform(200) - 100) / 10000.0);
@@ -14,17 +14,11 @@ static void initializeNewSessionData() {
     sessionLatitude = 33.7490 + randomLatOffset;
     sessionLongitude = -84.3880 + randomLonOffset;
     
-    // نطاقات آبي أمريكية قوية ونظيفة جداً تابعة لمزودي خدمة محمول ومنزلي في أتلانتا لضمان ظهور الإعلانات
-    NSArray *atlantaIPRanges = @[
-        [NSString stringWithFormat:@"172.58.%d.%d", arc4random_uniform(100) + 10, arc4random_uniform(254) + 1], // T-Mobile Mobile IP
-        [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(100) + 10, arc4random_uniform(254) + 1], // T-Mobile Mobile IP
-        [NSString stringWithFormat:@"166.199.%d.%d", arc4random_uniform(50) + 10, arc4random_uniform(254) + 1], // Verizon Wireless GA
-        [NSString stringWithFormat:@"104.28.%d.%d", arc4random_uniform(150) + 20, arc4random_uniform(254) + 1], // Cloudflare / Residential CDN
-        [NSString stringWithFormat:@"73.220.%d.%d", arc4random_uniform(100) + 10, arc4random_uniform(254) + 1]  // Comcast Xfinity Atlanta
-    ];
+    NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
+    int uniqueSeed = (int)timeSeed % 90 + 10;
+    int randomSubSegment = arc4random_uniform(254) + 1;
     
-    int randomIndex = arc4random_uniform((int)[atlantaIPRanges count]);
-    sessionAtlantaIP = atlantaIPRanges[randomIndex];
+    sessionAtlantaIP = [NSString stringWithFormat:@"172.59.%d.%d", uniqueSeed, randomSubSegment];
     
     if (!networkLogs) {
         networkLogs = [[NSMutableArray alloc] init];
@@ -82,15 +76,51 @@ static void initializeNewSessionData() {
 }
 @end
 
+// تحريك الزر بإصبعك بكل سلاسة
 @interface DraggableButtonHandler : NSObject
 @end
 
 @implementation DraggableButtonHandler
 + (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    UIButton *button = (UIButton *)gesture.view;
+    UIView *button = gesture.view;
     CGPoint translation = [gesture translationInView:button.superview];
     button.center = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
     [gesture setTranslation:CGPointZero inView:button.superview];
+}
+@end
+
+// إنشاء نافذة مستقلة للزر لتكون ثابتة فوق أي صفحة أو فيو يتغير داخل التطبيق
+@interface FloatingButtonViewController : UIViewController
+@end
+
+@implementation FloatingButtonViewController
+- (void)viewDidLoad {
+    [super.viewDidLoad];
+    
+    UIButton *debugButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    [debugButton setTitle:@"IP Logs" forState:UIControlStateNormal];
+    [debugButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    debugButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
+    debugButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:0.9];
+    debugButton.layer.cornerRadius = 20;
+    debugButton.frame = CGRectMake(20, 120, 75, 40);
+    
+    [debugButton addTarget:[NetworkLogViewer class] action:@selector(showLogsMenu) forControlEvents:UIControlEventTouchUpInside];
+    
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:[DraggableButtonHandler class] action:@selector(handlePan:)];
+    [debugButton addGestureRecognizer:pan];
+    
+    [self.view addSubview:debugButton];
+}
+
+// السماح للمس بالمرور عبر النافذة الشفافة لكي لا تعطل تفاعلك مع التطبيق، وتستجيب فقط للزر
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    for (UIView *subview in self.view.subviews) {
+        if (CGRectContainsPoint(subview.frame, point)) {
+            return YES;
+        }
+    }
+    return NO;
 }
 @end
 
@@ -98,37 +128,38 @@ static void initializeNewSessionData() {
 
 - (void)makeKeyAndVisible {
     %orig;
-    if (!globalDebugButton) {
-        globalDebugButton = [UIButton buttonWithType:UIButtonTypeCustom];
-        [globalDebugButton setTitle:@"IP Logs" forState:UIControlStateNormal];
-        [globalDebugButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        globalDebugButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-        globalDebugButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:0.9];
-        globalDebugButton.layer.cornerRadius = 20;
-        globalDebugButton.frame = CGRectMake(20, 100, 75, 40);
-        globalDebugButton.layer.zPosition = 999999;
-        
-        [globalDebugButton addTarget:[NetworkLogViewer class] action:@selector(showLogsMenu) forControlEvents:UIControlEventTouchUpInside];
-        
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:[DraggableButtonHandler class] action:@selector(handlePan:)];
-        [globalDebugButton addGestureRecognizer:pan];
-    }
     
-    if (self.rootViewController && self.rootViewController.view) {
-        [globalDebugButton removeFromSuperview];
-        [self.rootViewController.view addSubview:globalDebugButton];
-        [self.rootViewController.view bringSubviewToFront:globalDebugButton];
+    // إنشاء النافذة المستقلة للزر مرة واحدة فقط وتثبيتها للأبد فوق كل النوافذ
+    if (!floatingLogWindow) {
+        if (@available(iOS 13.0, *)) {
+            for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive) {
+                    floatingLogWindow = [[UIWindow alloc] initWithWindowScene:scene];
+                    break;
+                }
+            }
+        }
+        if (!floatingLogWindow) {
+            floatingLogWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        }
+        
+        floatingLogWindow.windowLevel = UIWindowLevelAlert + 1000; // مستوى عالي جداً فوق كل شيء
+        floatingLogWindow.backgroundColor = [UIColor clearColor];
+        floatingLogWindow.rootViewController = [[FloatingButtonViewController alloc] init];
+        [floatingLogWindow setHidden:NO];
     }
 }
 
 %end
 
+// تثبيت موقع أتلانتا
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
 }
 %end
 
+// إجبار إعدادات الشبكة على استخدام الآبي الجديد
 %hook NSURLSessionConfiguration
 
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
@@ -146,6 +177,7 @@ static void initializeNewSessionData() {
 
 %end
 
+// حقن الآبي في الطلبات وتسجيلها
 %hook NSMutableURLRequest
 
 - (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
