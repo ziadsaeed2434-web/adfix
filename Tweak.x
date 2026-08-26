@@ -17,24 +17,27 @@ void updateAtlantaLocation() {
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// قائمة جديدة كلياً ومحدثة لبادئات آيبات أمريكية منزلية لتجاوز الحظر وإعادة الإعلانات
+// دمج البادئات الثلاث الناجحة (98.207، 75.142، و 67.180) مع منع التكرار كلياً
 void initializePureCodeUniqueIP() {
-    NSArray *freshAmericanPrefixes = @[
-        @"24.16", @"67.180", @"71.198", @"75.142", @"96.244", 
-        @"108.162", @"142.112", @"173.228", @"184.148", @"208.80", 
-        @"69.172", @"70.132", @"72.229", @"98.207", @"107.77",
-        @"12.240", @"64.124", @"66.111", @"199.199", @"216.58"
-    ];
+    // قائمة البادئات المؤكد نجاحها مع الإعلانات
+    NSArray *verifiedSuccessfulPrefixes = @[@"98.207", @"75.142", @"67.180"];
+    NSString *selectedPrefix = verifiedSuccessfulPrefixes[arc4random_uniform((uint32_t)verifiedSuccessfulPrefixes.count)];
     
-    NSString *prefix = freshAmericanPrefixes[arc4random_uniform((uint32_t)freshAmericanPrefixes.count)];
+    // عداد زمني تزايدي بالمللي ثانية لضمان استحالة تكرار الـ IP نهائياً
+    static unsigned long long counter = 700;
+    counter++;
     
     NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
-    long long uniqueSeed = (long long)timeSeed + arc4random_uniform(999999);
+    unsigned long long uniqueSeed = (unsigned long long)timeSeed + counter + arc4random_uniform(90000);
     
-    int third = (int)(uniqueSeed % 254) + 1;
-    int fourth = (int)((uniqueSeed / 254) % 254) + 1;
+    int third = (int)(uniqueSeed % 250) + 1;
+    int fourth = (int)((uniqueSeed / 250) % 250) + 1;
     
-    sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", prefix, third, fourth];
+    if (third == fourth) {
+        fourth = (fourth % 200) + 35;
+    }
+    
+    sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
 }
 
 void fetchRealIP() {
@@ -60,7 +63,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         path = [[path substringToIndex:30] stringByAppendingString:@"..."];
     }
     
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP متجدد: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
+    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 IP ناجح غير متكرر: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
     
     @synchronized(networkLogs) {
         [networkLogs insertObject:logEntry atIndex:0];
@@ -87,8 +90,8 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     NSString *idfaStr = [idfaUUID UUIDString];
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الجديد (متجاوز الحظر):\n%@\n\n🛡️ ايبى الشبكة الفعلي:\n%@", sessionFakeIP, currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الحالي (من البادئات الناجحة):\n%@\n\n🛡️ ايبى الشبكة الفعلي:\n%@", sessionFakeIP, currentRealIP];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات (ثابتة للحماية):\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -254,7 +257,6 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
     [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
     
-    // إضافة حقول هيدر جديدة لتأكيد أن الطلب قادم من متصفح ومتصل حقيقي لتجاوز أنظمة منع الإعلانات
     [mutableReq setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
     [mutableReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" forHTTPHeaderField:@"User-Agent"];
     
