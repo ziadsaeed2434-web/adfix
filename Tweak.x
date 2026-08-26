@@ -4,8 +4,6 @@
 static double sessionLatitude = 0.0;
 static double sessionLongitude = 0.0;
 static NSString *sessionAtlantaIP = nil;
-static NSMutableArray *networkLogs = nil;
-static UIWindow *floatingLogWindow = nil;
 
 static void initializeNewSessionData() {
     double randomLatOffset = ((arc4random_uniform(200) - 100) / 10000.0);
@@ -19,132 +17,20 @@ static void initializeNewSessionData() {
     int randomSubSegment = arc4random_uniform(254) + 1;
     
     sessionAtlantaIP = [NSString stringWithFormat:@"172.59.%d.%d", uniqueSeed, randomSubSegment];
-    
-    if (!networkLogs) {
-        networkLogs = [[NSMutableArray alloc] init];
-    } else {
-        [networkLogs removeAllObjects];
-    }
 }
 
 %ctor {
     initializeNewSessionData();
 }
 
-@interface NetworkLogViewer : NSObject
-@end
-
-@implementation NetworkLogViewer
-+ (void)showLogsMenu {
-    UIWindow *keyWindow = nil;
-    if (@available(iOS 13.0, *)) {
-        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
-            if (scene.activationState == UISceneActivationStateForegroundActive) {
-                for (UIWindow *window in scene.windows) {
-                    if (window.isKeyWindow) {
-                        keyWindow = window;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    if (!keyWindow) keyWindow = [UIApplication sharedApplication].keyWindow;
-    
-    UIViewController *rootVC = keyWindow.rootViewController;
-    while (rootVC.presentedViewController) {
-        rootVC = rootVC.presentedViewController;
-    }
-    
-    NSMutableString *message = [NSMutableString stringWithFormat:@"🌐 Active Atlanta IP: %@\n\n--- الطلبات المسجلة (%lu) ---\n", sessionAtlantaIP, (unsigned long)[networkLogs count]];
-    
-    NSInteger startIdx = [networkLogs count] > 15 ? [networkLogs count] - 15 : 0;
-    for (NSInteger i = [networkLogs count] - 1; i >= startIdx; i--) {
-        [message appendFormat:@"• %@\n", networkLogs[i]];
-    }
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"مراقب الآبي والشبكة" 
-                                                                   message:message 
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:@"إغلاق" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"مسح السجل" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-        [networkLogs removeAllObjects];
-    }]];
-    
-    [rootVC presentViewController:alert animated:YES completion:nil];
-}
-@end
-
-@interface DraggableButtonHandler : NSObject
-@end
-
-@implementation DraggableButtonHandler
-+ (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    UIView *button = gesture.view;
-    CGPoint translation = [gesture translationInView:button.superview];
-    button.center = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
-    [gesture setTranslation:CGPointZero inView:button.superview];
-}
-@end
-
-@interface FloatingButtonViewController : UIViewController
-@end
-
-@implementation FloatingButtonViewController
-- (void)viewDidLoad {
-    [super viewDidLoad]; // تم تصحيح طريقة الاستدعاء هنا للغة Objective-C الصحيحة
-    
-    UIButton *debugButton = [UIButton buttonWithType:UIButtonTypeCustom];
-    [debugButton setTitle:@"IP Logs" forState:UIControlStateNormal];
-    [debugButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    debugButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    debugButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:0.9];
-    debugButton.layer.cornerRadius = 20;
-    debugButton.frame = CGRectMake(20, 120, 75, 40);
-    
-    [debugButton addTarget:[NetworkLogViewer class] action:@selector(showLogsMenu) forControlEvents:UIControlEventTouchUpInside];
-    
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:[DraggableButtonHandler class] action:@selector(handlePan:)];
-    [debugButton addGestureRecognizer:pan];
-    
-    [self.view addSubview:debugButton];
-}
-@end
-
-%hook UIWindow
-
-- (void)makeKeyAndVisible {
-    %orig;
-    
-    if (!floatingLogWindow) {
-        if (@available(iOS 13.0, *)) {
-            for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                if (scene.activationState == UISceneActivationStateForegroundActive) {
-                    floatingLogWindow = [[UIWindow alloc] initWithWindowScene:scene];
-                    break;
-                }
-            }
-        }
-        if (!floatingLogWindow) {
-            floatingLogWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        }
-        
-        floatingLogWindow.windowLevel = UIWindowLevelAlert + 1000;
-        floatingLogWindow.backgroundColor = [UIColor clearColor];
-        floatingLogWindow.rootViewController = [[FloatingButtonViewController alloc] init];
-        [floatingLogWindow setHidden:NO];
-    }
-}
-
-%end
-
+// تثبيت موقع أتلانتا الجغرافي
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
 }
 %end
 
+// إجبار إعدادات الشبكة على استخدام الآبي الجديد
 %hook NSURLSessionConfiguration
 
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
@@ -162,6 +48,7 @@ static void initializeNewSessionData() {
 
 %end
 
+// حقن الآبي في جميع الطلبات الصادرة
 %hook NSMutableURLRequest
 
 - (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
@@ -179,12 +66,6 @@ static void initializeNewSessionData() {
     if (url && url.absoluteString) {
         [self setValue:sessionAtlantaIP forHTTPHeaderField:@"X-Forwarded-For"];
         [self setValue:sessionAtlantaIP forHTTPHeaderField:@"Client-IP"];
-        
-        NSString *logEntry = [NSString stringWithFormat:@"[%@] %@", sessionAtlantaIP, url.absoluteString];
-        if (networkLogs && ![networkLogs containsObject:logEntry]) {
-            if ([networkLogs count] > 100) [networkLogs removeObjectAtIndex:0];
-            [networkLogs addObject:logEntry];
-        }
     }
 }
 
