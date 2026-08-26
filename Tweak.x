@@ -17,42 +17,7 @@ static NSString *generateNewUUID() {
     return result;
 }
 
-// دالة تنظيف الملفات بشكل آمن مع حماية ضد الأخطاء
-static void clearAllIdentifiersAndFirebase() {
-    @try {
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        // التصحيح هنا: استبدال القوس المربع بقوس دبريلي أو نقطة صحيحة
-        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
-        if ([paths count] == 0) return;
-        NSString *libraryPath = paths[0];
-        
-        NSArray *pathsToClean = @[
-            [libraryPath stringByAppendingPathComponent:@"Caches/com.google.firebase.installations"],
-            [libraryPath stringByAppendingPathComponent:@"Application Support/Firebase/Installations"]
-        ];
-        
-        for (NSString *path in pathsToClean) {
-            if ([fileManager fileExistsAtPath:path]) {
-                [fileManager removeItemAtPath:path error:nil];
-            }
-        }
-        
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSDictionary *dict = [defaults dictionaryRepresentation];
-        for (NSString *key in dict.allKeys) {
-            if ([key rangeOfString:@"FIR" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                [key rangeOfString:@"firebase" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                [key rangeOfString:@"installations" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                [defaults removeObjectForKey:key];
-            }
-        }
-        [defaults synchronize];
-    } @catch (NSException *exception) {
-        // تجاهل أي خطأ مفاجئ لكي لا يكرش التطبيق
-    }
-}
-
-// 1. خطاف معرف الجهاز
+// 1. خطاف معرف الجهاز (IDFV)
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     @try {
@@ -66,7 +31,7 @@ static void clearAllIdentifiersAndFirebase() {
 }
 %end
 
-// 2. خطاف معرف الإعلانات
+// 2. خطاف معرف الإعلانات (IDFA)
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     @try {
@@ -81,16 +46,4 @@ static void clearAllIdentifiersAndFirebase() {
 - (BOOL)isAdvertisingTrackingEnabled {
     return YES;
 }
-%end
-
-// 3. خطاف دورة الحياة مع حماية شاملة من الـ Crash
-%hook AppDelegate
-
-- (void)applicationDidEnterBackground:(UIApplication *)application {
-    %orig;
-    currentIDFV = nil;
-    currentIDFA = nil;
-    clearAllIdentifiersAndFirebase();
-}
-
 %end
