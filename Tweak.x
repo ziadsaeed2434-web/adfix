@@ -4,83 +4,55 @@
 
 static double currentLat = 0.0;
 static double currentLon = 0.0;
-static NSString *sessionFakeIP = @"";
 static NSString *currentRandomUDID = nil;
 static NSUUID *currentRandomIDFA = nil;
 static NSString *currentRandomUserAgent = @"";
+static NSString *currentDynamicIP = @"";
 
 double randomInRange(double min, double max) {
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
-// تنويع عشوائي للإحداثيات الجغرافية الأمريكية
-void updateRandomUSLocation() {
-    int cityChoice = arc4random_uniform(6);
-    switch (cityChoice) {
-        case 0: // نيويورك
-            currentLat = randomInRange(40.7128, 40.7828);
-            currentLon = randomInRange(-74.0060, -73.9350);
-            break;
-        case 1: // لوس أنجلوس
-            currentLat = randomInRange(34.0522, 34.1522);
-            currentLon = randomInRange(-118.2437, -118.3537);
-            break;
-        case 2: // شيكاغو
-            currentLat = randomInRange(41.8781, 41.9581);
-            currentLon = randomInRange(-87.6298, -87.7298);
-            break;
-        case 3: // هيوستن
-            currentLat = randomInRange(29.7604, 29.8604);
-            currentLon = randomInRange(-95.3698, -95.4698);
-            break;
-        case 4: // دالاس
-            currentLat = randomInRange(32.7767, 32.8767);
-            currentLon = randomInRange(-96.7970, -96.8970);
-            break;
-        default: // ميامي
-            currentLat = randomInRange(25.7617, 25.8617);
-            currentLon = randomInRange(-80.1918, -80.2918);
-            break;
-    }
+// توليد إحداثيات عشوائية ومتغيرة داخل مدينة أتلانطا
+void generateRandomAtlantaCoordinates() {
+    currentLat = 33.7490 + randomInRange(-0.0450, 0.0450);
+    currentLon = -84.3880 + randomInRange(-0.0450, 0.0450);
 }
 
-// توليد IP فريد وقوي مع توزيع البادئات
-void initializeUniqueIP() {
-    NSArray *verifiedSuccessfulPrefixes = @[@"98.207", @"75.142", @"67.180", @"24.16", @"71.198", @"104.28", @"172.56", @"50.201", @"173.239"];
-    NSString *selectedPrefix = verifiedSuccessfulPrefixes[arc4random_uniform((uint32_t)verifiedSuccessfulPrefixes.count)];
+// توليد IP أمريكي جديد وحقيقي خاص بشبكات أتلانطا مع كل ريسيت
+void generateDynamicAtlantaIP() {
+    // بادئات شهيرة لشبكات الإنترنت والاتصالات في أتلانطا (مثل AT&T و Comcast)
+    NSArray *atlantaPrefixes = @[@"12.144", @"24.98", @"65.112", @"68.174", @"70.192", @"73.130", @"104.156", @"172.58"];
+    NSString *selectedPrefix = atlantaPrefixes[arc4random_uniform((uint32_t)atlantaPrefixes.count)];
     
-    NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
-    unsigned long long uniqueSeed = (unsigned long long)timeSeed + arc4random_uniform(9999999);
+    int third = arc4random_uniform(200) + 10;
+    int fourth = arc4random_uniform(240) + 5;
     
-    int third = (int)(uniqueSeed % 245) + 5;
-    int fourth = (int)((uniqueSeed / 245) % 245) + 5;
-    
-    sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
+    currentDynamicIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
 }
 
-// User-Agents محدثة لإصدارات iOS 26 وما فوق
-void initializeRandomUserAgent() {
-    NSArray *agents = @[
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148",
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148",
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
-        @"Mozilla/5.0 (iPhone; CPU iPhone OS 25_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/25.5 Mobile/15E148"
-    ];
-    currentRandomUserAgent = agents[arc4random_uniform((uint32_t)agents.count)];
+// توليد User-Agent عشوائي ومتغير بالكامل لإصدارات iOS الحديثة
+void generateDynamicUserAgent() {
+    NSArray *iosVersions = @[@"26_0", @"26_1", @"26_2", @"26_3", @"26_4"];
+    NSString *selectedVersion = iosVersions[arc4random_uniform((uint32_t)iosVersions.count)];
+    
+    currentRandomUserAgent = [NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/%@ Mobile/15E148 Safari/604.1", selectedVersion, [selectedVersion stringByReplacingOccurrencesOfString:@"_" withString:@"."]];
 }
 
-// تهيئة الهوية والشبكة والموقع
-void initializeDeviceIdentity() {
+// تحديث كل شيء بالكامل (IP جديد، موقع جديد، هوية جديدة، وبصمة جديدة)
+void randomizeEverything() {
     currentRandomUDID = [[NSUUID UUID] UUIDString];
     currentRandomIDFA = [NSUUID UUID];
-    initializeRandomUserAgent();
-    initializeUniqueIP();
-    updateRandomUSLocation();
+    generateRandomAtlantaCoordinates();
+    generateDynamicAtlantaIP();
+    generateDynamicUserAgent();
 }
 
-// التنفيذ الفوري والمسح الشامل مع الخروج
+// التنفيذ الفوري والمسح الجذري الشامل لكل أثر
 void executeInstantMasterReset() {
+    // تحديث الهوية والـ IP لتكون جديدة تماماً عند الفتح القادم
+    randomizeEverything();
+    
     NSString *homeDirectory = NSHomeDirectory();
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
@@ -90,7 +62,9 @@ void executeInstantMasterReset() {
         [homeDirectory stringByAppendingPathComponent:@"Library/Application Support"],
         [homeDirectory stringByAppendingPathComponent:@"Library/Preferences"],
         [homeDirectory stringByAppendingPathComponent:@"tmp"],
-        [homeDirectory stringByAppendingPathComponent:@"Library/Cookies"]
+        [homeDirectory stringByAppendingPathComponent:@"Library/Cookies"],
+        [homeDirectory stringByAppendingPathComponent:@"Library/WebKit"],
+        [homeDirectory stringByAppendingPathComponent:@"Library/Saved Application State"]
     ];
     
     for (NSString *folderPath in foldersToClean) {
@@ -103,6 +77,7 @@ void executeInstantMasterReset() {
         }
     }
     
+    // إغلاق فوري ونظيف
     exit(0);
 }
 
@@ -191,14 +166,14 @@ void executeInstantMasterReset() {
 @end
 
 %ctor {
-    initializeDeviceIdentity();
+    randomizeEverything();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[MasterManager sharedInstance] setupFloatingButton];
     });
 }
 
-// خطاف الموقع الجغرافي الوهمي
+// حقن الإحداثيات المتغيرة داخل أتلانطا
 %hook CLLocationManager
 - (void)startUpdatingLocation {
     CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
@@ -211,14 +186,15 @@ void executeInstantMasterReset() {
 }
 %end
 
-// خطاف طلبات الشبكة لحقن ترويسات الـ IP الوهمي والمتصفح الحديث
+// حقن الـ IP الجديد الخاص بأتلانطا وترويسات المتصفح في كل طلب شبكي
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
-    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+    // حقن الـ IP المتجدد في ترويسات الشبكة وتتبع الاتصال
+    [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:currentDynamicIP forHTTPHeaderField:@"X-Real-IP"];
     
     [mutableReq setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
     [mutableReq setValue:currentRandomUserAgent forHTTPHeaderField:@"User-Agent"];
@@ -227,14 +203,13 @@ void executeInstantMasterReset() {
 }
 %end
 
-// تغيير الـ UDID
+// تغيير معرفات الجهاز
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:currentRandomUDID];
 }
 %end
 
-// تغيير الـ IDFA
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     return currentRandomIDFA;
