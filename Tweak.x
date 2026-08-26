@@ -5,7 +5,7 @@ static double sessionLatitude = 0.0;
 static double sessionLongitude = 0.0;
 static NSString *sessionAtlantaIP = nil;
 static NSMutableArray *networkLogs = nil;
-static UIButton *globalDebugButton = nil; // متغير عام لضمان بقاء زر واحد دائم
+static UIButton *globalDebugButton = nil;
 
 static void initializeNewSessionData() {
     double randomLatOffset = ((arc4random_uniform(200) - 100) / 10000.0);
@@ -35,7 +35,7 @@ static void initializeNewSessionData() {
     initializeNewSessionData();
 }
 
-// دالة عرض النافذة والسجل
+// واجهة عرض سجل الطلبات
 @interface NetworkLogViewer : NSObject
 @end
 
@@ -61,14 +61,14 @@ static void initializeNewSessionData() {
         rootVC = rootVC.presentedViewController;
     }
     
-    NSMutableString *message = [NSMutableString stringWithFormat:@"🌐 Atlanta IP: %@\n\n--- الطلبات الصادرة (%lu) ---\n", sessionAtlantaIP, (unsigned long)[networkLogs count]];
+    NSMutableString *message = [NSMutableString stringWithFormat:@"🌐 Active Atlanta IP: %@\n\n--- الطلبات المسجلة (%lu) ---\n", sessionAtlantaIP, (unsigned long)[networkLogs count]];
     
     NSInteger startIdx = [networkLogs count] > 15 ? [networkLogs count] - 15 : 0;
     for (NSInteger i = [networkLogs count] - 1; i >= startIdx; i--) {
         [message appendFormat:@"• %@\n", networkLogs[i]];
     }
     
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"سجل الآبي والشبكة" 
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"مراقب الآبي والشبكة" 
                                                                    message:message 
                                                             preferredStyle:UIAlertControllerStyleAlert];
     
@@ -81,7 +81,23 @@ static void initializeNewSessionData() {
 }
 @end
 
-// تثبيت الزر العائم وجعله يظهر فوق أي صفحة تنتقل إليها
+// دالة تحريك الزر العائم في أي مكان بإصبعك
+@interface DraggableButtonHandler : NSObject
+@end
+
+@implementation DraggableButtonHandler
++ (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    UIButton *button = (UIButton *)gesture.view;
+    CGPoint translation = [gesture translationInView:button.superview];
+    
+    CGPoint newCenter = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
+    button.center = newCenter;
+    
+    [gesture setTranslation:CGPointZero inView:button.superview];
+}
+@end
+
+// تثبيت الزر العائم وجعله قابلاً للسحب وفوق كل الصفحات
 %hook UIWindow
 
 - (void)makeKeyAndVisible {
@@ -94,16 +110,16 @@ static void initializeNewSessionData() {
         globalDebugButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:0.9];
         globalDebugButton.layer.cornerRadius = 20;
         globalDebugButton.frame = CGRectMake(20, 100, 75, 40);
-        
-        // إعطاء الزر أعلى ترتيب (Z-Position) لكي لا يختفي خلف أي صفحة
         globalDebugButton.layer.zPosition = 999999;
         
         [globalDebugButton addTarget:[NetworkLogViewer class] action:@selector(showLogsMenu) forControlEvents:UIControlEventTouchUpInside];
+        
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:[DraggableButtonHandler class] action:@selector(handlePan:)];
+        [globalDebugButton addGestureRecognizer:pan];
     }
     
-    // التأكد من وضع الزر في الشاشة الرئيسية وعدم اختفائه عند تغير الواجهات
     if (self.rootViewController && self.rootViewController.view) {
-        [globalDebugButton removeFromSuperview]; // إزالته من أي مكان قديم وتثبيته في النافذة النشطة
+        [globalDebugButton removeFromSuperview];
         [self.rootViewController.view addSubview:globalDebugButton];
         [self.rootViewController.view bringSubviewToFront:globalDebugButton];
     }
@@ -111,19 +127,39 @@ static void initializeNewSessionData() {
 
 %end
 
-// 1. تثبيت موقع أتلانتا
+// 1. تثبيت موقع أتلانتا الجغرافي
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
 }
 %end
 
-// 2. مراقبة وتسجيل الطلبات والآبي
+// 2. إجبار التطبيق على أخذ الآبي الجديد في كل جلسات الاتصال الحديثة (NSURLSession)
+%hook NSURLSessionConfiguration
+
+- (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
+    NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy];
+    if (!modifiedHeaders) {
+        modifiedHeaders = [NSMutableDictionary dictionary];
+    }
+    
+    // حقن الآبي الجديد كمعيار رئيسي في ترويسات جلسة الشبكة
+    [modifiedHeaders setObject:sessionAtlantaIP forKey:@"X-Forwarded-For"];
+    [modifiedHeaders setObject:sessionAtlantaIP forKey:@"Client-IP"];
+    [modifiedHeaders setObject:sessionAtlantaIP forKey:@"X-Real-IP"];
+    
+    %orig(modifiedHeaders);
+}
+
+%end
+
+// 3. اعتراض الطلبات الفردية وحقن الآبي وتتبعها في السجل
 %hook NSMutableURLRequest
 
 - (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
-        [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame) {
+        [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
+        [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame) {
         %orig(sessionAtlantaIP, field);
         return;
     }
@@ -133,6 +169,9 @@ static void initializeNewSessionData() {
 - (void)setURL:(NSURL *)url {
     %orig;
     if (url && url.absoluteString) {
+        [self setValue:sessionAtlantaIP forHTTPHeaderField:@"X-Forwarded-For"];
+        [self setValue:sessionAtlantaIP forHTTPHeaderField:@"Client-IP"];
+        
         NSString *logEntry = [NSString stringWithFormat:@"[%@] %@", sessionAtlantaIP, url.absoluteString];
         if (networkLogs && ![networkLogs containsObject:logEntry]) {
             if ([networkLogs count] > 100) [networkLogs removeObjectAtIndex:0];
