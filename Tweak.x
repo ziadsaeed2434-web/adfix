@@ -11,7 +11,6 @@
 @implementation FullInspector {
     UITextView *_textView;
     UIWindow *_inspectorWindow;
-    UIView *_containerView;
 }
 
 + (instancetype)sharedInstance {
@@ -29,7 +28,6 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             CGRect screenBounds = [UIScreen mainScreen].bounds;
             
-            // نافذة تغطي جزءاً كبيراً من الشاشة لتتمكن من القراءة بوضوح
             self->_inspectorWindow = [[UIWindow alloc] initWithFrame:CGRectMake(10, 50, screenBounds.size.width - 20, 320)];
             self->_inspectorWindow.windowLevel = UIWindowLevelAlert + 9999;
             self->_inspectorWindow.hidden = NO;
@@ -43,7 +41,6 @@
             vc.view.backgroundColor = [UIColor clearColor];
             self->_inspectorWindow.rootViewController = vc;
             
-            // شاشة النصوص القابلة للتمرير
             self->_textView = [[UITextView alloc] initWithFrame:CGRectMake(5, 35, screenBounds.size.width - 30, 275)];
             self->_textView.backgroundColor = [UIColor clearColor];
             self->_textView.textColor = [UIColor cyanColor];
@@ -52,7 +49,6 @@
             self->_textView.text = @"[FullInspector] App Started. Monitoring everything...\n";
             [vc.view addSubview:self->_textView];
             
-            // زر نسخ السجل
             UIButton *copyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
             copyBtn.frame = CGRectMake(10, 5, 80, 25);
             [copyBtn setTitle:@"COPY LOGS" forState:UIControlStateNormal];
@@ -63,7 +59,6 @@
             [copyBtn addTarget:self action:@selector(copyLogs) forControlEvents:UIControlEventTouchUpInside];
             [vc.view addSubview:copyBtn];
             
-            // زر إخفاء/تصغير النافذة
             UIButton *hideBtn = [UIButton buttonWithType:UIButtonTypeSystem];
             hideBtn.frame = CGRectMake(screenBounds.size.width - 100, 5, 75, 25);
             [hideBtn setTitle:@"HIDE/SHOW" forState:UIControlStateNormal];
@@ -101,19 +96,17 @@
 
 @end
 
-// بدء المراقبة فور تشغيل التطبيق
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[FullInspector sharedInstance] logEvent:@"[AppLaunch] Initialized successfully."];
     });
 }
 
-// 1. مراقبة طلبات الشبكة بالكامل (الروابط، الاستجابة، الأخطاء)
+// 1. مراقبة طلبات الشبكة بالكامل
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSString *urlString = request.URL.absoluteString;
     
-    // تسجيل أي رابط يمر بالشبكة
     [[FullInspector sharedInstance] logEvent:[NSString stringWithFormat:@"[NET REQ] Method: %@\nURL: %@", request.HTTPMethod, urlString]];
     
     void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -125,9 +118,9 @@
             if (data && data.length < 300) {
                 respBody = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"[Binary Data]";
             } else {
-                Mo: respBody = [NSString stringWithFormat:@"[Data size: %lu bytes]", (unsigned long)data.length];
+                respBody = [NSString stringWithFormat:@"[Data size: %lu bytes]", (unsigned long)data.length];
             }
-            [[FullInspector sharedInstance] logEvent:[NSString stringWithFormat:@"[NET RESP] Code:ld\nBody: %@", (long)httpResp.statusCode, respBody]];
+            [[FullInspector sharedInstance] logEvent:[NSString stringWithFormat:@"[NET RESP] Code: %ld\nBody: %@", (long)httpResp.statusCode, respBody]];
         }
         if (completionHandler) {
             completionHandler(data, response, error);
@@ -138,7 +131,7 @@
 }
 %end
 
-// 2. مراقبة معرفات الجهاز (متى يطلب التطبيق الـ IDFA أو UDID)
+// 2. مراقبة معرفات الجهاز
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     NSUUID *val = %orig;
