@@ -1,82 +1,94 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
 
-// 1. تعريف المتغيرات الثابتة للجلسة الحالية
 static NSString *currentIDFV = nil;
 static NSString *currentIDFA = nil;
 
-// دالة مساعدة لتوليد UUID متوافقة مع جميع بيئات التجميع (بدون أخطاء ARC)
+// دالة توليد UUID آمنة ومستقرة تماماً
 static NSString *generateNewUUID() {
     CFUUIDRef uuid = CFUUIDCreate(NULL);
+    if (!uuid) return [[NSUUID UUID] UUIDString];
     CFStringRef string = CFUUIDCreateString(NULL, uuid);
+    CFRelease(uuid);
+    if (!string) return [[NSUUID UUID] UUIDString];
+    
+    // نسخ النص بطريقة آمنة لا تسبب كراش
     NSString *result = [NSString stringWithString:(__bridge NSString *)string];
     CFRelease(string);
-    CFRelease(uuid);
     return result;
 }
 
-// 2. دالة تنظيف ملفات الـ FID والفايربيز والتخزين المؤقت بالترتيب الصحيح
+// دالة تنظيف الملفات بشكل آمن مع حماية ضد الأخطاء
 static void clearAllIdentifiersAndFirebase() {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *libraryPath = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
-    
-    // أ) مسح مجلدات الكاش الخاصة بـ Firebase Installations والـ FID
-    NSArray *pathsToClean = @[
-        [libraryPath stringByAppendingPathComponent:@"Caches/com.google.firebase.installations"],
-        [libraryPath stringByAppendingPathComponent:@"Application Support/Firebase/Installations"]
-    ];
-    
-    for (NSString *path in pathsToClean) {
-        if ([fileManager fileExistsAtPath:path]) {
-            [fileManager removeItemAtPath:path error:nil];
+    @try {
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        NSString *libraryPath = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES)] firstObject];
+        if (!libraryPath) return;
+        
+        NSArray *pathsToClean = @[
+            [libraryPath stringByAppendingPathComponent:@"Caches/com.google.firebase.installations"],
+            [libraryPath stringByAppendingPathComponent:@"Application Support/Firebase/Installations"]
+        ];
+        
+        for (NSString *path in pathsToClean) {
+            if ([fileManager fileExistsAtPath:path]) {
+                [fileManager removeItemAtPath:path error:nil];
+            }
         }
-    }
-    
-    // ب) تنظيف الـ NSUserDefaults من مفاتيح الفايربيز المرتبطة بمعرف التثبيت
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSDictionary *dict = [defaults dictionaryRepresentation];
-    for (NSString *key in dict.allKeys) {
-        if ([key containsString:@"FIR"] || [key containsString:@"firebase"] || [key containsString:@"gcm"] || [key containsString:@"installations"]) {
-            [defaults removeObjectForKey:key];
+        
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSDictionary *dict = [defaults dictionaryRepresentation];
+        for (NSString *key in dict.allKeys) {
+            if ([key rangeOfString:@"FIR" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [key rangeOfString:@"firebase" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [key rangeOfString:@"installations" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                [defaults removeObjectForKey:key];
+            }
         }
+        [defaults synchronize];
+    } @catch (NSException *exception) {
+        // تجاهل أي خطأ مفاجئ لكي لا يكرش التطبيق
     }
-    [defaults synchronize];
 }
 
-// 3. خطاف الـ UDID / IDFV
+// 1. خطاف معرف الجهاز
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
-    if (!currentIDFV) {
-        currentIDFV = generateNewUUID();
+    @try {
+        if (!currentIDFV) {
+            currentIDFV = generateNewUUID();
+        }
+        return [[NSUUID alloc] initWithUUIDString:currentIDFV];
+    } @catch (NSException *e) {
+        return %orig;
     }
-    return [[NSUUID alloc] initWithUUIDString:currentIDFV];
 }
 %end
 
-// 4. خطاف الـ IDFA (معرف الإعلانات)
+// 2. خطاف معرف الإعلانات
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    if (!currentIDFA) {
-        currentIDFA = generateNewUUID();
+    @try {
+        if (!currentIDFA) {
+            currentIDFA = generateNewUUID();
+        }
+        return [[NSUUID alloc] initWithUUIDString:currentIDFA];
+    } @catch (NSException *e) {
+        return %orig;
     }
-    return [[NSUUID alloc] initWithUUIDString:currentIDFA];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
     return YES;
 }
 %end
 
-// 5. خطاف إدارة دورة حياة التطبيق (AppDelegate) للتصفير عند الخروج
+// 3. خطاف دورة الحياة مع حماية شاملة من الـ Crash
 %hook AppDelegate
 
 - (void)applicationDidEnterBackground:(UIApplication *)application {
     %orig;
-    
-    // أولاً: تفريغ المعرفات لكي تتولد هويات جديدة في المرة القادمة
     currentIDFV = nil;
     currentIDFA = nil;
-    
-    // ثانياً: مسح ملفات ومفاتيح الـ FID والفايربيز
     clearAllIdentifiersAndFirebase();
 }
 
