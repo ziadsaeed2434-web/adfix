@@ -12,19 +12,21 @@ double randomInRange(double min, double max) {
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
-// تحديث الإحداثيات لنطاق مدينة أمستردام في هولندا
-void updateNetherlandsLocation() {
-    // نطاق أمستردام (خطوط العرض والطول)
-    currentLat = randomInRange(52.3500, 52.4200);
-    currentLon = randomInRange(4.8200, 4.9500);
+void updateAtlantaLocation() {
+    currentLat = randomInRange(33.7000, 33.8000);
+    currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// توليد IP فريد كلياً تابع لهولندا (باستخدام بادئات آيبات هولندية حقيقية) بالاعتماد على الوقت والعشوائية
+// قائمة جديدة كلياً ومحدثة لبادئات آيبات أمريكية منزلية لتجاوز الحظر وإعادة الإعلانات
 void initializePureCodeUniqueIP() {
-    // بادئات شهيرة لشبكات هولندا (KPN, Ziggo, LeaseWeb, etc.)
-    NSArray *netherlandsPrefixes = @[@"213.127", @"82.161", @"84.241", @"94.212", @"145.131", @"62.45", @"195.169", @"77.160", @"188.207", @"212.238"];
+    NSArray *freshAmericanPrefixes = @[
+        @"24.16", @"67.180", @"71.198", @"75.142", @"96.244", 
+        @"108.162", @"142.112", @"173.228", @"184.148", @"208.80", 
+        @"69.172", @"70.132", @"72.229", @"98.207", @"107.77",
+        @"12.240", @"64.124", @"66.111", @"199.199", @"216.58"
+    ];
     
-    NSString *prefix = netherlandsPrefixes[arc4random_uniform((uint32_t)netherlandsPrefixes.count)];
+    NSString *prefix = freshAmericanPrefixes[arc4random_uniform((uint32_t)freshAmericanPrefixes.count)];
     
     NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
     long long uniqueSeed = (long long)timeSeed + arc4random_uniform(999999);
@@ -58,7 +60,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         path = [[path substringToIndex:30] stringByAppendingString:@"..."];
     }
     
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP هولندي: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
+    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP متجدد: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
     
     @synchronized(networkLogs) {
         [networkLogs insertObject:logEntry atIndex:0];
@@ -68,10 +70,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     }
 }
 
-@interface NetherlandsReportViewController : UIViewController
+@interface AtlantaReportViewController : UIViewController
 @end
 
-@implementation NetherlandsReportViewController
+@implementation AtlantaReportViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.95];
@@ -84,8 +86,8 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     NSUUID *idfaUUID = [[ASIdentifierManager sharedManager] advertisingIdentifier];
     NSString *idfaStr = [idfaUUID UUIDString];
     
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أمستردام، هولندا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الهولندي الفريد:\n%@\n\n🛡️ ايبى الشبكة الفعلي:\n%@", sessionFakeIP, currentRealIP];
+    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الجديد (متجاوز الحظر):\n%@\n\n🛡️ ايبى الشبكة الفعلي:\n%@", sessionFakeIP, currentRealIP];
     NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
@@ -124,12 +126,12 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 @end
 
-@interface NetherlandsWindow : UIWindow
+@interface AtlantaWindow : UIWindow
 @end
 
-@implementation NetherlandsWindow
+@implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn = [self viewWithTag:888999];
+    UIView *btn = [self viewWithTag:999888];
     if (btn && CGRectContainsPoint(btn.frame, point)) {
         return YES;
     }
@@ -137,17 +139,17 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 @end
 
-@interface NetherlandsInfoManager : NSObject
-@property (strong, nonatomic) NetherlandsWindow *floatingWindow;
+@interface AtlantaInfoManager : NSObject
+@property (strong, nonatomic) AtlantaWindow *floatingWindow;
 @property (strong, nonatomic) UIButton *floatingBtn;
 + (instancetype)sharedInstance;
 - (void)setupFloatingButton;
 @end
 
-@implementation NetherlandsInfoManager
+@implementation AtlantaInfoManager
 
 + (instancetype)sharedInstance {
-    static NetherlandsInfoManager *sharedInstance = nil;
+    static AtlantaInfoManager *sharedInstance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         sharedInstance = [[self alloc] init];
@@ -160,7 +162,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         if (self.floatingWindow) return;
         
         CGRect screenBounds = [UIScreen mainScreen].bounds;
-        self.floatingWindow = [[NetherlandsWindow alloc] initWithFrame:screenBounds];
+        self.floatingWindow = [[AtlantaWindow alloc] initWithFrame:screenBounds];
         self.floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
         self.floatingWindow.hidden = NO;
         self.floatingWindow.backgroundColor = [UIColor clearColor];
@@ -170,11 +172,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         self.floatingWindow.rootViewController = vc;
         
         self.floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.floatingBtn.tag = 888999;
+        self.floatingBtn.tag = 999888;
         self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
-        // لون مميز يرمز لهولندا (مثلاً البرتقالي الملكي)
-        self.floatingBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.55 blue:0.0 alpha:0.9];
-        [self.floatingBtn setTitle:@"NL" forState:UIControlStateNormal];
+        self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
+        [self.floatingBtn setTitle:@"ATL" forState:UIControlStateNormal];
         [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
         self.floatingBtn.layer.cornerRadius = 30;
@@ -214,7 +215,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         rootVC = rootVC.presentedViewController;
     }
     
-    NetherlandsReportViewController *reportVC = [[NetherlandsReportViewController alloc] init];
+    AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
     reportVC.modalPresentationStyle = UIModalPresentationFullScreen;
     [rootVC presentViewController:reportVC animated:YES completion:nil];
 }
@@ -222,25 +223,25 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 @end
 
 %ctor {
-    updateNetherlandsLocation();
+    updateAtlantaLocation();
     initializePureCodeUniqueIP();
     fetchRealIP();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[NetherlandsInfoManager sharedInstance] setupFloatingButton];
+        [[AtlantaInfoManager sharedInstance] setupFloatingButton];
     });
 }
 
 %hook CLLocationManager
 - (void)startUpdatingLocation {
-    updateNetherlandsLocation();
+    updateAtlantaLocation();
     CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
     if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
         [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
     }
 }
 - (CLLocation *)location {
-    updateNetherlandsLocation();
+    updateAtlantaLocation();
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
 }
 %end
@@ -252,6 +253,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
     [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+    
+    // إضافة حقول هيدر جديدة لتأكيد أن الطلب قادم من متصفح ومتصل حقيقي لتجاوز أنظمة منع الإعلانات
+    [mutableReq setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+    [mutableReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" forHTTPHeaderField:@"User-Agent"];
     
     NSString *urlString = request.URL.absoluteString;
     if (urlString) {
