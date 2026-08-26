@@ -9,6 +9,8 @@ static NSString *currentRandomUDID = nil;
 static NSUUID *currentRandomIDFA = nil;
 
 double randomInRange(double min, double max) {
+    min = 33.7000;
+    max = 33.8000;
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
@@ -22,17 +24,17 @@ void initializeUniqueIP() {
     NSArray *verifiedSuccessfulPrefixes = @[@"98.207", @"75.142", @"67.180"];
     NSString *selectedPrefix = verifiedSuccessfulPrefixes[arc4random_uniform((uint32_t)verifiedSuccessfulPrefixes.count)];
     
-    static unsigned long long counter = 1000;
+    static unsigned long long counter = 2000;
     counter++;
     
     NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
-    unsigned long long uniqueSeed = (unsigned long long)timeSeed + counter + arc4random_uniform(77777);
+    unsigned long long uniqueSeed = (unsigned long long)timeSeed + counter + arc4random_uniform(55555);
     
     int third = (int)(uniqueSeed % 250) + 1;
     int fourth = (int)((uniqueSeed / 250) % 250) + 1;
     
     if (third == fourth) {
-        fourth = (fourth % 200) + 40;
+        fourth = (fourth % 200) + 15;
     }
     
     sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, third, fourth];
@@ -57,8 +59,8 @@ void initializeDeviceIdentity() {
     }
 }
 
-// الوظيفة الشاملة عند الضغط على الزر: توليد هوية جديدة، إيبات جديدة، حذف البيانات، وإغلاق التطبيق
-void executeMasterReset() {
+// الوظيفة الشاملة والفورية عند الضغط على الزر (بدون تأكيد، حذف كل شيء ما عدا Keychain)
+void executeInstantMasterReset() {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     
     // 1. توليد هوية جديدة كلياً
@@ -69,27 +71,30 @@ void executeMasterReset() {
     [defaults setObject:[newIDFA UUIDString] forKey:@"MasterSpoofedIDFA"];
     [defaults synchronize];
     
-    // 2. مسح ملفات الكاش والمستندات الخاصة بالتطبيق
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-    NSString *cachesDirectory = [paths objectAtIndex:0];
+    // 2. مسح شامل لكل ملفات ومجلدات التطبيق (Caches, Documents, Library, tmp) واستثناء Keychain
+    NSString *homeDirectory = NSHomeDirectory();
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
-    NSError *error = nil;
-    NSArray *cacheFiles = [fileManager contentsOfDirectoryAtPath:cachesDirectory error:&error];
-    for (NSString *file in cacheFiles) {
-        NSString *filePath = [cachesDirectory stringByAppendingPathComponent:file];
-        [fileManager removeItemAtPath:filePath error:nil];
+    NSArray *foldersToClean = @[
+        [homeDirectory stringByAppendingPathComponent:@"Library/Caches"],
+        [homeDirectory stringByAppendingPathComponent:@"Documents"],
+        [homeDirectory stringByAppendingPathComponent:@"Library/Application Support"],
+        [homeDirectory stringByAppendingPathComponent:@"Library/Preferences"],
+        [homeDirectory stringByAppendingPathComponent:@"tmp"]
+    ];
+    
+    for (NSString *folderPath in foldersToClean) {
+        if ([fileManager fileExistsAtPath:folderPath]) {
+            NSArray *contents = [fileManager contentsOfDirectoryAtPath:folderPath error:nil];
+            for (NSString *file in contents) {
+                // استثناء ملفات إعدادات التويك أو النظام الخاصة بنا إذا لزم الأمر، أو حذف الكل
+                NSString *fullPath = [folderPath stringByAppendingPathComponent:file];
+                [fileManager removeItemAtPath:fullPath error:nil];
+            }
+        }
     }
     
-    NSArray *docPaths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docDirectory = [docPaths objectAtIndex:0];
-    NSArray *docFiles = [fileManager contentsOfDirectoryAtPath:docDirectory error:&error];
-    for (NSString *file in docFiles) {
-        NSString *filePath = [docDirectory stringByAppendingPathComponent:file];
-        [fileManager removeItemAtPath:filePath error:nil];
-    }
-    
-    // 3. إغلاق التطبيق لتطبيق التغييرات (IP وموقع وجهاز جديد بالكامل)
+    // 3. إغلاق التطبيق فوراً وبدون أي انتظار
     exit(0);
 }
 
@@ -156,7 +161,8 @@ void executeMasterReset() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.resetBtn addGestureRecognizer:pan];
         
-        [self.resetBtn addTarget:self action:@selector(confirmAndReset) forControlEvents:UIControlEventTouchUpInside];
+        // تنفيذ عملية الحذف والخروج الفوري بدون إظهار أي قائمة تأكيد
+        [self.resetBtn addTarget:self action:@selector(executeInstantMasterReset) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.resetBtn];
     });
@@ -175,23 +181,6 @@ void executeMasterReset() {
     
     btn.center = CGPointMake(newX, newY);
     [gesture setTranslation:CGPointZero inView:btn.superview];
-}
-
-- (void)confirmAndReset {
-    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-    UIViewController *rootVC = keyWindow.rootViewController;
-    while (rootVC.presentedViewController) {
-        rootVC = rootVC.presentedViewController;
-    }
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"إعادة ضبط كاملة" message:@"سيتم تغيير الموقع، توليـد IP أمريكي جديد، تبديل معرفات الجهاز، حذف الكاش، وإعادة تشغيل التطبيق فوراً. هل تريد المتابعة؟" preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"نعم، نفذ الكل" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-        executeMasterReset();
-    }]];
-    
-    [rootVC presentViewController:alert animated:YES completion:nil];
 }
 
 @end
