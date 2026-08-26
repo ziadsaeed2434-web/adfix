@@ -5,11 +5,12 @@
 static NSString *currentIDFV = nil;
 static NSString *currentIDFA = nil;
 
-// دوال المساعدة لتوليد هويات جديدة نظيفة
+// دالة مساعدة لتوليد UUID متوافقة مع جميع بيئات التجميع (بدون أخطاء ARC)
 static NSString *generateNewUUID() {
     CFUUIDRef uuid = CFUUIDCreate(NULL);
     CFStringRef string = CFUUIDCreateString(NULL, uuid);
-    NSString *result = (__bridge_transfer NSString *)string;
+    NSString *result = [NSString stringWithString:(__bridge NSString *)string];
+    CFRelease(string);
     CFRelease(uuid);
     return result;
 }
@@ -42,7 +43,7 @@ static void clearAllIdentifiersAndFirebase() {
     [defaults synchronize];
 }
 
-// 3. خطاف الـ UDID / IDFV (يُعطي هوية جديدة للجهاز ثابتة طوال الجلسة)
+// 3. خطاف الـ UDID / IDFV
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     if (!currentIDFV) {
@@ -52,7 +53,7 @@ static void clearAllIdentifiersAndFirebase() {
 }
 %end
 
-// 4. خطاف الـ IDFA (معرف الإعلانات الأساسي - مرتب بطريقة تضمن قبول شبكات الإعلانات له)
+// 4. خطاف الـ IDFA (معرف الإعلانات)
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     if (!currentIDFA) {
@@ -61,12 +62,11 @@ static void clearAllIdentifiersAndFirebase() {
     return [[NSUUID alloc] initWithUUIDString:currentIDFA];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
-    // إجبار النظام على إرسال إشارة أن التتبع مسموح لكي لا تُرفض الإعلانات برمجياً
     return YES;
 }
 %end
 
-// 5. خطاف إدارة دورة حياة التطبيق (AppDelegate) - وهنا يتم التصفير بالتسلسل الصحيح عند الإغلاق
+// 5. خطاف إدارة دورة حياة التطبيق (AppDelegate) للتصفير عند الخروج
 %hook AppDelegate
 
 - (void)applicationDidEnterBackground:(UIApplication *)application {
@@ -76,7 +76,7 @@ static void clearAllIdentifiersAndFirebase() {
     currentIDFV = nil;
     currentIDFA = nil;
     
-    // ثانياً: مسح جذور وملفات الـ FID والفايربيز بالكامل
+    // ثانياً: مسح ملفات ومفاتيح الـ FID والفايربيز
     clearAllIdentifiersAndFirebase();
 }
 
