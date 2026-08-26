@@ -12,7 +12,6 @@ static NSString *generateNewUUID() {
     CFRelease(uuid);
     if (!string) return [[NSUUID UUID] UUIDString];
     
-    // نسخ النص بطريقة آمنة لا تسبب كراش
     NSString *result = [NSString stringWithString:(__bridge NSString *)string];
     CFRelease(string);
     return result;
@@ -22,8 +21,10 @@ static NSString *generateNewUUID() {
 static void clearAllIdentifiersAndFirebase() {
     @try {
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *libraryPath = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES)] firstObject];
-        if (!libraryPath) return;
+        // التصحيح هنا: استبدال القوس المربع بقوس دبريلي أو نقطة صحيحة
+        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+        if ([paths count] == 0) return;
+        NSString *libraryPath = paths[0];
         
         NSArray *pathsToClean = @[
             [libraryPath stringByAppendingPathComponent:@"Caches/com.google.firebase.installations"],
