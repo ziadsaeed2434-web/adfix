@@ -14,11 +14,13 @@ static void initializeNewSessionData() {
     sessionLatitude = 33.7490 + randomLatOffset;
     sessionLongitude = -84.3880 + randomLonOffset;
     
+    // نطاقات آبي أمريكية قوية ونظيفة جداً تابعة لمزودي خدمة محمول ومنزلي في أتلانتا لضمان ظهور الإعلانات
     NSArray *atlantaIPRanges = @[
-        [NSString stringWithFormat:@"104.28.%d.%d", arc4random_uniform(200) + 10, arc4random_uniform(254) + 1],
-        [NSString stringWithFormat:@"172.56.%d.%d", arc4random_uniform(50) + 10, arc4random_uniform(254) + 1], 
-        [NSString stringWithFormat:@"73.152.%d.%d", arc4random_uniform(100) + 10, arc4random_uniform(254) + 1],  
-        [NSString stringWithFormat:@"68.174.%d.%d", arc4random_uniform(100) + 10, arc4random_uniform(254) + 1]   
+        [NSString stringWithFormat:@"172.58.%d.%d", arc4random_uniform(100) + 10, arc4random_uniform(254) + 1], // T-Mobile Mobile IP
+        [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(100) + 10, arc4random_uniform(254) + 1], // T-Mobile Mobile IP
+        [NSString stringWithFormat:@"166.199.%d.%d", arc4random_uniform(50) + 10, arc4random_uniform(254) + 1], // Verizon Wireless GA
+        [NSString stringWithFormat:@"104.28.%d.%d", arc4random_uniform(150) + 20, arc4random_uniform(254) + 1], // Cloudflare / Residential CDN
+        [NSString stringWithFormat:@"73.220.%d.%d", arc4random_uniform(100) + 10, arc4random_uniform(254) + 1]  // Comcast Xfinity Atlanta
     ];
     
     int randomIndex = arc4random_uniform((int)[atlantaIPRanges count]);
@@ -35,7 +37,6 @@ static void initializeNewSessionData() {
     initializeNewSessionData();
 }
 
-// واجهة عرض سجل الطلبات
 @interface NetworkLogViewer : NSObject
 @end
 
@@ -81,7 +82,6 @@ static void initializeNewSessionData() {
 }
 @end
 
-// دالة تحريك الزر العائم في أي مكان بإصبعك
 @interface DraggableButtonHandler : NSObject
 @end
 
@@ -89,15 +89,11 @@ static void initializeNewSessionData() {
 + (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIButton *button = (UIButton *)gesture.view;
     CGPoint translation = [gesture translationInView:button.superview];
-    
-    CGPoint newCenter = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
-    button.center = newCenter;
-    
+    button.center = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
     [gesture setTranslation:CGPointZero inView:button.superview];
 }
 @end
 
-// تثبيت الزر العائم وجعله قابلاً للسحب وفوق كل الصفحات
 %hook UIWindow
 
 - (void)makeKeyAndVisible {
@@ -127,14 +123,12 @@ static void initializeNewSessionData() {
 
 %end
 
-// 1. تثبيت موقع أتلانتا الجغرافي
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
 }
 %end
 
-// 2. إجبار التطبيق على أخذ الآبي الجديد في كل جلسات الاتصال الحديثة (NSURLSession)
 %hook NSURLSessionConfiguration
 
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
@@ -143,7 +137,6 @@ static void initializeNewSessionData() {
         modifiedHeaders = [NSMutableDictionary dictionary];
     }
     
-    // حقن الآبي الجديد كمعيار رئيسي في ترويسات جلسة الشبكة
     [modifiedHeaders setObject:sessionAtlantaIP forKey:@"X-Forwarded-For"];
     [modifiedHeaders setObject:sessionAtlantaIP forKey:@"Client-IP"];
     [modifiedHeaders setObject:sessionAtlantaIP forKey:@"X-Real-IP"];
@@ -153,7 +146,6 @@ static void initializeNewSessionData() {
 
 %end
 
-// 3. اعتراض الطلبات الفردية وحقن الآبي وتتبعها في السجل
 %hook NSMutableURLRequest
 
 - (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
