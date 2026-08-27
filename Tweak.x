@@ -5,21 +5,6 @@
 #import <arpa/inet.h>
 #import <net/if.h>
 
-// نافذة مخصصة للزر تمرر اللمسات للتطبيق خلفها ولا تجمد التطبيق
-@interface PassThroughWindow : UIWindow
-@end
-@implementation PassThroughWindow
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *hitView = [super hitTest:point withEvent:event];
-    if (hitView == self || hitView == self.rootViewController.view) {
-        return nil; // السماح للمسات بالمرور للتطبيق إذا لم يتم الضغط على الزر مباشرة
-    }
-    return hitView;
-}
-@end
-
-static UIButton *floatingBtn = nil;
-static PassThroughWindow *floatingWindow = nil;
 static UIWindow *overlayWindow = nil;
 static UIViewController *panelViewController = nil;
 static UITextView *logTextView = nil;
@@ -109,7 +94,7 @@ void addNetworkLog(NSString *log) {
 
 %end
 
-// واجهة اللوحة العائمة
+// واجهة اللوحة العائمة لعرض البيانات
 @interface FloatingPanelVC : UIViewController
 @end
 
@@ -117,7 +102,7 @@ void addNetworkLog(NSString *log) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.9];
+    self.view.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.92];
     
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 40, self.view.frame.size.width - 40, 30)];
     titleLabel.text = @"معلومات الجهاز والشبكة والـ IP";
@@ -154,8 +139,8 @@ void addNetworkLog(NSString *log) {
     [self.view addSubview:logTextView];
     
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeBtn.frame = CGRectMake((self.view.frame.size.width - 100) / 2, self.view.frame.size.height - 65, 100, 35);
-    [closeBtn setTitle:@"إغلاق" forState:UIControlStateNormal];
+    closeBtn.frame = CGRectMake((self.view.frame.size.width - 120) / 2, self.view.frame.size.height - 65, 120, 38);
+    [closeBtn setTitle:@"إغلاق الصفحة" forState:UIControlStateNormal];
     [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     closeBtn.backgroundColor = [UIColor redColor];
     closeBtn.layer.cornerRadius = 8;
@@ -178,13 +163,13 @@ void addNetworkLog(NSString *log) {
 
 @end
 
-// مدير الزر العائم
-@interface FloatingButtonManager : NSObject
+// مدير إيماءة النقر المزدوج للشاشة
+@interface GestureManager : NSObject
 @end
 
-@implementation FloatingButtonManager
+@implementation GestureManager
 
-+ (void)openPanelWindow {
++ (void)handleDoubleTap:(UITapGestureRecognizer *)gesture {
     @try {
         if (!overlayWindow) {
             overlayWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
@@ -196,58 +181,23 @@ void addNetworkLog(NSString *log) {
     } @catch (NSException *e) {}
 }
 
-+ (void)btnTapped:(UIButton *)sender {
-    [self openPanelWindow];
-}
-
-+ (void)handlePan:(UIPanGestureRecognizer *)recognizer {
-    @try {
-        UIWindow *window = recognizer.view.window;
-        CGPoint translation = [recognizer translationInView:window];
-        CGPoint center = recognizer.view.center;
-        
-        recognizer.view.center = CGPointMake(center.x + translation.x, center.y + translation.y);
-        [recognizer setTranslation:CGPointZero inView:window];
-    } @catch (NSException *e) {}
-}
-
-+ (void)createFloatingButton {
++ (void)setupDoubleTapGesture {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (floatingWindow) return;
+        UIWindow *window = [UIApplication sharedApplication].keyWindow;
+        if (!window) return;
         
-        // استخدام PassThroughWindow لمنع حجب اللمسات عن التطبيق
-        floatingWindow = [[PassThroughWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        floatingWindow.windowLevel = UIWindowLevelStatusBar + 100;
-        floatingWindow.backgroundColor = [UIColor clearColor];
-        
-        UIViewController *vc = [[UIViewController alloc] init];
-        vc.view.backgroundColor = [UIColor clearColor];
-        floatingWindow.rootViewController = vc;
-        
-        floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        floatingBtn.frame = CGRectMake(30, 150, 55, 55);
-        [floatingBtn setTitle:@"أدوات" forState:UIControlStateNormal];
-        [floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        floatingBtn.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.85];
-        floatingBtn.layer.cornerRadius = 27.5;
-        floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        floatingBtn.layer.shadowRadius = 4.0;
-        floatingBtn.layer.shadowOpacity = 0.5;
-        
-        [floatingBtn addTarget:[FloatingButtonManager class] action:@selector(btnTapped:) forControlEvents:UIControlEventTouchUpInside];
-        
-        UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer alloc] initWithTarget:[FloatingButtonManager class] action:@selector(handlePan:)];
-        [floatingBtn addGestureRecognizer:panGes];
-        
-        [vc.view addSubview:floatingBtn];
-        [floatingWindow setHidden:NO];
+        UITapGestureRecognizer *doubleTap = [[UITapGestureRecognizer alloc] initWithTarget:[GestureManager class] action:@selector(handleDoubleTap:)];
+        doubleTap.numberOfTapsRequired = 2; // الضغط مرتين
+        doubleTap.cancelsTouchesInView = NO; // لكي لا يعيق لمسات التطبيق العادية
+        [window addGestureRecognizer:doubleTap];
     });
 }
 
 @end
 
+// تفعيل الإيماءة عند تشغيل التطبيق
 %ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [FloatingButtonManager createFloatingButton];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [GestureManager setupDoubleTapGesture];
     });
 }
