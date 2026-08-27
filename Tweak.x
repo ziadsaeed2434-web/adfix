@@ -59,7 +59,6 @@ static void rotateIdentityNow() {
         sessionLatitude = 33.7490 + latOffset;
         sessionLongitude = -84.3880 + lonOffset;
         
-        // تأثير اهتزاز خفيف مؤكد للضغط (Haptic Feedback)
         UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
         [generator impactOccurred];
     } @catch (NSException *e) {}
@@ -82,13 +81,11 @@ static void rotateIdentityNow() {
     UITouch *touch = [touches anyObject];
     CGPoint currentLocation = [touch locationInView:self.superview];
     
-    // تحريك الزر بإصبعك إلى أي مكان تختاره في الشاشة
     CGFloat deltaX = currentLocation.x - touchLocation.x;
     CGFloat deltaY = currentLocation.y - touchLocation.y;
     
     CGPoint newCenter = CGPointMake(self.center.x + deltaX, self.center.y + deltaY);
     
-    // منع خروج الزر عن حدود الشاشة
     CGSize screenSize = [UIScreen mainScreen].bounds.size;
     newCenter.x = MAX(self.frame.size.width/2, MIN(screenSize.width - self.frame.size.width/2, newCenter.x));
     newCenter.y = MAX(self.frame.size.height/2, MIN(screenSize.height - self.frame.size.height/2, newCenter.y));
@@ -98,7 +95,6 @@ static void rotateIdentityNow() {
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // إذا كانت لمسة خفيفة وليست سحباً، يتم تفعيل دالة تغيير الهوية
     UITouch *touch = [touches anyObject];
     CGPoint endLocation = [touch locationInView:self.superview];
     CGFloat distance = hypot(endLocation.x - touchLocation.x, endLocation.y - touchLocation.y);
@@ -108,25 +104,12 @@ static void rotateIdentityNow() {
 }
 @end
 
-// دالة إنشاء الزر وعرضه في نافذة مستقلة تعلو التطبيق
+// دالة إنشاء الزر وعرضه بطريقة آمنة ومتوافقة مع جميع الإصدارات
 static void createFloatingButtonWindow() {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (floatingWindow) return;
         
-        UIWindowScene *scene = nil;
-        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
-            if (s.activationState == UISceneActivationStateForegroundActive && [s isKindOfClass:[UIWindowScene class]]) {
-                scene = (UIWindowScene *)s;
-                break;
-            }
-        }
-        
-        if (scene) {
-            floatingWindow = [[UIWindow alloc] initWithWindowScene:scene];
-        } else {
-            floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        }
-        
+        floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
         floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
         floatingWindow.backgroundColor = [UIColor clearColor];
         floatingWindow.hidden = NO;
@@ -135,7 +118,6 @@ static void createFloatingButtonWindow() {
         vc.view.backgroundColor = [UIColor clearColor];
         floatingWindow.rootViewController = vc;
         
-        // إنشاء الزر العائم
         SpoofFloatingButton *spoofButton = [SpoofFloatingButton buttonWithType:UIButtonTypeCustom];
         spoofButton.frame = CGRectMake(30, 120, 120, 42);
         spoofButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.45 blue:0.95 alpha:0.9];
@@ -166,7 +148,7 @@ static void createFloatingButtonWindow() {
     }
 }
 
-// الخطافات والآبي والـ IDFA كما هي
+// الخطافات والآبي والـ IDFA
 %hook NSLocale
 + (NSArray<NSString *> *)preferredLanguages {
     return @[@"en-US", @"en"];
