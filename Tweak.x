@@ -6,13 +6,12 @@ static double sessionLatitude = 33.7490;
 static double sessionLongitude = -84.3880;
 static NSString *sessionTimeZoneName = @"America/New_York";
 
-// دالة جلب أو إنشاء الهوية المرتبطة بملف التفضيلات لضمان التجديد الفعلي
+// دوال توليد وجلب الهوية الحالية
 static NSString *getDynamicIP() {
     @try {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *savedIP = [defaults stringForKey:@"MySpoofedIPSession"];
         
-        // إذا لم يكن هناك آبي مخزن أو إذا أردنا توليد جديد
         if (!savedIP) {
             int third = arc4random_uniform(200) + 1;
             int fourth = arc4random_uniform(250) + 1;
@@ -42,20 +41,66 @@ static NSString *getDynamicIDFA() {
     }
 }
 
-// دالة تصفير الهوية عند فتح التطبيق من جديد (تُمسح القديمة لتتولد جديدة)
-%ctor {
-    @autoreleasepool {
-        // مسح الجلسة القديمة فور بدء العملية لضمان توليد آبي و IDFA جديدين كلياً
+// دالة تغيير الآبي والـ IDFA فوراً عند الضغط على الزر
+static void rotateIdentityNow() {
+    @try {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         [defaults removeObjectForKey:@"MySpoofedIPSession"];
         [defaults removeObjectForKey:@"MySpoofedIDFASession"];
         [defaults synchronize];
         
-        // إحداثيات عشوائية طفيفة في أتلانطا
+        // توليد هوية جديدة فورية
+        getDynamicIP();
+        getDynamicIDFA();
+        
+        // إحداثيات جديدة
         double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
         double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
         sessionLatitude = 33.7490 + latOffset;
         sessionLongitude = -84.3880 + lonOffset;
+    } @catch (NSException *e) {}
+}
+
+// إضافة زر عائم (Floating Button) يظهر فوق الشاشة لتغيير الهوية بضغطة زر
+%hook UIApplication
+- (void)applicationDidFinishLaunching:(UIApplication *)application {
+    %orig;
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+        if (!keyWindow) {
+            keyWindow = [[UIApplication sharedApplication] windows].firstObject;
+        }
+        
+        if (keyWindow) {
+            // إنشاء زر عائم صغير في الشاشة
+            UIButton *spoofButton = [UIButton buttonWithType:UIButtonTypeCustom];
+            spoofButton.frame = CGRectMake(20, 100, 110, 40);
+            spoofButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:0.85];
+            [spoofButton setTitle:@"🔄 تغيير الهوية" forState:UIControlStateNormal];
+            [spoofButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            spoofButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
+            spoofButton.layer.cornerRadius = 10;
+            spoofButton.layer.shadowColor = [[UIColor blackColor] CGColor];
+            spoofButton.layer.shadowOffset = CGSizeMake(0, 2);
+            spoofButton.layer.shadowOpacity = 0.5;
+            spoofButton.layer.shadowRadius = 3;
+            
+            // ربط الضغط على الزر بدالة تغيير الآبي والـ IDFA
+            [spoofButton addTarget:nil action:@selector(handleSpoofButtonTap) forControlEvents:UIControlEventTouchUpInside];
+            
+            [keyWindow addSubview:spoofButton];
+            [keyWindow bringSubviewToFront:spoofButton];
+        }
+    });
+}
+%end
+
+// تعريف الفعالية عند الضغط على الزر (بدون رسائل مزعجة، يتغير كل شي بصمت)
+%ctor {
+    @autoreleasepool {
+        // إضافة دالة الاستجابة للزر برمجياً
+        class_addMethod(objc_getMetaClass("NSObject"), @selector(handleSpoofButtonTap), (IMP)rotateIdentityNow, "v@:");
     }
 }
 
@@ -69,7 +114,7 @@ static NSString *getDynamicIDFA() {
 }
 %end
 
-// 2. إرجاع الـ IDFA الخاص بالجلسة
+// 2. إرجاع الـ IDFA المتجدد
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     @try {
@@ -99,7 +144,7 @@ static NSString *getDynamicIDFA() {
 }
 %end
 
-// 5. حقن الآبي المتجدد في إعدادات الشبكة
+// 5. حقن الآبي في إعدادات الشبكة
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
@@ -118,7 +163,7 @@ static NSString *getDynamicIDFA() {
 }
 %end
 
-// 6. حقن الآبي المتجدد في الطلبات الصادرة
+// 6. حقن الآبي في الطلبات الصادرة
 %hook NSMutableURLRequest
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
