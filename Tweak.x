@@ -1,95 +1,83 @@
 #import <UIKit/UIKit.h>
-#import <AdSupport/AdSupport.h>
-#import <objc/runtime.h>
+#import <CoreLocation/CoreLocation.h>
 
-// توليد معرف عشوائي جديد
-NSString *generateNewUUID() {
-    return [[NSUUID UUID] UUIDString];
+// إحداثيات هولندا - زوترمير (مطابقة تماماً للـ IP)
+static double sessionLatitude = 52.0575;
+static double sessionLongitude = 4.49306;
+static NSString *targetFixedIP = @"87.212.61.114"; 
+static NSString *sessionTimeZoneName = @"Europe/Amsterdam";
+
+// 1. مطابقة اللغة والمنطقة لتكون هولندية مطابقة للآبي (بدون المساس بمعرفات الجهاز)
+%hook NSLocale
++ (NSString *)preferredLanguages {
+    return @"nl-NL";
 }
-
-// دالة تغيير وحفظ الـ IDFA
-void changeIDFA() {
-    NSString *newIDFA = generateNewUUID();
-    [[NSUserDefaults standardUserDefaults] setObject:newIDFA forKey:@"CustomFakeIDFA_Btn"];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+- (NSString *)countryCode {
+    return @"NL";
 }
+%end
 
-// دالة تغيير وحفظ الـ UDID
-void changeUDID() {
-    NSString *newUDID = generateNewUUID();
-    [[NSUserDefaults standardUserDefaults] setObject:newUDID forKey:@"CustomFakeUDID_Btn"];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+// 2. مطابقة التوقيت الزمني لهولندا بأمان
+%hook NSTimeZone
++ (NSTimeZone *)localTimeZone {
+    if (sessionTimeZoneName) {
+        NSTimeZone *tz = [NSTimeZone timeZoneWithName:sessionTimeZoneName];
+        if (tz) return tz;
+    }
+    return %orig;
 }
-
-// هوك IDFA
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    NSString *fakeIDFA = [[NSUserDefaults standardUserDefaults] stringForKey:@"CustomFakeIDFA_Btn"];
-    if (fakeIDFA) {
-        return [[NSUUID alloc] initWithUUIDString:fakeIDFA];
++ (NSTimeZone *)systemTimeZone {
+    if (sessionTimeZoneName) {
+        NSTimeZone *tz = [NSTimeZone timeZoneWithName:sessionTimeZoneName];
+        if (tz) return tz;
     }
     return %orig;
 }
 %end
 
-// هوك UDID
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    NSString *fakeUDID = [[NSUserDefaults standardUserDefaults] stringForKey:@"CustomFakeUDID_Btn"];
-    if (fakeUDID) {
-        return [[NSUUID alloc] initWithUUIDString:fakeUDID];
-    }
-    return %orig;
+// 3. مطابقة موقع الـ GPS ليكون في هولندا (زوترمير)
+%hook CLLocation
+- (CLLocationCoordinate2D)coordinate {
+    return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
 }
 %end
 
-// إنشاء زرين صغيرين ومنفصلين في أعلى الشاشة
-%ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *window = [UIApplication sharedApplication].keyWindow;
-        if (!window) return;
-        
-        UIViewController *rootVC = window.rootViewController;
-        if (!rootVC) return;
-        
-        // زر تغيير UDID (في أعلى اليسار)
-        UIButton *btnUDID = [UIButton buttonWithType:UIButtonTypeCustom];
-        btnUDID.frame = CGRectMake(10, 45, 80, 25);
-        [btnUDID setTitle:@"تغيير UDID" forState:UIControlStateNormal];
-        [btnUDID setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        btnUDID.titleLabel.font = [UIFont boldSystemFontOfSize:10];
-        btnUDID.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.8];
-        btnUDID.layer.cornerRadius = 4;
-        btnUDID.layer.zPosition = 99999;
-        [btnUDID addTarget:nil action:@selector(actionChangeUDID) forControlEvents:UIControlEventTouchUpInside];
-        
-        // زر تغيير IDFA (بجانبه في الأعلى)
-        UIButton *btnIDFA = [UIButton buttonWithType:UIButtonTypeCustom];
-        btnIDFA.frame = CGRectMake(95, 45, 80, 25);
-        [btnIDFA setTitle:@"تغيير IDFA" forState:UIControlStateNormal];
-        [btnIDFA setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        btnIDFA.titleLabel.font = [UIFont boldSystemFontOfSize:10];
-        btnIDFA.backgroundColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.8];
-        btnIDFA.layer.cornerRadius = 4;
-        btnIDFA.layer.zPosition = 99999;
-        [btnIDFA addTarget:nil action:@selector(actionChangeIDFA) forControlEvents:UIControlEventTouchUpInside];
-        
-        [rootVC.view addSubview:btnUDID];
-        [rootVC.view addSubview:btnIDFA];
-        [rootVC.view bringSubviewToFront:btnUDID];
-        [rootVC.view bringSubviewToFront:btnIDFA];
-    });
+// 4. فرض إرسال الآبي الثابت في ترويسات الشبكة
+%hook NSURLSessionConfiguration
+- (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
+    NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy];
+    if (!modifiedHeaders) {
+        modifiedHeaders = [NSMutableDictionary dictionary];
+    }
+    if (targetFixedIP) {
+        [modifiedHeaders setObject:targetFixedIP forKey:@"X-Forwarded-For"];
+        [modifiedHeaders setObject:targetFixedIP forKey:@"Client-IP"];
+        [modifiedHeaders setObject:targetFixedIP forKey:@"X-Real-IP"];
+    }
+    %orig(modifiedHeaders);
+}
+%end
+
+// 5. حقن الآبي الثابت في كافة الطلبات الصادرة بدون كراش
+%hook NSMutableURLRequest
+
+- (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
+    if (field && targetFixedIP && 
+        ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
+         [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
+         [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame)) {
+        %orig(targetFixedIP, field);
+        return;
+    }
+    %orig(value, field);
 }
 
-// أهداف الأزرار
-@interface NSObject (ButtonActions)
-@end
-@implementation NSObject (ButtonActions)
-- (void)actionChangeUDID {
-    changeUDID();
+- (void)setURL:(NSURL *)url {
+    %orig;
+    if (url && url.absoluteString && targetFixedIP) {
+        [self setValue:targetFixedIP forHTTPHeaderField:@"X-Forwarded-For"];
+        [self setValue:targetFixedIP forHTTPHeaderField:@"Client-IP"];
+    }
 }
-- (void)actionChangeIDFA {
-    changeIDFA();
-}
-@end
 
+%end
