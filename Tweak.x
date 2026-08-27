@@ -1,10 +1,12 @@
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
 #import <AdSupport/ASIdentifierManager.h>
+#import <objc/runtime.h>
 
 static double sessionLatitude = 33.7490;
 static double sessionLongitude = -84.3880;
 static NSString *sessionTimeZoneName = @"America/New_York";
+static UIWindow *floatingWindow = nil;
 
 // دوال توليد وجلب الهوية الحالية
 static NSString *getDynamicIP() {
@@ -49,62 +51,122 @@ static void rotateIdentityNow() {
         [defaults removeObjectForKey:@"MySpoofedIDFASession"];
         [defaults synchronize];
         
-        // توليد هوية جديدة فورية
         getDynamicIP();
         getDynamicIDFA();
         
-        // إحداثيات جديدة
         double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
         double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
         sessionLatitude = 33.7490 + latOffset;
         sessionLongitude = -84.3880 + lonOffset;
+        
+        // تأثير اهتزاز خفيف مؤكد للضغط (Haptic Feedback)
+        UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+        [generator impactOccurred];
     } @catch (NSException *e) {}
 }
 
-// إضافة زر عائم (Floating Button) يظهر فوق الشاشة لتغيير الهوية بضغطة زر
-%hook UIApplication
-- (void)applicationDidFinishLaunching:(UIApplication *)application {
-    %orig;
+// كلاس خاص بالزر العائم القابل للسحب
+@interface SpoofFloatingButton : UIButton
+@end
+
+@implementation SpoofFloatingButton {
+    CGPoint touchLocation;
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = [touches anyObject];
+    touchLocation = [touch locationInView:self.superview];
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = [touches anyObject];
+    CGPoint currentLocation = [touch locationInView:self.superview];
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-        if (!keyWindow) {
-            keyWindow = [[UIApplication sharedApplication] windows].firstObject;
+    // تحريك الزر بإصبعك إلى أي مكان تختاره في الشاشة
+    CGFloat deltaX = currentLocation.x - touchLocation.x;
+    CGFloat deltaY = currentLocation.y - touchLocation.y;
+    
+    CGPoint newCenter = CGPointMake(self.center.x + deltaX, self.center.y + deltaY);
+    
+    // منع خروج الزر عن حدود الشاشة
+    CGSize screenSize = [UIScreen mainScreen].bounds.size;
+    newCenter.x = MAX(self.frame.size.width/2, MIN(screenSize.width - self.frame.size.width/2, newCenter.x));
+    newCenter.y = MAX(self.frame.size.height/2, MIN(screenSize.height - self.frame.size.height/2, newCenter.y));
+    
+    self.center = newCenter;
+    touchLocation = currentLocation;
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // إذا كانت لمسة خفيفة وليست سحباً، يتم تفعيل دالة تغيير الهوية
+    UITouch *touch = [touches anyObject];
+    CGPoint endLocation = [touch locationInView:self.superview];
+    CGFloat distance = hypot(endLocation.x - touchLocation.x, endLocation.y - touchLocation.y);
+    if (distance < 5.0) {
+        [self sendActionsForControlEvents:UIControlEventTouchUpInside];
+    }
+}
+@end
+
+// دالة إنشاء الزر وعرضه في نافذة مستقلة تعلو التطبيق
+static void createFloatingButtonWindow() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (floatingWindow) return;
+        
+        UIWindowScene *scene = nil;
+        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
+            if (s.activationState == UISceneActivationStateForegroundActive && [s isKindOfClass:[UIWindowScene class]]) {
+                scene = (UIWindowScene *)s;
+                break;
+            }
         }
         
-        if (keyWindow) {
-            // إنشاء زر عائم صغير في الشاشة
-            UIButton *spoofButton = [UIButton buttonWithType:UIButtonTypeCustom];
-            spoofButton.frame = CGRectMake(20, 100, 110, 40);
-            spoofButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:0.85];
-            [spoofButton setTitle:@"🔄 تغيير الهوية" forState:UIControlStateNormal];
-            [spoofButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            spoofButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-            spoofButton.layer.cornerRadius = 10;
-            spoofButton.layer.shadowColor = [[UIColor blackColor] CGColor];
-            spoofButton.layer.shadowOffset = CGSizeMake(0, 2);
-            spoofButton.layer.shadowOpacity = 0.5;
-            spoofButton.layer.shadowRadius = 3;
-            
-            // ربط الضغط على الزر بدالة تغيير الآبي والـ IDFA
-            [spoofButton addTarget:nil action:@selector(handleSpoofButtonTap) forControlEvents:UIControlEventTouchUpInside];
-            
-            [keyWindow addSubview:spoofButton];
-            [keyWindow bringSubviewToFront:spoofButton];
+        if (scene) {
+            floatingWindow = [[UIWindow alloc] initWithWindowScene:scene];
+        } else {
+            floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
         }
+        
+        floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
+        floatingWindow.backgroundColor = [UIColor clearColor];
+        floatingWindow.hidden = NO;
+        
+        UIViewController *vc = [[UIViewController alloc] init];
+        vc.view.backgroundColor = [UIColor clearColor];
+        floatingWindow.rootViewController = vc;
+        
+        // إنشاء الزر العائم
+        SpoofFloatingButton *spoofButton = [SpoofFloatingButton buttonWithType:UIButtonTypeCustom];
+        spoofButton.frame = CGRectMake(30, 120, 120, 42);
+        spoofButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.45 blue:0.95 alpha:0.9];
+        [spoofButton setTitle:@"🔄 تغيير الهوية" forState:UIControlStateNormal];
+        [spoofButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        spoofButton.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+        spoofButton.layer.cornerRadius = 21;
+        spoofButton.layer.borderWidth = 1.5;
+        spoofButton.layer.borderColor = [[UIColor whiteColor] CGColor];
+        spoofButton.layer.shadowColor = [[UIColor blackColor] CGColor];
+        spoofButton.layer.shadowOffset = CGSizeMake(0, 3);
+        spoofButton.layer.shadowOpacity = 0.4;
+        spoofButton.layer.shadowRadius = 4;
+        
+        [spoofButton addTarget:nil action:@selector(handleSpoofButtonTap) forControlEvents:UIControlEventTouchUpInside];
+        
+        [vc.view addSubview:spoofButton];
     });
 }
-%end
 
-// تعريف الفعالية عند الضغط على الزر (بدون رسائل مزعجة، يتغير كل شي بصمت)
 %ctor {
     @autoreleasepool {
-        // إضافة دالة الاستجابة للزر برمجياً
         class_addMethod(objc_getMetaClass("NSObject"), @selector(handleSpoofButtonTap), (IMP)rotateIdentityNow, "v@:");
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            createFloatingButtonWindow();
+        });
     }
 }
 
-// 1. تزييف لغة النظام
+// الخطافات والآبي والـ IDFA كما هي
 %hook NSLocale
 + (NSArray<NSString *> *)preferredLanguages {
     return @[@"en-US", @"en"];
@@ -114,7 +176,6 @@ static void rotateIdentityNow() {
 }
 %end
 
-// 2. إرجاع الـ IDFA المتجدد
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     @try {
@@ -127,7 +188,6 @@ static void rotateIdentityNow() {
 }
 %end
 
-// 3. مطابقة التوقيت الزمني
 %hook NSTimeZone
 + (NSTimeZone *)localTimeZone {
     return [NSTimeZone timeZoneWithName:sessionTimeZoneName] ?: %orig;
@@ -137,14 +197,12 @@ static void rotateIdentityNow() {
 }
 %end
 
-// 4. مطابقة الـ GPS
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
 }
 %end
 
-// 5. حقن الآبي في إعدادات الشبكة
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
@@ -163,7 +221,6 @@ static void rotateIdentityNow() {
 }
 %end
 
-// 6. حقن الآبي في الطلبات الصادرة
 %hook NSMutableURLRequest
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
