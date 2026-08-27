@@ -7,17 +7,7 @@ static double sessionLongitude = 4.49306;
 static NSString *targetFixedIP = @"87.212.61.114"; 
 static NSString *sessionTimeZoneName = @"Europe/Amsterdam";
 
-// 1. مطابقة اللغة والمنطقة لتكون هولندية مطابقة للآبي (بدون المساس بمعرفات الجهاز)
-%hook NSLocale
-+ (NSString *)preferredLanguages {
-    return @"nl-NL";
-}
-- (NSString *)countryCode {
-    return @"NL";
-}
-%end
-
-// 2. مطابقة التوقيت الزمني لهولندا بأمان
+// 1. مطابقة التوقيت الزمني لهولندا بأمان تام
 %hook NSTimeZone
 + (NSTimeZone *)localTimeZone {
     if (sessionTimeZoneName) {
@@ -35,14 +25,14 @@ static NSString *sessionTimeZoneName = @"Europe/Amsterdam";
 }
 %end
 
-// 3. مطابقة موقع الـ GPS ليكون في هولندا (زوترمير)
+// 2. مطابقة موقع الـ GPS ليكون في هولندا (زوترمير)
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
 }
 %end
 
-// 4. فرض إرسال الآبي الثابت في ترويسات الشبكة
+// 3. فرض إرسال الآبي الثابت في ترويسات الشبكة
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy];
@@ -58,7 +48,7 @@ static NSString *sessionTimeZoneName = @"Europe/Amsterdam";
 }
 %end
 
-// 5. حقن الآبي الثابت في كافة الطلبات الصادرة بدون كراش
+// 4. حقن الآبي الثابت في كافة الطلبات الصادرة بدون كراش
 %hook NSMutableURLRequest
 
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
