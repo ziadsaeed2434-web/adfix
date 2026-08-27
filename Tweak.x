@@ -1,148 +1,228 @@
 #import <UIKit/UIKit.h>
-#import <CoreLocation/CoreLocation.h>
-#import <AdSupport/ASIdentifierManager.h>
+#import <AdSupport/AdSupport.h>
+#import <objc/runtime.h>
+#import <ifaddrs.h>
+#import <arpa/inet.h>
+#import <net/if.h>
 
-static double sessionLatitude = 33.7490;
-static double sessionLongitude = -84.3880;
-static NSString *sessionUSIP = @"172.58.15.42";
-static NSString *sessionFakeIDFA = nil;
-static NSString *sessionFakeIDFV = nil;
-static NSString *sessionTimeZoneName = @"America/New_York";
+// متغيرات عامة للتحكم بالنافذة والزر
+static UIButton *floatingBtn = nil;
+static UIWindow *overlayWindow = nil;
+static UIViewController *panelViewController = nil;
+static UITextView *logTextView = nil;
+static NSMutableArray *networkLogs = nil;
+static NSString *currentSessionIP = @"جاري جلب الـ IP...";
+static UILabel *ipInfoLabel = nil;
 
-typedef struct {
-    NSString *ipRangeFormat;
-    double baseLatitude;
-    double baseLongitude;
-    NSString *timeZoneName;
-} IPLocationInfo;
-
-static void initializeSessionData() {
-    @try {
-        NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
-        int dynamicSegment = (int)((long)timeSeed % 90) + 10;
-        int randomSubSegment = arc4random_uniform(254) + 1;
-        
-        IPLocationInfo realCarrierPool[] = {
-            {@"172.58.%d.%d", 33.7490, -84.3880, @"America/New_York"},   // T-Mobile Atlanta
-            {@"172.59.%d.%d", 33.7490, -84.3880, @"America/New_York"},   // T-Mobile Atlanta
-            {@"166.199.%d.%d", 40.7128, -74.0060, @"America/New_York"},  // Verizon New York
-            {@"166.137.%d.%d", 40.7128, -74.0060, @"America/New_York"},  // Verizon New York
-            {@"144.160.%d.%d", 32.7767, -96.7970, @"America/Chicago"},   // AT&T Dallas
-            {@"32.220.%d.%d", 32.7767, -96.7970, @"America/Chicago"},    // AT&T Dallas
-            {@"73.140.%d.%d", 41.8781, -87.6298, @"America/Chicago"},    // Comcast Chicago
-            {@"24.180.%d.%d", 34.0522, -118.2437, @"America/Los_Angeles"} // Spectrum Los Angeles
-        };
-        
-        int poolSize = sizeof(realCarrierPool) / sizeof(IPLocationInfo);
-        int randomIndex = arc4random_uniform(poolSize);
-        IPLocationInfo selectedLocation = realCarrierPool[randomIndex];
-        
-        if (selectedLocation.ipRangeFormat) {
-            if ([selectedLocation.ipRangeFormat containsString:@"166."]) {
-                sessionUSIP = [NSString stringWithFormat:selectedLocation.ipRangeFormat, dynamicSegment % 50, randomSubSegment];
-            } else {
-                sessionUSIP = [NSString stringWithFormat:selectedLocation.ipRangeFormat, dynamicSegment, randomSubSegment];
+// دالة لجلب الـ IP المحلي (Local IP) المرتبط بالجلسة الحالية
+NSString *getLocalIPAddress() {
+    NSString *address = @"غير متوفر";
+    struct ifaddrs *interfaces = NULL;
+    struct ifaddrs *temp_addr = NULL;
+    int success = getifaddrs(&interfaces);
+    if (success == 0) {
+        temp_addr = interfaces;
+        while (temp_addr != NULL) {
+            if (temp_addr->ifa_addr->sa_family == AF_INET) {
+                // البحث عن الواجهة النشطة (Wi-Fi أو Cellular مثل en0 أو pdp_ip0)
+                if ([[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en0"] ||
+                    [[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"pdp_ip0"]) {
+                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
+                }
             }
+            temp_addr = temp_addr->ifa_next;
+        }
+    }
+    freeifaddrs(interfaces);
+    return address;
+}
+
+// دالة لجلب الـ Public IP الخارجي للجلسة عبر خدمة عامة سريعة
+void fetchPublicIP() {
+    NSURL *url = [NSURL URLWithString:@"https://api.ipify.org?format=text"];
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:[NSURLRequest requestWithURL:url] completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (data && !error) {
+            NSString *ipStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            if (ipStr.length > 0) {
+                currentSessionIP = [NSString stringWithFormat:@"Local: %@ | Public: %@", getLocalIPAddress(), ipStr];
+            } else {
+                currentSessionIP = [NSString stringWithFormat:@"Local: %@", getLocalIPAddress()];
+            }
+        } else {
+            currentSessionIP = [NSString stringWithFormat:@"Local: %@", getLocalIPAddress()];
         }
         
-        double randomLatOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-        double randomLonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-        
-        sessionLatitude = selectedLocation.baseLatitude + randomLatOffset;
-        sessionLongitude = selectedLocation.baseLongitude + randomLonOffset;
-        
-        if (selectedLocation.timeZoneName) {
-            sessionTimeZoneName = selectedLocation.timeZoneName;
-        }
-    } @catch (NSException *exception) {
-        // حماية ضد أي خطأ مفاجئ أثناء التهيئة
+        // تحديث الواجهة إن كانت مفتوحة
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (ipInfoLabel) {
+                ipInfoLabel.text = [NSString stringWithFormat:@"الجلسة IP: %@", currentSessionIP];
+            }
+        });
+    }];
+    [task resume];
+}
+
+// دالة لتسجيل أحداث الشبكة وعرضها
+void addNetworkLog(NSString *log) {
+    if (!networkLogs) networkLogs = [NSMutableArray array];
+    [networkLogs addObject:log];
+    if (networkLogs.count > 100) {
+        [networkLogs removeObjectAtIndex:0];
     }
     
-    sessionFakeIDFA = [[NSUUID UUID] UUIDString];
-    sessionFakeIDFV = [[NSUUID UUID] UUIDString];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (logTextView) {
+            logTextView.text = [networkLogs componentsJoinedByString:@"\n\n--------------------\n\n"];
+            [logTextView scrollRangeToVisible:NSMakeRange(logTextView.text.length, 0)];
+        }
+    });
 }
 
+// Intercept NSURLSession لجمع الطلبات الصادرة والواردة وتحديد الـ Host/IP المستهدف
+%hook NSURLSession
+
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    NSString *urlStr = request.URL.absoluteString;
+    NSString *method = request.HTTPMethod;
+    NSString *host = request.URL.host;
+    
+    NSString *log = [NSString stringWithFormat:@"[NET] %@\nHost/IP: %@\nURL: %@", method, host ? host : @"Unknown", urlStr];
+    addNetworkLog(log);
+    
+    return %orig;
+}
+
+%end
+
+// واجهة لوحة التحكم والتحركات
+@interface FloatingPanelVC : UIViewController
+@end
+
+@implementation FloatingPanelVC
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.9];
+    
+    // عنوان اللوحة
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 40, self.view.frame.size.width - 40, 30)];
+    titleLabel.text = @"معلومات الجهاز والشبكة والـ IP";
+    titleLabel.textColor = [UIColor whiteColor];
+    titleLabel.font = [UIColor boldSystemFontOfSize:16];
+    titleLabel.textAlignment = NSTextAlignmentCenter;
+    [self.view addSubview:titleLabel];
+    
+    // جلب IDFA و IDFV
+    NSString *idfa = [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
+    NSString *idfv = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
+    
+    // عرض المعرفات والـ IP
+    ipInfoLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 75, self.view.frame.size.width - 40, 50)];
+    ipInfoLabel.numberOfLines = 2;
+    ipInfoLabel.textColor = [UIColor cyanColor];
+    ipInfoLabel.font = [UIFont systemFontOfSize:11];
+    ipInfoLabel.text = [NSString stringWithFormat:@"الجلسة IP: %@", currentSessionIP];
+    [self.view addSubview:ipInfoLabel];
+    
+    UILabel *idsLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 130, self.view.frame.size.width - 40, 45)];
+    idsLabel.numberOfLines = 2;
+    idsLabel.textColor = [UIColor greenColor];
+    idsLabel.font = [UIFont systemFontOfSize:10];
+    idsLabel.text = [NSString stringWithFormat:@"IDFA: %@\nIDFV: %@", idfa, idfv];
+    [self.view addSubview:idsLabel];
+    
+    // صندوق النصوص لعرض سجلات الشبكة
+    logTextView = [[UITextView alloc] initWithFrame:CGRectMake(20, 185, self.view.frame.size.width - 40, self.view.frame.size.height - 260)];
+    logTextView.backgroundColor = [UIColor darkGrayColor];
+    logTextView.textColor = [UIColor whiteColor];
+    logTextView.editable = NO;
+    logTextView.font = [UIFont fontWithName:@"Courier" size:10];
+    if (networkLogs) {
+        logTextView.text = [networkLogs componentsJoinedByString:@"\n\n--------------------\n\n"];
+    }
+    [self.view addSubview:logTextView];
+    
+    // زر الإغلاق الآمن
+    UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    closeBtn.frame = CGRectMake((self.view.frame.size.width - 100) / 2, self.view.frame.size.height - 65, 100, 35);
+    [closeBtn setTitle:@"إغلاق" forState:UIControlStateNormal];
+    [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    closeBtn.backgroundColor = [UIColor redColor];
+    closeBtn.layer.cornerRadius = 8;
+    [closeBtn addTarget:self action:@selector(closePanel) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:closeBtn];
+    
+    // تحديث الـ IP فور فتح اللوحة
+    fetchPublicIP();
+}
+
+- (void)closePanel {
+    [overlayWindow setHidden:YES];
+    overlayWindow = nil;
+    panelViewController = nil;
+    logTextView = nil;
+    ipInfoLabel = nil;
+}
+
+@end
+
+// دالة فتح النافذة عند الضغط على الزر
+static void openPanelWindow() {
+    if (!overlayWindow) {
+        overlayWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        overlayWindow.windowLevel = UIWindowLevelAlert + 1;
+        panelViewController = [[FloatingPanelVC alloc] init];
+        overlayWindow.rootViewController = panelViewController;
+        [overlayWindow makeKeyAndVisible];
+    }
+}
+
+// دالة مساعدة لربط أحداث الزر العائم
+@interface FloatingButtonHelper : NSObject
+@end
+@implementation FloatingButtonHelper
++annels {
+}
++ (void)btnTapped:(UIButton *)sender {
+    openPanelWindow();
+}
++ (void)handlePan:(UIPanGestureRecognizer *)recognizer {
+    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+    CGPoint translation = [recognizer translationInView:keyWindow];
+    CGPoint center = recognizer.view.center;
+    
+    recognizer.view.center = CGPointMake(center.x + translation.x, center.y + translation.y);
+    [recognizer setTranslation:CGPointZero inView:keyWindow];
+}
+@end
+
+// إنشاء وزرع الزر العائم عند بدء تشغيل التطبيق
 %ctor {
-    initializeSessionData();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIWindow *window = [UIApplication sharedApplication].keyWindow;
+        if (!window) return;
+        
+        if (!floatingBtn) {
+            floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+            floatingBtn.frame = CGRectMake(30, 120, 55, 55);
+            [floatingBtn setTitle:@"أدوات" forState:UIControlStateNormal];
+            [floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            floatingBtn.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.85];
+            floatingBtn.layer.cornerRadius = 27.5;
+            floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
+            floatingBtn.layer.shadowRadius = 4.0;
+            floatingBtn.layer.shadowOpacity = 0.5;
+            
+            // ربط الضغط لفتح النافذة
+            [floatingBtn addTarget:[FloatingButtonHelper class] action:@selector(btnTapped:) forControlEvents:UIControlEventTouchUpInside];
+            
+            // إضافة إيماءة التحريك (Drag) ليصبح الزر قابلاً للسحب في أي مكان بالشاشة دون أن يختفي
+            UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer alloc] initWithTarget:[FloatingButtonHelper class] action:@selector(handlePan:)];
+            [floatingBtn addGestureRecognizer:panGes];
+            
+            // إضافة الزر على مستوى النظام الرئيسي (KeyWindow) ليبقى ثابتاً ولا يختفي عند التنقل بين صفحات التطبيق
+            [window addSubview:floatingBtn];
+            [window bringSubviewToFront:floatingBtn];
+        }
+    });
 }
-
-// 1. تزييف الـ IDFA بأمان
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    if (sessionFakeIDFA) {
-        return [[NSUUID alloc] initWithUUIDString:sessionFakeIDFA];
-    }
-    return %orig;
-}
-%end
-
-// 2. تزييف معرف الجهاز بأمان
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    if (sessionFakeIDFV) {
-        return [[NSUUID alloc] initWithUUIDString:sessionFakeIDFV];
-    }
-    return %orig;
-}
-%end
-
-// 3. مطابقة التوقيت الزمني بأمان
-%hook NSTimeZone
-+ (NSTimeZone *)localTimeZone {
-    if (sessionTimeZoneName) {
-        NSTimeZone *tz = [NSTimeZone timeZoneWithName:sessionTimeZoneName];
-        if (tz) return tz;
-    }
-    return %orig;
-}
-+ (NSTimeZone *)systemTimeZone {
-    if (sessionTimeZoneName) {
-        NSTimeZone *tz = [NSTimeZone timeZoneWithName:sessionTimeZoneName];
-        if (tz) return tz;
-    }
-    return %orig;
-}
-%end
-
-// 4. مطابقة موقع الـ GPS
-%hook CLLocation
-- (CLLocationCoordinate2D)coordinate {
-    return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
-}
-%end
-
-// 5. حقن الآبي في ترويسات الشبكة والطلبات الصادرة بدون كراش
-%hook NSURLSessionConfiguration
-- (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
-    NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy];
-    if (!modifiedHeaders) {
-        modifiedHeaders = [NSMutableDictionary dictionary];
-    }
-    if (sessionUSIP) {
-        [modifiedHeaders setObject:sessionUSIP forKey:@"X-Forwarded-For"];
-        [modifiedHeaders setObject:sessionUSIP forKey:@"Client-IP"];
-        [modifiedHeaders setObject:sessionUSIP forKey:@"X-Real-IP"];
-    }
-    %orig(modifiedHeaders);
-}
-%end
-
-%hook NSMutableURLRequest
-- (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
-    if (field && sessionUSIP && 
-        ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
-         [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
-         [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame)) {
-        %orig(sessionUSIP, field);
-        return;
-    }
-    %orig(value, field);
-}
-
-- (void)setURL:(NSURL *)url {
-    %orig;
-    if (url && url.absoluteString && sessionUSIP) {
-        [self setValue:sessionUSIP forHTTPHeaderField:@"X-Forwarded-For"];
-    }
-}
-%end
