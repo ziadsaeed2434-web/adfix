@@ -134,7 +134,7 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
 
 // 6. تغطية وحقن الآبي في اتصالات NSURLConnection القديمة
 %hook NSURLConnection
-- initWithRequest:(NSURLRequest *)request delegate:(id)delegate startImmediately:(BOOL)startImmediately {
+- (id)initWithRequest:(NSURLRequest *)request delegate:(id)delegate startImmediately:(BOOL)startImmediately {
     @try {
         if ([request isKindOfClass:[NSMutableURLRequest class]]) {
             NSString *fakeIP = getResidentialFakeIP();
