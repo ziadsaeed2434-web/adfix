@@ -5,8 +5,21 @@
 #import <arpa/inet.h>
 #import <net/if.h>
 
+// نافذة مخصصة للزر تمرر اللمسات للتطبيق خلفها ولا تجمد التطبيق
+@interface PassThroughWindow : UIWindow
+@end
+@implementation PassThroughWindow
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hitView = [super hitTest:point withEvent:event];
+    if (hitView == self || hitView == self.rootViewController.view) {
+        return nil; // السماح للمسات بالمرور للتطبيق إذا لم يتم الضغط على الزر مباشرة
+    }
+    return hitView;
+}
+@end
+
 static UIButton *floatingBtn = nil;
-static UIWindow *floatingWindow = nil;
+static PassThroughWindow *floatingWindow = nil;
 static UIWindow *overlayWindow = nil;
 static UIViewController *panelViewController = nil;
 static UITextView *logTextView = nil;
@@ -165,7 +178,7 @@ void addNetworkLog(NSString *log) {
 
 @end
 
-// مدير الزر العائم لمنع الاختفاء
+// مدير الزر العائم
 @interface FloatingButtonManager : NSObject
 @end
 
@@ -175,7 +188,7 @@ void addNetworkLog(NSString *log) {
     @try {
         if (!overlayWindow) {
             overlayWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-            overlayWindow.windowLevel = UIWindowLevelAlert + 10000;
+            overlayWindow.windowLevel = UIWindowLevelAlert + 1000;
             panelViewController = [[FloatingPanelVC alloc] init];
             overlayWindow.rootViewController = panelViewController;
             [overlayWindow makeKeyAndVisible];
@@ -202,12 +215,10 @@ void addNetworkLog(NSString *log) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (floatingWindow) return;
         
-        // إنشاء نافذة خاصة مستقلة تماماً ومستوى عالٍ جداً تمنع أي نافذة تابعة من تغطيتها أو إخفائها
-        floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        floatingWindow.windowLevel = UIWindowLevelAlert + 9999;
+        // استخدام PassThroughWindow لمنع حجب اللمسات عن التطبيق
+        floatingWindow = [[PassThroughWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        floatingWindow.windowLevel = UIWindowLevelStatusBar + 100;
         floatingWindow.backgroundColor = [UIColor clearColor];
-        // السماح بلمس الزر فقط وتمرير باقي اللمسات للتطبيق خلفه
-        floatingWindow.userInteractionEnabled = YES;
         
         UIViewController *vc = [[UIViewController alloc] init];
         vc.view.backgroundColor = [UIColor clearColor];
@@ -225,27 +236,18 @@ void addNetworkLog(NSString *log) {
         
         [floatingBtn addTarget:[FloatingButtonManager class] action:@selector(btnTapped:) forControlEvents:UIControlEventTouchUpInside];
         
-        UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer alloc] initWithTarget:[FloatingButtonManager class] action:@selector(handlePan:)];
+        UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer, UIPanGestureRecognizer] alloc] initWithTarget:[FloatingButtonManager class] action:@selector(handlePan:)];
         [floatingBtn addGestureRecognizer:panGes];
         
         [vc.view addSubview:floatingBtn];
-        [floatingWindow makeKeyAndVisible];
+        [floatingWindow setHidden:NO];
     });
 }
 
 @end
 
-// مراقبة دورية بسيطة لضمان بقاء نافذة الزر ظاهرة في المقدمة مهما فتح التطبيق نوافذ جديدة
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [FloatingButtonManager createFloatingButton];
-        
-        // فحص دوري كل ثانيتين لإعادة إظهار الزر في المقدمة إن حاول التطبيق حجبه
-        [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
-            if (floatingWindow && floatingWindow.isHidden) {
-                [floatingWindow setHidden:NO];
-                [floatingWindow makeKeyAndVisible];
-            }
-        }];
     });
 }
