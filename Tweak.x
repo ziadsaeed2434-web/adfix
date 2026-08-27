@@ -1,26 +1,26 @@
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
 
-static double sessionLatitude = 33.7490;
-static double sessionLongitude = -84.3880;
-static NSString *dynamicSessionIP = @"172.58.15.42";
+static double sessionLatitude = 33.7550;
+static double sessionLongitude = -84.3900;
+static NSString *dynamicSessionIP = @"144.160.12.88";
 static NSString *sessionTimeZoneName = @"America/New_York";
 
-static void generateT_MobileIP() {
+static void generateATT_IP() {
     @try {
-        int thirdSegment = arc4random_uniform(50) + 50; // نطاقات T-Mobile الحقيقية
+        int thirdSegment = arc4random_uniform(100) + 1; // نطاقات AT&T الحقيقية
         int fourthSegment = arc4random_uniform(254) + 1;
-        dynamicSessionIP = [NSString stringWithFormat:@"172.58.%d.%d", thirdSegment, fourthSegment];
+        dynamicSessionIP = [NSString stringWithFormat:@"144.160.%d.%d", thirdSegment, fourthSegment];
         
         double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
         double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-        sessionLatitude = 33.7490 + latOffset;
-        sessionLongitude = -84.3880 + lonOffset;
+        sessionLatitude = 33.7550 + latOffset;
+        sessionLongitude = -84.3900 + lonOffset;
     } @catch (NSException *e) {}
 }
 
 %ctor {
-    generateT_MobileIP();
+    generateATT_IP();
 }
 
 %hook NSTimeZone
