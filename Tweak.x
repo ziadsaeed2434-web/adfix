@@ -1,13 +1,10 @@
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
 #import <AdSupport/ASIdentifierManager.h>
-#import <ifaddrs.h>
-#import <arpa/inet.h>
-#import <net/if.h>
 
-static double sessionLatitude = 0.0;
-static double sessionLongitude = 0.0;
-static NSString *sessionUSIP = nil;
+static double sessionLatitude = 33.7490;
+static double sessionLongitude = -84.3880;
+static NSString *sessionUSIP = @"172.58.15.42";
 static NSString *sessionFakeIDFA = nil;
 static NSString *sessionFakeIDFV = nil;
 static NSString *sessionTimeZoneName = @"America/New_York";
@@ -19,81 +16,91 @@ typedef struct {
     NSString *timeZoneName;
 } IPLocationInfo;
 
-static NSString *generateUSDeviceUUID() {
-    return [[NSUUID UUID] UUIDString];
-}
-
-static void initializeNewSessionData() {
-    NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
-    int dynamicSegment = (int)((long)timeSeed % 90) + 10;
-    int randomSubSegment = arc4random_uniform(254) + 1;
-    
-    IPLocationInfo realCarrierPool[] = {
-        {@"172.58.%d.%d", 33.7490, -84.3880, @"America/New_York"},   // T-Mobile Atlanta
-        {@"172.59.%d.%d", 33.7490, -84.3880, @"America/New_York"},   // T-Mobile Atlanta
-        {@"166.199.%d.%d", 40.7128, -74.0060, @"America/New_York"},  // Verizon New York
-        {@"166.137.%d.%d", 40.7128, -74.0060, @"America/New_York"},  // Verizon New York
-        {@"144.160.%d.%d", 32.7767, -96.7970, @"America/Chicago"},   // AT&T Dallas
-        {@"32.220.%d.%d", 32.7767, -96.7970, @"America/Chicago"},    // AT&T Dallas
-        {@"73.140.%d.%d", 41.8781, -87.6298, @"America/Chicago"},    // Comcast Chicago
-        {@"24.180.%d.%d", 34.0522, -118.2437, @"America/Los_Angeles"} // Spectrum Los Angeles
-    };
-    
-    int poolSize = sizeof(realCarrierPool) / sizeof(IPLocationInfo);
-    int randomIndex = arc4random_uniform(poolSize);
-    IPLocationInfo selectedLocation = realCarrierPool[randomIndex];
-    
-    if ([selectedLocation.ipRangeFormat containsString:@"166."]) {
-        sessionUSIP = [NSString stringWithFormat:selectedLocation.ipRangeFormat, dynamicSegment % 50, randomSubSegment];
-    } else {
-        sessionUSIP = [NSString stringWithFormat:selectedLocation.ipRangeFormat, dynamicSegment, randomSubSegment];
+static void initializeSessionData() {
+    @try {
+        NSTimeInterval timeSeed = [[NSDate date] timeIntervalSince1970] * 1000;
+        int dynamicSegment = (int)((long)timeSeed % 90) + 10;
+        int randomSubSegment = arc4random_uniform(254) + 1;
+        
+        IPLocationInfo realCarrierPool[] = {
+            {@"172.58.%d.%d", 33.7490, -84.3880, @"America/New_York"},   // T-Mobile Atlanta
+            {@"172.59.%d.%d", 33.7490, -84.3880, @"America/New_York"},   // T-Mobile Atlanta
+            {@"166.199.%d.%d", 40.7128, -74.0060, @"America/New_York"},  // Verizon New York
+            {@"166.137.%d.%d", 40.7128, -74.0060, @"America/New_York"},  // Verizon New York
+            {@"144.160.%d.%d", 32.7767, -96.7970, @"America/Chicago"},   // AT&T Dallas
+            {@"32.220.%d.%d", 32.7767, -96.7970, @"America/Chicago"},    // AT&T Dallas
+            {@"73.140.%d.%d", 41.8781, -87.6298, @"America/Chicago"},    // Comcast Chicago
+            {@"24.180.%d.%d", 34.0522, -118.2437, @"America/Los_Angeles"} // Spectrum Los Angeles
+        };
+        
+        int poolSize = sizeof(realCarrierPool) / sizeof(IPLocationInfo);
+        int randomIndex = arc4random_uniform(poolSize);
+        IPLocationInfo selectedLocation = realCarrierPool[randomIndex];
+        
+        if (selectedLocation.ipRangeFormat) {
+            if ([selectedLocation.ipRangeFormat containsString:@"166."]) {
+                sessionUSIP = [NSString stringWithFormat:selectedLocation.ipRangeFormat, dynamicSegment % 50, randomSubSegment];
+            } else {
+                sessionUSIP = [NSString stringWithFormat:selectedLocation.ipRangeFormat, dynamicSegment, randomSubSegment];
+            }
+        }
+        
+        double randomLatOffset = ((arc4random_uniform(200) - 100) / 10000.0);
+        double randomLonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
+        
+        sessionLatitude = selectedLocation.baseLatitude + randomLatOffset;
+        sessionLongitude = selectedLocation.baseLongitude + randomLonOffset;
+        
+        if (selectedLocation.timeZoneName) {
+            sessionTimeZoneName = selectedLocation.timeZoneName;
+        }
+    } @catch (NSException *exception) {
+        // حماية ضد أي خطأ مفاجئ أثناء التهيئة
     }
     
-    double randomLatOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-    double randomLonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-    
-    sessionLatitude = selectedLocation.baseLatitude + randomLatOffset;
-    sessionLongitude = selectedLocation.baseLongitude + randomLonOffset;
-    sessionTimeZoneName = selectedLocation.timeZoneName;
-    
-    sessionFakeIDFA = generateUSDeviceUUID();
-    sessionFakeIDFV = generateUSDeviceUUID();
+    sessionFakeIDFA = [[NSUUID UUID] UUIDString];
+    sessionFakeIDFV = [[NSUUID UUID] UUIDString];
 }
 
 %ctor {
-    initializeNewSessionData();
+    initializeSessionData();
 }
 
-// 1. تزييف معرفات الإعلانات والجهاز
+// 1. تزييف الـ IDFA بأمان
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    return [[NSUUID alloc] initWithUUIDString:sessionFakeIDFA];
+    if (sessionFakeIDFA) {
+        return [[NSUUID alloc] initWithUUIDString:sessionFakeIDFA];
+    }
+    return %orig;
 }
 %end
 
+// 2. تزييف معرف الجهاز بأمان
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
-    return [[NSUUID alloc] initWithUUIDString:sessionFakeIDFV];
+    if (sessionFakeIDFV) {
+        return [[NSUUID alloc] initWithUUIDString:sessionFakeIDFV];
+    }
+    return %orig;
 }
 %end
 
-// 2. فرض اللغة والمنطقة الأمريكية
-%hook NSLocale
-+ (NSString *)preferredLanguages {
-    return @"en-US";
-}
-- (NSString *)countryCode {
-    return @"US";
-}
-%end
-
-// 3. مطابقة التوقيت الزمني للموقع والآبي
+// 3. مطابقة التوقيت الزمني بأمان
 %hook NSTimeZone
 + (NSTimeZone *)localTimeZone {
-    return [NSTimeZone timeZoneWithName:sessionTimeZoneName];
+    if (sessionTimeZoneName) {
+        NSTimeZone *tz = [NSTimeZone timeZoneWithName:sessionTimeZoneName];
+        if (tz) return tz;
+    }
+    return %orig;
 }
 + (NSTimeZone *)systemTimeZone {
-    return [NSTimeZone timeZoneWithName:sessionTimeZoneName];
+    if (sessionTimeZoneName) {
+        NSTimeZone *tz = [NSTimeZone timeZoneWithName:sessionTimeZoneName];
+        if (tz) return tz;
+    }
+    return %orig;
 }
 %end
 
@@ -104,25 +111,28 @@ static void initializeNewSessionData() {
 }
 %end
 
-// 5. تأمين الطلبات الصادرة وإعدادات الشبكة
+// 5. حقن الآبي في ترويسات الشبكة والطلبات الصادرة بدون كراش
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy];
     if (!modifiedHeaders) {
         modifiedHeaders = [NSMutableDictionary dictionary];
     }
-    [modifiedHeaders setObject:sessionUSIP forKey:@"X-Forwarded-For"];
-    [modifiedHeaders setObject:sessionUSIP forKey:@"Client-IP"];
-    [modifiedHeaders setObject:sessionUSIP forKey:@"X-Real-IP"];
+    if (sessionUSIP) {
+        [modifiedHeaders setObject:sessionUSIP forKey:@"X-Forwarded-For"];
+        [modifiedHeaders setObject:sessionUSIP forKey:@"Client-IP"];
+        [modifiedHeaders setObject:sessionUSIP forKey:@"X-Real-IP"];
+    }
     %orig(modifiedHeaders);
 }
 %end
 
 %hook NSMutableURLRequest
-- (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
-        [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
-        [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame) {
+- (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
+    if (field && sessionUSIP && 
+        ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
+         [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
+         [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame)) {
         %orig(sessionUSIP, field);
         return;
     }
@@ -131,9 +141,8 @@ static void initializeNewSessionData() {
 
 - (void)setURL:(NSURL *)url {
     %orig;
-    if (url && url.absoluteString) {
+    if (url && url.absoluteString && sessionUSIP) {
         [self setValue:sessionUSIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [self setValue:sessionUSIP forHTTPHeaderField:@"Client-IP"];
     }
 }
 %end
