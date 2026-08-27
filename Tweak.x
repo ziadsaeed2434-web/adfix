@@ -236,7 +236,7 @@ void addNetworkLog(NSString *log) {
         
         [floatingBtn addTarget:[FloatingButtonManager class] action:@selector(btnTapped:) forControlEvents:UIControlEventTouchUpInside];
         
-        UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer, UIPanGestureRecognizer] alloc] initWithTarget:[FloatingButtonManager class] action:@selector(handlePan:)];
+        UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer alloc] initWithTarget:[FloatingButtonManager class] action:@selector(handlePan:)];
         [floatingBtn addGestureRecognizer:panGes];
         
         [vc.view addSubview:floatingBtn];
