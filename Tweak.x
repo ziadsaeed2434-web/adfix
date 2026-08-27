@@ -1,200 +1,58 @@
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
 #import <AdSupport/ASIdentifierManager.h>
-#import <objc/runtime.h>
 
-static double sessionLatitude = 33.7490;
-static double sessionLongitude = -84.3880;
-static NSString *sessionTimeZoneName = @"America/New_York";
-static UIWindow *floatingWindow = nil;
-
-// دوال توليد وجلب الهوية الحالية
-static NSString *getDynamicIP() {
-    @try {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSString *savedIP = [defaults stringForKey:@"MySpoofedIPSession"];
-        
-        if (!savedIP) {
-            int third = arc4random_uniform(200) + 1;
-            int fourth = arc4random_uniform(250) + 1;
-            savedIP = [NSString stringWithFormat:@"50.200.%d.%d", third, fourth];
-            [defaults setObject:savedIP forKey:@"MySpoofedIPSession"];
-            [defaults synchronize];
-        }
-        return savedIP;
-    } @catch (NSException *e) {
-        return @"50.200.50.50";
-    }
+// 1. توليد آبي أمريكي عشوائي جديد كلياً وطائر مع كل طلب
+static NSString *getRandomIP() {
+    int third = arc4random_uniform(200) + 1;
+    int fourth = arc4random_uniform(250) + 1;
+    return [NSString stringWithFormat:@"50.200.%d.%d", third, fourth];
 }
 
-static NSString *getDynamicIDFA() {
-    @try {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSString *savedIDFA = [defaults stringForKey:@"MySpoofedIDFASession"];
-        
-        if (!savedIDFA) {
-            savedIDFA = [[NSUUID UUID] UUIDString];
-            [defaults setObject:savedIDFA forKey:@"MySpoofedIDFASession"];
-            [defaults synchronize];
-        }
-        return savedIDFA;
-    } @catch (NSException *e) {
-        return [[NSUUID UUID] UUIDString];
-    }
+// 2. توليد IDFA جديد كلياً وطائر عند الطلب
+static NSString *getRandomIDFA() {
+    return [[NSUUID UUID] UUIDString];
 }
 
-// دالة تغيير الآبي والـ IDFA فوراً عند الضغط على الزر
-static void rotateIdentityNow() {
-    @try {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        [defaults removeObjectForKey:@"MySpoofedIPSession"];
-        [defaults removeObjectForKey:@"MySpoofedIDFASession"];
-        [defaults synchronize];
-        
-        getDynamicIP();
-        getDynamicIDFA();
-        
-        double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-        double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-        sessionLatitude = 33.7490 + latOffset;
-        sessionLongitude = -84.3880 + lonOffset;
-        
-        UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-        [generator impactOccurred];
-    } @catch (NSException *e) {}
+// 3. إحداثيات عشوائية طفيفة ومتحركة مع كل طلب لضمان توافق الموقع الجغرافي مع الآبي
+static CLLocationCoordinate2D getRandomCoordinate() {
+    double baseLat = 33.7490;
+    double baseLon = -84.3880;
+    double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
+    double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
+    return CLLocationCoordinate2DMake(baseLat + latOffset, baseLon + lonOffset);
 }
 
-// كلاس خاص بالزر العائم القابل للسحب
-@interface SpoofFloatingButton : UIButton
-@end
-
-@implementation SpoofFloatingButton {
-    CGPoint touchLocation;
-}
-
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = [touches anyObject];
-    touchLocation = [touch locationInView:self.superview];
-}
-
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = [touches anyObject];
-    CGPoint currentLocation = [touch locationInView:self.superview];
-    
-    CGFloat deltaX = currentLocation.x - touchLocation.x;
-    CGFloat deltaY = currentLocation.y - touchLocation.y;
-    
-    CGPoint newCenter = CGPointMake(self.center.x + deltaX, self.center.y + deltaY);
-    
-    CGSize screenSize = [UIScreen mainScreen].bounds.size;
-    newCenter.x = MAX(self.frame.size.width/2, MIN(screenSize.width - self.frame.size.width/2, newCenter.x));
-    newCenter.y = MAX(self.frame.size.height/2, MIN(screenSize.height - self.frame.size.height/2, newCenter.y));
-    
-    self.center = newCenter;
-    touchLocation = currentLocation;
-}
-
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = [touches anyObject];
-    CGPoint endLocation = [touch locationInView:self.superview];
-    CGFloat distance = hypot(endLocation.x - touchLocation.x, endLocation.y - touchLocation.y);
-    if (distance < 5.0) {
-        [self sendActionsForControlEvents:UIControlEventTouchUpInside];
-    }
-}
-@end
-
-// دالة إنشاء الزر وعرضه بطريقة آمنة ومتوافقة مع جميع الإصدارات
-static void createFloatingButtonWindow() {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (floatingWindow) return;
-        
-        floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
-        floatingWindow.backgroundColor = [UIColor clearColor];
-        floatingWindow.hidden = NO;
-        
-        UIViewController *vc = [[UIViewController alloc] init];
-        vc.view.backgroundColor = [UIColor clearColor];
-        floatingWindow.rootViewController = vc;
-        
-        SpoofFloatingButton *spoofButton = [SpoofFloatingButton buttonWithType:UIButtonTypeCustom];
-        spoofButton.frame = CGRectMake(30, 120, 120, 42);
-        spoofButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.45 blue:0.95 alpha:0.9];
-        [spoofButton setTitle:@"🔄 تغيير الهوية" forState:UIControlStateNormal];
-        [spoofButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        spoofButton.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-        spoofButton.layer.cornerRadius = 21;
-        spoofButton.layer.borderWidth = 1.5;
-        spoofButton.layer.borderColor = [[UIColor whiteColor] CGColor];
-        spoofButton.layer.shadowColor = [[UIColor blackColor] CGColor];
-        spoofButton.layer.shadowOffset = CGSizeMake(0, 3);
-        spoofButton.layer.shadowOpacity = 0.4;
-        spoofButton.layer.shadowRadius = 4;
-        
-        [spoofButton addTarget:nil action:@selector(handleSpoofButtonTap) forControlEvents:UIControlEventTouchUpInside];
-        
-        [vc.view addSubview:spoofButton];
-    });
-}
-
-%ctor {
-    @autoreleasepool {
-        class_addMethod(objc_getMetaClass("NSObject"), @selector(handleSpoofButtonTap), (IMP)rotateIdentityNow, "v@:");
-        
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            createFloatingButtonWindow();
-        });
-    }
-}
-
-// الخطافات والآبي والـ IDFA
-%hook NSLocale
-+ (NSArray<NSString *> *)preferredLanguages {
-    return @[@"en-US", @"en"];
-}
-- (NSString *)countryCode {
-    return @"US";
-}
-%end
-
+// تزييف الـ IDFA فوراً عند طلبه
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     @try {
-        NSString *activeIDFA = getDynamicIDFA();
-        if (activeIDFA) {
-            return [[NSUUID alloc] initWithUUIDString:activeIDFA];
+        NSString *newIDFA = getRandomIDFA();
+        if (newIDFA) {
+            return [[NSUUID alloc] initWithUUIDString:newIDFA];
         }
     } @catch (NSException *e) {}
     return %orig;
 }
 %end
 
-%hook NSTimeZone
-+ (NSTimeZone *)localTimeZone {
-    return [NSTimeZone timeZoneWithName:sessionTimeZoneName] ?: %orig;
-}
-+ (NSTimeZone *)systemTimeZone {
-    return [NSTimeZone timeZoneWithName:sessionTimeZoneName] ?: %orig;
-}
-%end
-
+// تزييف الموقع الجغرافي ليتطابق دائماً مع حركة الآبيات الجديدة
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
-    return CLLocationCoordinate2DMake(sessionLatitude, sessionLongitude);
+    return getRandomCoordinate();
 }
 %end
 
+// 1. حقن الآبي الجديد في إعدادات جلسات الشبكة
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
         NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
-        NSString *activeIP = getDynamicIP();
-        
-        if (activeIP) {
-            [modifiedHeaders setObject:activeIP forKey:@"X-Forwarded-For"];
-            [modifiedHeaders setObject:activeIP forKey:@"Client-IP"];
-            [modifiedHeaders setObject:activeIP forKey:@"X-Real-IP"];
+        NSString *newIP = getRandomIP();
+        if (newIP) {
+            [modifiedHeaders setObject:newIP forKey:@"X-Forwarded-For"];
+            [modifiedHeaders setObject:newIP forKey:@"Client-IP"];
+            [modifiedHeaders setObject:newIP forKey:@"X-Real-IP"];
         }
         %orig(modifiedHeaders);
     } @catch (NSException *e) {
@@ -203,15 +61,32 @@ static void createFloatingButtonWindow() {
 }
 %end
 
+// 2. حقن الآبي الجديد في الطلبات الصادرة (NSMutableURLRequest) وضمان مرورها إجبارياً
 %hook NSMutableURLRequest
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
-        NSString *activeIP = getDynamicIP();
-        if (field && activeIP && 
+        NSString *newIP = getRandomIP();
+        if (field && newIP && 
             ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
              [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
              [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame)) {
-            %orig(activeIP, field);
+            %orig(newIP, field);
+            return;
+        }
+        %orig(value, field);
+    } @catch (NSException *e) {
+        %orig(value, field);
+    }
+}
+
+- (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
+    @try {
+        NSString *newIP = getRandomIP();
+        if (field && newIP && 
+            ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
+             [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
+             [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame)) {
+            %orig(newIP, field);
             return;
         }
         %orig(value, field);
@@ -223,12 +98,26 @@ static void createFloatingButtonWindow() {
 - (void)setURL:(NSURL * _Nullable)url {
     %orig;
     @try {
-        NSString *activeIP = getDynamicIP();
-        if (url && url.absoluteString && activeIP) {
-            [self setValue:activeIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [self setValue:activeIP forHTTPHeaderField:@"Client-IP"];
-            [self setValue:activeIP forHTTPHeaderField:@"X-Real-IP"];
+        NSString *newIP = getRandomIP();
+        if (url && url.absoluteString && newIP) {
+            [self setValue:newIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [self setValue:newIP forHTTPHeaderField:@"Client-IP"];
+            [self setValue:newIP forHTTPHeaderField:@"X-Real-IP"];
         }
     } @catch (NSException *e) {}
+}
+%end
+
+// 3. ضمان شمول الطلبات العادية (NSURLRequest) وتوجيهها بالآبي الجديد
+%hook NSURLRequest
+- (NSDictionary<NSString *, NSString *> *)allHTTPHeaderFields {
+    NSMutableDictionary *headers = [%orig mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSString *newIP = getRandomIP();
+    if (newIP) {
+        headers[@"X-Forwarded-For"] = newIP;
+        headers[@"Client-IP"] = newIP;
+        headers[@"X-Real-IP"] = newIP;
+    }
+    return [headers copy];
 }
 %end
