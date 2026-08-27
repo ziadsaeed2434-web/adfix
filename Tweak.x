@@ -14,7 +14,7 @@ static NSString *getRandomIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// 3. إحداثيات عشوائية طفيفة ومتحركة مع كل طلب لضمان توافق الموقع الجغرافي مع الآبي
+// 3. إحداثيات عشوائية طفيفة ومتحركة مع كل طلب
 static CLLocationCoordinate2D getRandomCoordinate() {
     double baseLat = 33.7490;
     double baseLon = -84.3880;
@@ -36,7 +36,7 @@ static CLLocationCoordinate2D getRandomCoordinate() {
 }
 %end
 
-// تزييف الموقع الجغرافي ليتطابق دائماً مع حركة الآبيات الجديدة
+// تزييف الموقع الجغرافي ليتطابق دائماً
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return getRandomCoordinate();
@@ -61,7 +61,7 @@ static CLLocationCoordinate2D getRandomCoordinate() {
 }
 %end
 
-// 2. حقن الآبي الجديد في الطلبات الصادرة (NSMutableURLRequest) وضمان مرورها إجبارياً
+// 2. حقن الآبي الجديد في الطلبات القابلة للتعديل
 %hook NSMutableURLRequest
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
@@ -108,10 +108,11 @@ static CLLocationCoordinate2D getRandomCoordinate() {
 }
 %end
 
-// 3. ضمان شمول الطلبات العادية (NSURLRequest) وتوجيهها بالآبي الجديد
+// 3. ضمان شمول الطلبات العادية عبر التقاط Tweak لـ NSURLRequest بأمان
 %hook NSURLRequest
 - (NSDictionary<NSString *, NSString *> *)allHTTPHeaderFields {
-    NSMutableDictionary *headers = [%orig mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSDictionary *origHeaders = %orig;
+    NSMutableDictionary *headers = [origHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
     NSString *newIP = getRandomIP();
     if (newIP) {
         headers[@"X-Forwarded-For"] = newIP;
