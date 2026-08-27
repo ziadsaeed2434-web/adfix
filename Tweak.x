@@ -1,73 +1,49 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
 #import <objc/runtime.h>
-#import <ifaddrs.h>
-#import <arpa/inet.h>
-#import <net/if.h>
 
-static UIView *infoBannerView = nil;
-static UITextView *bannerLogView = nil;
-static NSMutableArray *networkLogs = nil;
-
-// جلب الـ IP المحلي بسرعة فائقة
-NSString *getLocalIP() {
-    NSString *address = @"غير متوفر";
-    struct ifaddrs *interfaces = NULL;
-    struct ifaddrs *temp_addr = NULL;
-    int success = getifaddrs(&interfaces);
-    if (success == 0) {
-        temp_addr = interfaces;
-        while (temp_addr != NULL) {
-            if (temp_addr->ifa_addr->sa_family == AF_INET) {
-                if ([[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en0"] ||
-                    [[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"pdp_ip0"]) {
-                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
-                }
-            }
-            temp_addr = temp_addr->ifa_next;
-        }
-    }
-    freeifaddrs(interfaces);
-    return address;
+// توليد معرف عشوائي جديد
+NSString *generateNewUUID() {
+    return [[NSUUID UUID] UUIDString];
 }
 
-// تسجيل أحداث الشبكة
-void addNewLog(NSString *log) {
-    @synchronized(networkLogs) {
-        if (!networkLogs) networkLogs = [NSMutableArray array];
-        [networkLogs addObject:log];
-        if (networkLogs.count > 30) {
-            [networkLogs removeObjectAtIndex:0];
-        }
-    }
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (bannerLogView) {
-            bannerLogView.text = [networkLogs componentsJoinedByString:@"\n"];
-            [bannerLogView scrollRangeToVisible:NSMakeRange(bannerLogView.text.length, 0)];
-        }
-    });
+// دالة تغيير وحفظ الـ IDFA
+void changeIDFA() {
+    NSString *newIDFA = generateNewUUID();
+    [[NSUserDefaults standardUserDefaults] setObject:newIDFA forKey:@"CustomFakeIDFA_Btn"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
-// اعتراض الطلبات
-%hook NSURLSession
+// دالة تغيير وحفظ الـ UDID
+void changeUDID() {
+    NSString *newUDID = generateNewUUID();
+    [[NSUserDefaults standardUserDefaults] setObject:newUDID forKey:@"CustomFakeUDID_Btn"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
 
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    @try {
-        NSString *urlStr = request.URL.absoluteString;
-        NSString *method = request.HTTPMethod;
-        NSString *host = request.URL.host;
-        
-        NSString *log = [NSString stringWithFormat:@"[%@] %@", method, host ? host : urlStr];
-        addNewLog(log);
-    } @catch (NSException *e) {}
-    
+// هوك IDFA
+%hook ASIdentifierManager
+- (NSUUID *)advertisingIdentifier {
+    NSString *fakeIDFA = [[NSUserDefaults standardUserDefaults] stringForKey:@"CustomFakeIDFA_Btn"];
+    if (fakeIDFA) {
+        return [[NSUUID alloc] initWithUUIDString:fakeIDFA];
+    }
     return %orig;
 }
-
 %end
 
-// زرع اللوحة الثابتة في أعلى الصفحة الرئيسية للتطبيق
+// هوك UDID
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
+    NSString *fakeUDID = [[NSUserDefaults standardUserDefaults] stringForKey:@"CustomFakeUDID_Btn"];
+    if (fakeUDID) {
+        return [[NSUUID alloc] initWithUUIDString:fakeUDID];
+    }
+    return %orig;
+}
+%end
+
+// إنشاء زرين صغيرين ومنفصلين في أعلى الشاشة
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIWindow *window = [UIApplication sharedApplication].keyWindow;
@@ -76,40 +52,44 @@ void addNewLog(NSString *log) {
         UIViewController *rootVC = window.rootViewController;
         if (!rootVC) return;
         
-        // منع تكرار اللوحة إذا تم إنشاؤها مسبقاً
-        if (infoBannerView) return;
+        // زر تغيير UDID (في أعلى اليسار)
+        UIButton *btnUDID = [UIButton buttonWithType:UIButtonTypeCustom];
+        btnUDID.frame = CGRectMake(10, 45, 80, 25);
+        [btnUDID setTitle:@"تغيير UDID" forState:UIControlStateNormal];
+        [btnUDID setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        btnUDID.titleLabel.font = [UIFont boldSystemFontOfSize:10];
+        btnUDID.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.8];
+        btnUDID.layer.cornerRadius = 4;
+        btnUDID.layer.zPosition = 99999;
+        [btnUDID addTarget:nil action:@selector(actionChangeUDID) forControlEvents:UIControlEventTouchUpInside];
         
-        // إنشاء لوحة في أعلى الشاشة (ارتفاع 150 بكسل تحت شريط الحالة مباشرة)
-        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-        infoBannerView = [[UIView alloc] initWithFrame:CGRectMake(0, 40, screenWidth, 140)];
-        infoBannerView.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.85];
-        infoBannerView.layer.borderWidth = 1.0;
-        infoBannerView.layer.borderColor = [UIColor greenColor].CGColor;
-        infoBannerView.layer.zPosition = 99999; // البقاء في المقدمة
+        // زر تغيير IDFA (بجانبه في الأعلى)
+        UIButton *btnIDFA = [UIButton buttonWithType:UIButtonTypeCustom];
+        btnIDFA.frame = CGRectMake(95, 45, 80, 25);
+        [btnIDFA setTitle:@"تغيير IDFA" forState:UIControlStateNormal];
+        [btnIDFA setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        btnIDFA.titleLabel.font = [UIFont boldSystemFontOfSize:10];
+        btnIDFA.backgroundColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.8];
+        btnIDFA.layer.cornerRadius = 4;
+        btnIDFA.layer.zPosition = 99999;
+        [btnIDFA addTarget:nil action:@selector(actionChangeIDFA) forControlEvents:UIControlEventTouchUpInside];
         
-        // جلب معرفات الجهاز
-        NSString *idfa = [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
-        NSString *idfv = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
-        
-        // نص معلومات الجهاز والـ IP
-        UILabel *detailsLabel = [[UILabel alloc] initWithFrame:CGRectMake(5, 2, screenWidth - 10, 45)];
-        detailsLabel.numberOfLines = 3;
-        detailsLabel.textColor = [UIColor cyanColor];
-        detailsLabel.font = [UIFont systemFontOfSize:9];
-        detailsLabel.text = [NSString stringWithFormat:@"IP: %@\nIDFA: %@\nIDFV: %@", getLocalIP(), idfa, idfv];
-        [infoBannerView addSubview:detailsLabel];
-        
-        // صندوق السجلات المصغر داخل اللوحة
-        bannerLogView = [[UITextView alloc] initWithFrame:CGRectMake(5, 48, screenWidth - 10, 88)];
-        bannerLogView.backgroundColor = [UIColor clearColor];
-        bannerLogView.textColor = [UIColor whiteColor];
-        bannerLogView.editable = NO;
-        bannerLogView.font = [UIFont fontWithName:@"Courier" size:9];
-        bannerLogView.text = @"جاري مراقبة الشبكة...";
-        [infoBannerView addSubview:bannerLogView];
-        
-        // إضافة اللوحة فوق واجهة التطبيق مباشرة
-        [rootVC.view addSubview:infoBannerView];
-        [rootVC.view bringSubviewToFront:infoBannerView];
+        [rootVC.view addSubview:btnUDID];
+        [rootVC.view addSubview:btnIDFA];
+        [rootVC.view bringSubviewToFront:btnUDID];
+        [rootVC.view bringSubviewToFront:btnIDFA];
     });
 }
+
+// أهداف الأزرار
+@interface NSObject (ButtonActions)
+@end
+@implementation NSObject (ButtonActions)
+- (void)actionChangeUDID {
+    changeUDID();
+}
+- (void)actionChangeIDFA {
+    changeIDFA();
+}
+@end
+
