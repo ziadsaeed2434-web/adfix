@@ -5,14 +5,12 @@
 #import <arpa/inet.h>
 #import <net/if.h>
 
-static UIWindow *overlayWindow = nil;
-static UIViewController *panelViewController = nil;
-static UITextView *logTextView = nil;
+static UIView *infoBannerView = nil;
+static UITextView *bannerLogView = nil;
 static NSMutableArray *networkLogs = nil;
-static UILabel *ipInfoLabel = nil;
 
-// جلب الـ IP المحلي بطريقة آمنة وسريعة جداً بدون تعليق
-NSString *getLocalIPAddress() {
+// جلب الـ IP المحلي بسرعة فائقة
+NSString *getLocalIP() {
     NSString *address = @"غير متوفر";
     struct ifaddrs *interfaces = NULL;
     struct ifaddrs *temp_addr = NULL;
@@ -33,25 +31,25 @@ NSString *getLocalIPAddress() {
     return address;
 }
 
-// تسجيل أحداث الشبكة بشكل آمن ومنع امتلاء الذاكرة
-void addNetworkLog(NSString *log) {
+// تسجيل أحداث الشبكة
+void addNewLog(NSString *log) {
     @synchronized(networkLogs) {
         if (!networkLogs) networkLogs = [NSMutableArray array];
         [networkLogs addObject:log];
-        if (networkLogs.count > 50) { // تقليل العدد لضمان خفة الأداء
+        if (networkLogs.count > 30) {
             [networkLogs removeObjectAtIndex:0];
         }
     }
     
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (logTextView) {
-            logTextView.text = [networkLogs componentsJoinedByString:@"\n--------------------\n"];
-            [logTextView scrollRangeToVisible:NSMakeRange(logTextView.text.length, 0)];
+        if (bannerLogView) {
+            bannerLogView.text = [networkLogs componentsJoinedByString:@"\n"];
+            [bannerLogView scrollRangeToVisible:NSMakeRange(bannerLogView.text.length, 0)];
         }
     });
 }
 
-// اعتراض طلبات الشبكة بدون إحداث تعليق
+// اعتراض الطلبات
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
@@ -60,123 +58,58 @@ void addNetworkLog(NSString *log) {
         NSString *method = request.HTTPMethod;
         NSString *host = request.URL.host;
         
-        NSString *log = [NSString stringWithFormat:@"[%@] Host: %@\nURL: %@", method, host ? host : @"Unknown", urlStr ? urlStr : @""];
-        addNetworkLog(log);
-    } @catch (NSException *exception) {}
+        NSString *log = [NSString stringWithFormat:@"[%@] %@", method, host ? host : urlStr];
+        addNewLog(log);
+    } @catch (NSException *e) {}
     
     return %orig;
 }
 
 %end
 
-// واجهة اللوحة العائمة
-@interface PanelViewController : UIViewController
-@end
-
-@implementation PanelViewController
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.95];
-    
-    // عنوان اللوحة
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 40, self.view.frame.size.width - 40, 30)];
-    titleLabel.text = @"معلومات الجهاز والشبكة";
-    titleLabel.textColor = [UIColor whiteColor];
-    titleLabel.font = [UIFont boldSystemFontOfSize:16];
-    titleLabel.textAlignment = NSTextAlignmentCenter;
-    [self.view addSubview:titleLabel];
-    
-    // جلب IDFA و IDFV
-    NSString *idfa = [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
-    NSString *idfv = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
-    
-    // عرض الـ IP المحلي فوراً بدون انتظار شبكة خارجية
-    ipInfoLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 75, self.view.frame.size.width - 40, 35)];
-    ipInfoLabel.textColor = [UIColor cyanColor];
-    ipInfoLabel.font = [UIFont systemFontOfSize:12];
-    ipInfoLabel.text = [NSString stringWithFormat:@"Local IP: %@", getLocalIPAddress()];
-    [self.view addSubview:ipInfoLabel];
-    
-    // عرض المعرفات
-    UILabel *idsLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 115, self.view.frame.size.width - 40, 45)];
-    idsLabel.numberOfLines = 2;
-    idsLabel.textColor = [UIColor greenColor];
-    idsLabel.font = [UIFont systemFontOfSize:10];
-    idsLabel.text = [NSString stringWithFormat:@"IDFA: %@\nIDFV: %@", idfa, idfv];
-    [self.view addSubview:idsLabel];
-    
-    // صندوق السجلات
-    logTextView = [[UITextView alloc] initWithFrame:CGRectMake(20, 170, self.view.frame.size.width - 40, self.view.frame.size.height - 240)];
-    logTextView.backgroundColor = [UIColor darkGrayColor];
-    logTextView.textColor = [UIColor whiteColor];
-    logTextView.editable = NO;
-    logTextView.font = [UIFont fontWithName:@"Courier" size:10];
-    if (networkLogs) {
-        logTextView.text = [networkLogs componentsJoinedByString:@"\n--------------------\n"];
-    }
-    [self.view addSubview:logTextView];
-    
-    // زر الإغلاق
-    UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeBtn.frame = CGRectMake((self.view.frame.size.width - 120) / 2, self.view.frame.size.height - 60, 120, 35);
-    [closeBtn setTitle:@"إغلاق الصفحة" forState:UIControlStateNormal];
-    [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    closeBtn.backgroundColor = [UIColor redColor];
-    closeBtn.layer.cornerRadius = 8;
-    [closeBtn addTarget:self action:@selector(closePanel) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:closeBtn];
-}
-
-- (void)closePanel {
-    @try {
-        [overlayWindow setHidden:YES];
-        overlayWindow.rootViewController = nil;
-        overlayWindow = nil;
-        panelViewController = nil;
-        logTextView = nil;
-        ipInfoLabel = nil;
-    } @catch (NSException *e) {}
-}
-
-@end
-
-// مدير الزر المخفي للفتح الآمن
-@interface SafeTriggerManager : NSObject
-@end
-
-@implementation SafeTriggerManager
-
-+ (void)openPanel {
-    @try {
-        if (!overlayWindow) {
-            overlayWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-            overlayWindow.windowLevel = UIWindowLevelAlert + 9999;
-            panelViewController = [[PanelViewController alloc] init];
-            overlayWindow.rootViewController = panelViewController;
-            [overlayWindow makeKeyAndVisible];
-        }
-    } @catch (NSException *e) {}
-}
-
-+ (void)setupTrigger {
+// زرع اللوحة الثابتة في أعلى الصفحة الرئيسية للتطبيق
+%ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIWindow *window = [UIApplication sharedApplication].keyWindow;
         if (!window) return;
         
-        // زر شفاف في أعلى يسار الشاشة لفتح الصفحة فوراً وبدون كراش
-        UIButton *hiddenBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        hiddenBtn.frame = CGRectMake(0, 40, 60, 60);
-        hiddenBtn.backgroundColor = [UIColor clearColor];
-        [hiddenBtn addTarget:self action:@selector(openPanel) forControlEvents:UIControlEventTouchUpInside];
+        UIViewController *rootVC = window.rootViewController;
+        if (!rootVC) return;
         
-        [window addSubview:hiddenBtn];
-        [window bringSubviewToFront:hiddenBtn];
+        // منع تكرار اللوحة إذا تم إنشاؤها مسبقاً
+        if (infoBannerView) return;
+        
+        // إنشاء لوحة في أعلى الشاشة (ارتفاع 150 بكسل تحت شريط الحالة مباشرة)
+        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+        infoBannerView = [[UIView alloc] initWithFrame:CGRectMake(0, 40, screenWidth, 140)];
+        infoBannerView.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.85];
+        infoBannerView.layer.borderWidth = 1.0;
+        infoBannerView.layer.borderColor = [UIColor greenColor].CGColor;
+        infoBannerView.layer.zPosition = 99999; // البقاء في المقدمة
+        
+        // جلب معرفات الجهاز
+        NSString *idfa = [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
+        NSString *idfv = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
+        
+        // نص معلومات الجهاز والـ IP
+        UILabel *detailsLabel = [[UILabel alloc] initWithFrame:CGRectMake(5, 2, screenWidth - 10, 45)];
+        detailsLabel.numberOfLines = 3;
+        detailsLabel.textColor = [UIColor cyanColor];
+        detailsLabel.font = [UIFont systemFontOfSize:9];
+        detailsLabel.text = [NSString stringWithFormat:@"IP: %@\nIDFA: %@\nIDFV: %@", getLocalIP(), idfa, idfv];
+        [infoBannerView addSubview:detailsLabel];
+        
+        // صندوق السجلات المصغر داخل اللوحة
+        bannerLogView = [[UITextView alloc] initWithFrame:CGRectMake(5, 48, screenWidth - 10, 88)];
+        bannerLogView.backgroundColor = [UIColor clearColor];
+        bannerLogView.textColor = [UIColor whiteColor];
+        bannerLogView.editable = NO;
+        bannerLogView.font = [UIFont fontWithName:@"Courier" size:9];
+        bannerLogView.text = @"جاري مراقبة الشبكة...";
+        [infoBannerView addSubview:bannerLogView];
+        
+        // إضافة اللوحة فوق واجهة التطبيق مباشرة
+        [rootVC.view addSubview:infoBannerView];
+        [rootVC.view bringSubviewToFront:infoBannerView];
     });
-}
-
-@end
-
-%ctor {
-    [SafeTriggerManager setupTrigger];
 }
