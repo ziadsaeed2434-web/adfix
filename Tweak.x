@@ -2,58 +2,68 @@
 #import <CoreLocation/CoreLocation.h>
 #import <AdSupport/ASIdentifierManager.h>
 
-// 1. توليد آبي أمريكي عشوائي جديد كلياً وطائر مع كل طلب
-static NSString *getRandomIP() {
-    int third = arc4random_uniform(200) + 1;
-    int fourth = arc4random_uniform(250) + 1;
-    return [NSString stringWithFormat:@"50.200.%d.%d", third, fourth];
+// توليد آبي من نطاقات سكنية ومحمولة أمريكية حقيقية (Residential / Mobile Carrier) غير مكشوفة
+static NSString *getResidentialFakeIP() {
+    int choice = arc4random_uniform(3);
+    int p3 = arc4random_uniform(250) + 1;
+    int p4 = arc4random_uniform(250) + 1;
+    
+    if (choice == 0) {
+        // نطاق شبكة منزلي أمريكي (Comcast / Xfinity)
+        return [NSString stringWithFormat:@"24.%d.%d.%d", arc4random_uniform(100) + 10, p3, p4];
+    } else if (choice == 1) {
+        // نطاق اتصالات أمريكي (AT&T Residential)
+        return [NSString stringWithFormat:@"32.%d.%d.%d", arc4random_uniform(100) + 50, p3, p4];
+    } else {
+        // نطاق إنترنت منزلي أمريكي (Verizon Fios)
+        return [NSString stringWithFormat:@"68.%d.%d.%d", arc4random_uniform(50) + 10, p3, p4];
+    }
 }
 
-// 2. توليد IDFA جديد كلياً وطائر عند الطلب
-static NSString *getRandomIDFA() {
+// توليد IDFA وهمي جديد كلياً وطائر عند الطلب
+static NSString *getCleanFakeIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// 3. إحداثيات عشوائية طفيفة ومتحركة مع كل طلب
-static CLLocationCoordinate2D getRandomCoordinate() {
-    double baseLat = 33.7490;
-    double baseLon = -84.3880;
+// إحداثيات عشوائية للموقع الجغرافي في أمريكا
+static CLLocationCoordinate2D getCleanFakeCoordinate() {
     double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
     double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-    return CLLocationCoordinate2DMake(baseLat + latOffset, baseLon + lonOffset);
+    return CLLocationCoordinate2DMake(34.0522 + latOffset, -118.2437 + lonOffset); // لوس أنجلوس / كاليفورنيا
 }
 
-// تزييف الـ IDFA فوراً عند طلبه
+// 1. تزييف الـ IDFA الإعلاني
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     @try {
-        NSString *newIDFA = getRandomIDFA();
-        if (newIDFA) {
-            return [[NSUUID alloc] initWithUUIDString:newIDFA];
+        NSString *fakeIDFA = getCleanFakeIDFA();
+        if (fakeIDFA) {
+            return [[NSUUID alloc] initWithUUIDString:fakeIDFA];
         }
     } @catch (NSException *e) {}
     return %orig;
 }
 %end
 
-// تزييف الموقع الجغرافي ليتطابق دائماً
+// 2. تزييف الموقع الجغرافي GPS
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
-    return getRandomCoordinate();
+    return getCleanFakeCoordinate();
 }
 %end
 
-// 1. حقن الآبي الجديد في إعدادات جلسات الشبكة
+// 3. حقن الآبي السكني إجبارياً في إعدادات جلسات الشبكة
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
         NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
-        NSString *newIP = getRandomIP();
-        if (newIP) {
-            [modifiedHeaders setObject:newIP forKey:@"X-Forwarded-For"];
-            [modifiedHeaders setObject:newIP forKey:@"Client-IP"];
-            [modifiedHeaders setObject:newIP forKey:@"X-Real-IP"];
-        }
+        NSString *fakeIP = getResidentialFakeIP();
+        
+        [modifiedHeaders setObject:fakeIP forKey:@"X-Forwarded-For"];
+        [modifiedHeaders setObject:fakeIP forKey:@"Client-IP"];
+        [modifiedHeaders setObject:fakeIP forKey:@"X-Real-IP"];
+        [modifiedHeaders setObject:fakeIP forKey:@"True-Client-IP"];
+        
         %orig(modifiedHeaders);
     } @catch (NSException *e) {
         %orig;
@@ -61,16 +71,17 @@ static CLLocationCoordinate2D getRandomCoordinate() {
 }
 %end
 
-// 2. حقن الآبي الجديد في الطلبات القابلة للتعديل
+// 4. حقن الآبي في كل الطلبات القابلة للتعديل وتأكيد فرضها
 %hook NSMutableURLRequest
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
-        NSString *newIP = getRandomIP();
-        if (field && newIP && 
-            ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
-             [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
-             [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame)) {
-            %orig(newIP, field);
+        NSString *fakeIP = getResidentialFakeIP();
+        if (field && (
+            [field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
+            [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
+            [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame ||
+            [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame)) {
+            %orig(fakeIP, field);
             return;
         }
         %orig(value, field);
@@ -81,12 +92,13 @@ static CLLocationCoordinate2D getRandomCoordinate() {
 
 - (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
-        NSString *newIP = getRandomIP();
-        if (field && newIP && 
-            ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
-             [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
-             [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame)) {
-            %orig(newIP, field);
+        NSString *fakeIP = getResidentialFakeIP();
+        if (field && (
+            [field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
+            [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
+            [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame ||
+            [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame)) {
+            %orig(fakeIP, field);
             return;
         }
         %orig(value, field);
@@ -98,27 +110,30 @@ static CLLocationCoordinate2D getRandomCoordinate() {
 - (void)setURL:(NSURL * _Nullable)url {
     %orig;
     @try {
-        NSString *newIP = getRandomIP();
-        if (url && url.absoluteString && newIP) {
-            [self setValue:newIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [self setValue:newIP forHTTPHeaderField:@"Client-IP"];
-            [self setValue:newIP forHTTPHeaderField:@"X-Real-IP"];
+        NSString *fakeIP = getResidentialFakeIP();
+        if (url && url.absoluteString) {
+            [self setValue:fakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [self setValue:fakeIP forHTTPHeaderField:@"Client-IP"];
+            [self setValue:fakeIP forHTTPHeaderField:@"X-Real-IP"];
+            [self setValue:fakeIP forHTTPHeaderField:@"True-Client-IP"];
         }
     } @catch (NSException *e) {}
 }
 %end
 
-// 3. ضمان شمول الطلبات العادية عبر التقاط Tweak لـ NSURLRequest بأمان
+// 5. تعديل الطلبات العادية لضمان مرور الآبي السكني بها
 %hook NSURLRequest
 - (NSDictionary<NSString *, NSString *> *)allHTTPHeaderFields {
     NSDictionary *origHeaders = %orig;
     NSMutableDictionary *headers = [origHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
-    NSString *newIP = getRandomIP();
-    if (newIP) {
-        headers[@"X-Forwarded-For"] = newIP;
-        headers[@"Client-IP"] = newIP;
-        headers[@"X-Real-IP"] = newIP;
-    }
+    NSString *fakeIP = getResidentialFakeIP();
+    
+    headers[@"X-Forwarded-For"] = fakeIP;
+    headers[@"Client-IP"] = fakeIP;
+    headers[@"X-Real-IP"] = fakeIP;
+    headers[@"True-Client-IP"] = fakeIP;
+    
     return [headers copy];
 }
 %end
+
