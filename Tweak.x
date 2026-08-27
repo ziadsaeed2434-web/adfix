@@ -24,7 +24,6 @@ NSString *getLocalIPAddress() {
         temp_addr = interfaces;
         while (temp_addr != NULL) {
             if (temp_addr->ifa_addr->sa_family == AF_INET) {
-                // البحث عن الواجهة النشطة (Wi-Fi أو Cellular مثل en0 أو pdp_ip0)
                 if ([[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en0"] ||
                     [[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"pdp_ip0"]) {
                     address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
@@ -37,7 +36,7 @@ NSString *getLocalIPAddress() {
     return address;
 }
 
-// دالة لجلب الـ Public IP الخارجي للجلسة عبر خدمة عامة سريعة
+// دالة لجلب الـ Public IP الخارجي للجلسة
 void fetchPublicIP() {
     NSURL *url = [NSURL URLWithString:@"https://api.ipify.org?format=text"];
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:[NSURLRequest requestWithURL:url] completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -52,7 +51,6 @@ void fetchPublicIP() {
             currentSessionIP = [NSString stringWithFormat:@"Local: %@", getLocalIPAddress()];
         }
         
-        // تحديث الواجهة إن كانت مفتوحة
         dispatch_async(dispatch_get_main_queue(), ^{
             if (ipInfoLabel) {
                 ipInfoLabel.text = [NSString stringWithFormat:@"الجلسة IP: %@", currentSessionIP];
@@ -78,7 +76,7 @@ void addNetworkLog(NSString *log) {
     });
 }
 
-// Intercept NSURLSession لجمع الطلبات الصادرة والواردة وتحديد الـ Host/IP المستهدف
+// Intercept NSURLSession لجمع الطلبات
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
@@ -108,7 +106,7 @@ void addNetworkLog(NSString *log) {
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 40, self.view.frame.size.width - 40, 30)];
     titleLabel.text = @"معلومات الجهاز والشبكة والـ IP";
     titleLabel.textColor = [UIColor whiteColor];
-    titleLabel.font = [UIColor boldSystemFontOfSize:16];
+    titleLabel.font = [UIFont boldSystemFontOfSize:16];
     titleLabel.textAlignment = NSTextAlignmentCenter;
     [self.view addSubview:titleLabel];
     
@@ -152,7 +150,6 @@ void addNetworkLog(NSString *log) {
     [closeBtn addTarget:self action:@selector(closePanel) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:closeBtn];
     
-    // تحديث الـ IP فور فتح اللوحة
     fetchPublicIP();
 }
 
@@ -166,7 +163,7 @@ void addNetworkLog(NSString *log) {
 
 @end
 
-// دالة فتح النافذة عند الضغط على الزر
+// دالة فتح النافذة
 static void openPanelWindow() {
     if (!overlayWindow) {
         overlayWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
@@ -177,12 +174,10 @@ static void openPanelWindow() {
     }
 }
 
-// دالة مساعدة لربط أحداث الزر العائم
+// فئة مساعدة لأحداث الزر
 @interface FloatingButtonHelper : NSObject
 @end
 @implementation FloatingButtonHelper
-+annels {
-}
 + (void)btnTapped:(UIButton *)sender {
     openPanelWindow();
 }
@@ -196,7 +191,7 @@ static void openPanelWindow() {
 }
 @end
 
-// إنشاء وزرع الزر العائم عند بدء تشغيل التطبيق
+// زرع الزر عند التشغيل
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIWindow *window = [UIApplication sharedApplication].keyWindow;
@@ -213,14 +208,11 @@ static void openPanelWindow() {
             floatingBtn.layer.shadowRadius = 4.0;
             floatingBtn.layer.shadowOpacity = 0.5;
             
-            // ربط الضغط لفتح النافذة
             [floatingBtn addTarget:[FloatingButtonHelper class] action:@selector(btnTapped:) forControlEvents:UIControlEventTouchUpInside];
             
-            // إضافة إيماءة التحريك (Drag) ليصبح الزر قابلاً للسحب في أي مكان بالشاشة دون أن يختفي
             UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer alloc] initWithTarget:[FloatingButtonHelper class] action:@selector(handlePan:)];
             [floatingBtn addGestureRecognizer:panGes];
             
-            // إضافة الزر على مستوى النظام الرئيسي (KeyWindow) ليبقى ثابتاً ولا يختفي عند التنقل بين صفحات التطبيق
             [window addSubview:floatingBtn];
             [window bringSubviewToFront:floatingBtn];
         }
