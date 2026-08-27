@@ -9,27 +9,22 @@ static NSString *getResidentialFakeIP() {
     int p4 = arc4random_uniform(250) + 1;
     
     if (choice == 0) {
-        // نطاق شبكة منزلي أمريكي (Comcast / Xfinity)
         return [NSString stringWithFormat:@"24.%d.%d.%d", arc4random_uniform(100) + 10, p3, p4];
     } else if (choice == 1) {
-        // نطاق اتصالات أمريكي (AT&T Residential)
         return [NSString stringWithFormat:@"32.%d.%d.%d", arc4random_uniform(100) + 50, p3, p4];
     } else {
-        // نطاق إنترنت منزلي أمريكي (Verizon Fios)
         return [NSString stringWithFormat:@"68.%d.%d.%d", arc4random_uniform(50) + 10, p3, p4];
     }
 }
 
-// توليد IDFA وهمي جديد كلياً وطائر عند الطلب
 static NSString *getCleanFakeIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// إحداثيات عشوائية للموقع الجغرافي في أمريكا
 static CLLocationCoordinate2D getCleanFakeCoordinate() {
     double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
     double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-    return CLLocationCoordinate2DMake(34.0522 + latOffset, -118.2437 + lonOffset); // لوس أنجلوس / كاليفورنيا
+    return CLLocationCoordinate2DMake(34.0522 + latOffset, -118.2437 + lonOffset);
 }
 
 // 1. تزييف الـ IDFA الإعلاني
@@ -52,7 +47,7 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
 }
 %end
 
-// 3. حقن الآبي السكني إجبارياً في إعدادات جلسات الشبكة
+// 3. حقن الآبي في إعدادات جلسات الشبكة الحديثة
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
@@ -71,7 +66,7 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
 }
 %end
 
-// 4. حقن الآبي في كل الطلبات القابلة للتعديل وتأكيد فرضها
+// 4. حقن الآبي في الطلبات القابلة للتعديل
 %hook NSMutableURLRequest
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
@@ -121,7 +116,7 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
 }
 %end
 
-// 5. تعديل الطلبات العادية لضمان مرور الآبي السكني بها
+// 5. تعديل الطلبات العادية NSURLRequest
 %hook NSURLRequest
 - (NSDictionary<NSString *, NSString *> *)allHTTPHeaderFields {
     NSDictionary *origHeaders = %orig;
@@ -137,3 +132,29 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
 }
 %end
 
+// 6. تغطية وحقن الآبي في اتصالات NSURLConnection القديمة
+%hook NSURLConnection
+- initWithRequest:(NSURLRequest *)request delegate:(id)delegate startImmediately:(BOOL)startImmediately {
+    @try {
+        if ([request isKindOfClass:[NSMutableURLRequest class]]) {
+            NSString *fakeIP = getResidentialFakeIP();
+            [(NSMutableURLRequest *)request setValue:fakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [(NSMutableURLRequest *)request setValue:fakeIP forHTTPHeaderField:@"Client-IP"];
+            [(NSMutableURLRequest *)request setValue:fakeIP forHTTPHeaderField:@"X-Real-IP"];
+        }
+    } @catch (NSException *e) {}
+    return %orig(request, delegate, startImmediately);
+}
+
++ (NSURLConnection *)connectionWithRequest:(NSURLRequest *)request delegate:(id)delegate {
+    @try {
+        if ([request isKindOfClass:[NSMutableURLRequest class]]) {
+            NSString *fakeIP = getResidentialFakeIP();
+            [(NSMutableURLRequest *)request setValue:fakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [(NSMutableURLRequest *)request setValue:fakeIP forHTTPHeaderField:@"Client-IP"];
+            [(NSMutableURLRequest *)request setValue:fakeIP forHTTPHeaderField:@"X-Real-IP"];
+        }
+    } @catch (NSException *e) {}
+    return %orig(request, delegate);
+}
+%end
