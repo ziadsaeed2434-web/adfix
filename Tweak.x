@@ -1,26 +1,26 @@
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
 
-static double sessionLatitude = 33.7550;
-static double sessionLongitude = -84.3900;
-static NSString *dynamicSessionIP = @"144.160.12.88";
+static double sessionLatitude = 33.7450;
+static double sessionLongitude = -84.3850;
+static NSString *dynamicSessionIP = @"73.140.95.22";
 static NSString *sessionTimeZoneName = @"America/New_York";
 
-static void generateATT_IP() {
+static void generateComcastIP() {
     @try {
-        int thirdSegment = arc4random_uniform(100) + 1; // نطاقات AT&T الحقيقية
+        int thirdSegment = arc4random_uniform(100) + 1; // نطاقات Comcast الحقيقية
         int fourthSegment = arc4random_uniform(254) + 1;
-        dynamicSessionIP = [NSString stringWithFormat:@"144.160.%d.%d", thirdSegment, fourthSegment];
+        dynamicSessionIP = [NSString stringWithFormat:@"73.140.%d.%d", thirdSegment, fourthSegment];
         
         double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
         double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
-        sessionLatitude = 33.7550 + latOffset;
-        sessionLongitude = -84.3900 + lonOffset;
+        sessionLatitude = 33.7450 + latOffset;
+        sessionLongitude = -84.3850 + lonOffset;
     } @catch (NSException *e) {}
 }
 
 %ctor {
-    generateATT_IP();
+    generateComcastIP();
 }
 
 %hook NSTimeZone
@@ -51,7 +51,7 @@ static void generateATT_IP() {
 %end
 
 %hook NSMutableURLRequest
-- (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
+- (void)addValue:(NSString *)value forHTTPHeaderField:(NSString * _Nonnull)field {
     if (field && dynamicSessionIP && 
         ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
          [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
