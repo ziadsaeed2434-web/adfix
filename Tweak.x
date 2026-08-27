@@ -6,41 +6,57 @@ static double sessionLatitude = 33.7490;
 static double sessionLongitude = -84.3880;
 static NSString *sessionTimeZoneName = @"America/New_York";
 
-// متغيرات لتخزين الهوية الحالية وتحديثها بشكل دوري
-static NSString *currentForcedIP = nil;
-static NSString *currentForcedIDFA = nil;
-
-// دالة لتوليد آبي جديد تماماً
-static NSString *getNewIP() {
-    int third = arc4random_uniform(200) + 1;
-    int fourth = arc4random_uniform(250) + 1;
-    return [NSString stringWithFormat:@"50.200.%d.%d", third, fourth];
-}
-
-// دالة لتوليد IDFA جديد تماماً
-static NSString *getNewIDFA() {
-    return [[NSUUID UUID] UUIDString];
-}
-
-// دالة إجبار تحديث الهوية فوراً
-static void forceRotateIdentity() {
+// دالة جلب أو إنشاء الهوية المرتبطة بملف التفضيلات لضمان التجديد الفعلي
+static NSString *getDynamicIP() {
     @try {
-        currentForcedIP = getNewIP();
-        currentForcedIDFA = getNewIDFA();
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSString *savedIP = [defaults stringForKey:@"MySpoofedIPSession"];
         
-        // مسح الكاش الشبكي تماماً لمنع الحفظ المؤقت
-        [[NSURLCache sharedURLCache] removeAllCachedResponses];
+        // إذا لم يكن هناك آبي مخزن أو إذا أردنا توليد جديد
+        if (!savedIP) {
+            int third = arc4random_uniform(200) + 1;
+            int fourth = arc4random_uniform(250) + 1;
+            savedIP = [NSString stringWithFormat:@"50.200.%d.%d", third, fourth];
+            [defaults setObject:savedIP forKey:@"MySpoofedIPSession"];
+            [defaults synchronize];
+        }
+        return savedIP;
+    } @catch (NSException *e) {
+        return @"50.200.50.50";
+    }
+}
+
+static NSString *getDynamicIDFA() {
+    @try {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSString *savedIDFA = [defaults stringForKey:@"MySpoofedIDFASession"];
         
-        // عشوائية خفيفة لموقع أتلانطا
+        if (!savedIDFA) {
+            savedIDFA = [[NSUUID UUID] UUIDString];
+            [defaults setObject:savedIDFA forKey:@"MySpoofedIDFASession"];
+            [defaults synchronize];
+        }
+        return savedIDFA;
+    } @catch (NSException *e) {
+        return [[NSUUID UUID] UUIDString];
+    }
+}
+
+// دالة تصفير الهوية عند فتح التطبيق من جديد (تُمسح القديمة لتتولد جديدة)
+%ctor {
+    @autoreleasepool {
+        // مسح الجلسة القديمة فور بدء العملية لضمان توليد آبي و IDFA جديدين كلياً
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults removeObjectForKey:@"MySpoofedIPSession"];
+        [defaults removeObjectForKey:@"MySpoofedIDFASession"];
+        [defaults synchronize];
+        
+        // إحداثيات عشوائية طفيفة في أتلانطا
         double latOffset = ((arc4random_uniform(200) - 100) / 10000.0);
         double lonOffset = ((arc4random_uniform(200) - 100) / 10000.0);
         sessionLatitude = 33.7490 + latOffset;
         sessionLongitude = -84.3880 + lonOffset;
-    } @catch (NSException *e) {}
-}
-
-%ctor {
-    forceRotateIdentity();
+    }
 }
 
 // 1. تزييف لغة النظام
@@ -53,14 +69,13 @@ static void forceRotateIdentity() {
 }
 %end
 
-// 2. إرجاع IDFA متجدد وإجباري مع كل استعلام
+// 2. إرجاع الـ IDFA الخاص بالجلسة
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     @try {
-        // تحديث الهوية فوراً عند كل طلب IDFA
-        forceRotateIdentity();
-        if (currentForcedIDFA) {
-            return [[NSUUID alloc] initWithUUIDString:currentForcedIDFA];
+        NSString *activeIDFA = getDynamicIDFA();
+        if (activeIDFA) {
+            return [[NSUUID alloc] initWithUUIDString:activeIDFA];
         }
     } @catch (NSException *e) {}
     return %orig;
@@ -84,16 +99,17 @@ static void forceRotateIdentity() {
 }
 %end
 
-// 5. إجبار تغيير الآبي وحقنه مع كل تكوين شبكي جديد
+// 5. حقن الآبي المتجدد في إعدادات الشبكة
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
-        forceRotateIdentity(); // تغيير إجباري للآبي
         NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
-        if (currentForcedIP) {
-            [modifiedHeaders setObject:currentForcedIP forKey:@"X-Forwarded-For"];
-            [modifiedHeaders setObject:currentForcedIP forKey:@"Client-IP"];
-            [modifiedHeaders setObject:currentForcedIP forKey:@"X-Real-IP"];
+        NSString *activeIP = getDynamicIP();
+        
+        if (activeIP) {
+            [modifiedHeaders setObject:activeIP forKey:@"X-Forwarded-For"];
+            [modifiedHeaders setObject:activeIP forKey:@"Client-IP"];
+            [modifiedHeaders setObject:activeIP forKey:@"X-Real-IP"];
         }
         %orig(modifiedHeaders);
     } @catch (NSException *e) {
@@ -102,19 +118,17 @@ static void forceRotateIdentity() {
 }
 %end
 
-// 6. إجبار تغيير وحقن الآبي مع كل طلب شبكي فردي صادر
+// 6. حقن الآبي المتجدد في الطلبات الصادرة
 %hook NSMutableURLRequest
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
-        if (field && 
+        NSString *activeIP = getDynamicIP();
+        if (field && activeIP && 
             ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame || 
              [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
              [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame)) {
-            forceRotateIdentity(); // تغيير إجباري
-            if (currentForcedIP) {
-                %orig(currentForcedIP, field);
-                return;
-            }
+            %orig(activeIP, field);
+            return;
         }
         %orig(value, field);
     } @catch (NSException *e) {
@@ -125,13 +139,11 @@ static void forceRotateIdentity() {
 - (void)setURL:(NSURL * _Nullable)url {
     %orig;
     @try {
-        if (url && url.absoluteString) {
-            forceRotateIdentity(); // تغيير إجباري مع كل رابط جديد
-            if (currentForcedIP) {
-                [self setValue:currentForcedIP forHTTPHeaderField:@"X-Forwarded-For"];
-                [self setValue:currentForcedIP forHTTPHeaderField:@"Client-IP"];
-                [self setValue:currentForcedIP forHTTPHeaderField:@"X-Real-IP"];
-            }
+        NSString *activeIP = getDynamicIP();
+        if (url && url.absoluteString && activeIP) {
+            [self setValue:activeIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [self setValue:activeIP forHTTPHeaderField:@"Client-IP"];
+            [self setValue:activeIP forHTTPHeaderField:@"X-Real-IP"];
         }
     } @catch (NSException *e) {}
 }
