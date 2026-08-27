@@ -5,8 +5,8 @@
 #import <arpa/inet.h>
 #import <net/if.h>
 
-// متغيرات عامة للتحكم بالنافذة والزر
 static UIButton *floatingBtn = nil;
+static UIWindow *floatingWindow = nil;
 static UIWindow *overlayWindow = nil;
 static UIViewController *panelViewController = nil;
 static UITextView *logTextView = nil;
@@ -14,7 +14,7 @@ static NSMutableArray *networkLogs = nil;
 static NSString *currentSessionIP = @"جاري جلب الـ IP...";
 static UILabel *ipInfoLabel = nil;
 
-// دالة لجلب الـ IP المحلي (Local IP) المرتبط بالجلسة الحالية
+// جلب IP المحلي
 NSString *getLocalIPAddress() {
     NSString *address = @"غير متوفر";
     struct ifaddrs *interfaces = NULL;
@@ -36,7 +36,7 @@ NSString *getLocalIPAddress() {
     return address;
 }
 
-// دالة لجلب الـ Public IP الخارجي للجلسة
+// جلب Public IP
 void fetchPublicIP() {
     NSURL *url = [NSURL URLWithString:@"https://api.ipify.org?format=text"];
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:[NSURLRequest requestWithURL:url] completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -60,12 +60,14 @@ void fetchPublicIP() {
     [task resume];
 }
 
-// دالة لتسجيل أحداث الشبكة وعرضها
+// تسجيل أحداث الشبكة
 void addNetworkLog(NSString *log) {
-    if (!networkLogs) networkLogs = [NSMutableArray array];
-    [networkLogs addObject:log];
-    if (networkLogs.count > 100) {
-        [networkLogs removeObjectAtIndex:0];
+    @synchronized(networkLogs) {
+        if (!networkLogs) networkLogs = [NSMutableArray array];
+        [networkLogs addObject:log];
+        if (networkLogs.count > 100) {
+            [networkLogs removeObjectAtIndex:0];
+        }
     }
     
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -76,23 +78,25 @@ void addNetworkLog(NSString *log) {
     });
 }
 
-// Intercept NSURLSession لجمع الطلبات
+// اعتراض الطلبات بأمان
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSString *urlStr = request.URL.absoluteString;
-    NSString *method = request.HTTPMethod;
-    NSString *host = request.URL.host;
-    
-    NSString *log = [NSString stringWithFormat:@"[NET] %@\nHost/IP: %@\nURL: %@", method, host ? host : @"Unknown", urlStr];
-    addNetworkLog(log);
+    @try {
+        NSString *urlStr = request.URL.absoluteString;
+        NSString *method = request.HTTPMethod;
+        NSString *host = request.URL.host;
+        
+        NSString *log = [NSString stringWithFormat:@"[NET] %@\nHost/IP: %@\nURL: %@", method, host ? host : @"Unknown", urlStr ? urlStr : @""];
+        addNetworkLog(log);
+    } @catch (NSException *exception) {}
     
     return %orig;
 }
 
 %end
 
-// واجهة لوحة التحكم والتحركات
+// واجهة اللوحة العائمة
 @interface FloatingPanelVC : UIViewController
 @end
 
@@ -102,7 +106,6 @@ void addNetworkLog(NSString *log) {
     [super viewDidLoad];
     self.view.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.9];
     
-    // عنوان اللوحة
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 40, self.view.frame.size.width - 40, 30)];
     titleLabel.text = @"معلومات الجهاز والشبكة والـ IP";
     titleLabel.textColor = [UIColor whiteColor];
@@ -110,11 +113,9 @@ void addNetworkLog(NSString *log) {
     titleLabel.textAlignment = NSTextAlignmentCenter;
     [self.view addSubview:titleLabel];
     
-    // جلب IDFA و IDFV
     NSString *idfa = [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     NSString *idfv = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
     
-    // عرض المعرفات والـ IP
     ipInfoLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 75, self.view.frame.size.width - 40, 50)];
     ipInfoLabel.numberOfLines = 2;
     ipInfoLabel.textColor = [UIColor cyanColor];
@@ -129,7 +130,6 @@ void addNetworkLog(NSString *log) {
     idsLabel.text = [NSString stringWithFormat:@"IDFA: %@\nIDFV: %@", idfa, idfv];
     [self.view addSubview:idsLabel];
     
-    // صندوق النصوص لعرض سجلات الشبكة
     logTextView = [[UITextView alloc] initWithFrame:CGRectMake(20, 185, self.view.frame.size.width - 40, self.view.frame.size.height - 260)];
     logTextView.backgroundColor = [UIColor darkGrayColor];
     logTextView.textColor = [UIColor whiteColor];
@@ -140,7 +140,6 @@ void addNetworkLog(NSString *log) {
     }
     [self.view addSubview:logTextView];
     
-    // زر الإغلاق الآمن
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     closeBtn.frame = CGRectMake((self.view.frame.size.width - 100) / 2, self.view.frame.size.height - 65, 100, 35);
     [closeBtn setTitle:@"إغلاق" forState:UIControlStateNormal];
@@ -154,67 +153,99 @@ void addNetworkLog(NSString *log) {
 }
 
 - (void)closePanel {
-    [overlayWindow setHidden:YES];
-    overlayWindow = nil;
-    panelViewController = nil;
-    logTextView = nil;
-    ipInfoLabel = nil;
+    @try {
+        [overlayWindow setHidden:YES];
+        overlayWindow.rootViewController = nil;
+        overlayWindow = nil;
+        panelViewController = nil;
+        logTextView = nil;
+        ipInfoLabel = nil;
+    } @catch (NSException *e) {}
 }
 
 @end
 
-// دالة فتح النافذة
-static void openPanelWindow() {
-    if (!overlayWindow) {
-        overlayWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        overlayWindow.windowLevel = UIWindowLevelAlert + 1;
-        panelViewController = [[FloatingPanelVC alloc] init];
-        overlayWindow.rootViewController = panelViewController;
-        [overlayWindow makeKeyAndVisible];
-    }
-}
-
-// فئة مساعدة لأحداث الزر
-@interface FloatingButtonHelper : NSObject
-@end
-@implementation FloatingButtonHelper
-+ (void)btnTapped:(UIButton *)sender {
-    openPanelWindow();
-}
-+ (void)handlePan:(UIPanGestureRecognizer *)recognizer {
-    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-    CGPoint translation = [recognizer translationInView:keyWindow];
-    CGPoint center = recognizer.view.center;
-    
-    recognizer.view.center = CGPointMake(center.x + translation.x, center.y + translation.y);
-    [recognizer setTranslation:CGPointZero inView:keyWindow];
-}
+// مدير الزر العائم لمنع الاختفاء
+@interface FloatingButtonManager : NSObject
 @end
 
-// زرع الزر عند التشغيل
-%ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *window = [UIApplication sharedApplication].keyWindow;
-        if (!window) return;
-        
-        if (!floatingBtn) {
-            floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-            floatingBtn.frame = CGRectMake(30, 120, 55, 55);
-            [floatingBtn setTitle:@"أدوات" forState:UIControlStateNormal];
-            [floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            floatingBtn.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.85];
-            floatingBtn.layer.cornerRadius = 27.5;
-            floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-            floatingBtn.layer.shadowRadius = 4.0;
-            floatingBtn.layer.shadowOpacity = 0.5;
-            
-            [floatingBtn addTarget:[FloatingButtonHelper class] action:@selector(btnTapped:) forControlEvents:UIControlEventTouchUpInside];
-            
-            UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer alloc] initWithTarget:[FloatingButtonHelper class] action:@selector(handlePan:)];
-            [floatingBtn addGestureRecognizer:panGes];
-            
-            [window addSubview:floatingBtn];
-            [window bringSubviewToFront:floatingBtn];
+@implementation FloatingButtonManager
+
++ (void)openPanelWindow {
+    @try {
+        if (!overlayWindow) {
+            overlayWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+            overlayWindow.windowLevel = UIWindowLevelAlert + 10000;
+            panelViewController = [[FloatingPanelVC alloc] init];
+            overlayWindow.rootViewController = panelViewController;
+            [overlayWindow makeKeyAndVisible];
         }
+    } @catch (NSException *e) {}
+}
+
++ (void)btnTapped:(UIButton *)sender {
+    [self openPanelWindow];
+}
+
++ (void)handlePan:(UIPanGestureRecognizer *)recognizer {
+    @try {
+        UIWindow *window = recognizer.view.window;
+        CGPoint translation = [recognizer translationInView:window];
+        CGPoint center = recognizer.view.center;
+        
+        recognizer.view.center = CGPointMake(center.x + translation.x, center.y + translation.y);
+        [recognizer setTranslation:CGPointZero inView:window];
+    } @catch (NSException *e) {}
+}
+
++ (void)createFloatingButton {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (floatingWindow) return;
+        
+        // إنشاء نافذة خاصة مستقلة تماماً ومستوى عالٍ جداً تمنع أي نافذة تابعة من تغطيتها أو إخفائها
+        floatingWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        floatingWindow.windowLevel = UIWindowLevelAlert + 9999;
+        floatingWindow.backgroundColor = [UIColor clearColor];
+        // السماح بلمس الزر فقط وتمرير باقي اللمسات للتطبيق خلفه
+        floatingWindow.userInteractionEnabled = YES;
+        
+        UIViewController *vc = [[UIViewController alloc] init];
+        vc.view.backgroundColor = [UIColor clearColor];
+        floatingWindow.rootViewController = vc;
+        
+        floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        floatingBtn.frame = CGRectMake(30, 150, 55, 55);
+        [floatingBtn setTitle:@"أدوات" forState:UIControlStateNormal];
+        [floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        floatingBtn.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.85];
+        floatingBtn.layer.cornerRadius = 27.5;
+        floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
+        floatingBtn.layer.shadowRadius = 4.0;
+        floatingBtn.layer.shadowOpacity = 0.5;
+        
+        [floatingBtn addTarget:[FloatingButtonManager class] action:@selector(btnTapped:) forControlEvents:UIControlEventTouchUpInside];
+        
+        UIPanGestureRecognizer *panGes = [[UIPanGestureRecognizer alloc] initWithTarget:[FloatingButtonManager class] action:@selector(handlePan:)];
+        [floatingBtn addGestureRecognizer:panGes];
+        
+        [vc.view addSubview:floatingBtn];
+        [floatingWindow makeKeyAndVisible];
+    });
+}
+
+@end
+
+// مراقبة دورية بسيطة لضمان بقاء نافذة الزر ظاهرة في المقدمة مهما فتح التطبيق نوافذ جديدة
+%ctor {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [FloatingButtonManager createFloatingButton];
+        
+        // فحص دوري كل ثانيتين لإعادة إظهار الزر في المقدمة إن حاول التطبيق حجبه
+        [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
+            if (floatingWindow && floatingWindow.isHidden) {
+                [floatingWindow setHidden:NO];
+                [floatingWindow makeKeyAndVisible];
+            }
+        }];
     });
 }
