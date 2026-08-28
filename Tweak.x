@@ -92,33 +92,29 @@ static CLLocationCoordinate2D getGlobalAdCoordinate() {
 }
 %end
 
-// الطريقة الأضمن والأكثر استقراراً: اعتراض الطلب وتحويله إلى قابل للتعديل وحقن الآبي فيه فور إنشائه
-%hook NSURLRequest
-+ (instancetype)requestWithURL:(NSURL *)URL {
+// الطريقة الأصح والأكثر توافقاً مع نظام الترجمة (Theos) لحقن الطلبات بدون أخطاء
+%hook NSMutableURLRequest
+- (instancetype)initWithURL:(NSURL *)URL {
+    id orig = %orig;
     @try {
-        NSMutableURLRequest *request = [%orig(URL) mutableCopy];
         NSString *dynamicIP = generateDynamicGlobalIP();
-        if (request && dynamicIP) {
-            [request setValue:dynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [request setValue:dynamicIP forHTTPHeaderField:@"Client-IP"];
+        if (orig && dynamicIP) {
+            [orig setValue:dynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [orig setValue:dynamicIP forHTTPHeaderField:@"Client-IP"];
         }
-        return request;
-    } @catch (NSException *e) {
-        return %orig(URL);
-    }
+    } @catch (NSException *e) {}
+    return orig;
 }
 
-+ (instancetype)requestWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
+- (instancetype)initWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
+    id orig = %orig;
     @try {
-        NSMutableURLRequest *request = [%orig(URL, cachePolicy, timeoutInterval) mutableCopy];
         NSString *dynamicIP = generateDynamicGlobalIP();
-        if (request && dynamicIP) {
-            [request setValue:dynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [request setValue:dynamicIP forHTTPHeaderField:@"Client-IP"];
+        if (orig && dynamicIP) {
+            [orig setValue:dynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [orig setValue:dynamicIP forHTTPHeaderField:@"Client-IP"];
         }
-        return request;
-    } @catch (NSException *e) {
-        return %orig(URL, cachePolicy, timeoutInterval);
-    }
+    } @catch (NSException *e) {}
+    return orig;
 }
 %end
