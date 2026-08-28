@@ -23,7 +23,7 @@ static void initializeIPPrefixes() {
     });
 }
 
-// دالة توليد آبي ديناميكي محمية بالكامل
+// دالة توليد آبي ديناميكي محمية بنسبة 100%
 static NSString *generateDynamicGlobalIP() {
     @try {
         initializeIPPrefixes();
@@ -92,51 +92,33 @@ static CLLocationCoordinate2D getGlobalAdCoordinate() {
 }
 %end
 
-// 1. حقن الآبي في جلسات الشبكة العامة
-%hook NSURLSessionConfiguration
-- (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
+// الطريقة الأضمن والأكثر استقراراً: اعتراض الطلب وتحويله إلى قابل للتعديل وحقن الآبي فيه فور إنشائه
+%hook NSURLRequest
++ (instancetype)requestWithURL:(NSURL *)URL {
     @try {
-        NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
+        NSMutableURLRequest *request = [%orig(URL) mutableCopy];
         NSString *dynamicIP = generateDynamicGlobalIP();
-        if (dynamicIP) {
-            [modifiedHeaders setObject:dynamicIP forKey:@"X-Forwarded-For"];
-            [modifiedHeaders setObject:dynamicIP forKey:@"Client-IP"];
+        if (request && dynamicIP) {
+            [request setValue:dynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [request setValue:dynamicIP forHTTPHeaderField:@"Client-IP"];
         }
-        %orig(modifiedHeaders);
+        return request;
     } @catch (NSException *e) {
-        %orig;
+        return %orig(URL);
+    }
+}
+
++ (instancetype)requestWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
+    @try {
+        NSMutableURLRequest *request = [%orig(URL, cachePolicy, timeoutInterval) mutableCopy];
+        NSString *dynamicIP = generateDynamicGlobalIP();
+        if (request && dynamicIP) {
+            [request setValue:dynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [request setValue:dynamicIP forHTTPHeaderField:@"Client-IP"];
+        }
+        return request;
+    } @catch (NSException *e) {
+        return %orig(URL, cachePolicy, timeoutInterval);
     }
 }
 %end
-
-// 2. حقن إجباري ومباشر في كل طلب فردي يتم إنشاؤه عبر الطلبات (لضمان مرور كل الطلبات)
-%hook NSMutableURLRequest
-- (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    @try {
-        if (field && ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
-                      [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame)) {
-            NSString *dynamicIP = generateDynamicGlobalIP();
-            %orig(dynamicIP, field);
-            return;
-        }
-        %orig(value, field);
-    } @catch (NSException *e) {
-        %orig(value, field);
-    }
-}
-
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    @try {
-        if (field && ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
-                      [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame)) {
-            NSString *dynamicIP = generateDynamicGlobalIP();
-            %orig(dynamicIP, field);
-            return;
-        }
-        %orig(value, field);
-    } @catch (NSException *e) {
-        %orig(value, field);
-    }
-}
-%end
-
