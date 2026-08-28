@@ -2,7 +2,7 @@
 #import <CoreLocation/CoreLocation.h>
 #import <AdSupport/ASIdentifierManager.h>
 
-// مصفوفة تضم الـ 22 نطاقاً عالمياً (فرنسا، هولندا، أمريكا، كندا، بريطانيا، ألمانيا)
+// مصفوفة الـ 22 نطاقاً عالمياً (فرنسا، هولندا، أمريكا، كندا، بريطانيا، ألمانيا)
 static NSArray *g_baseIPPrefixes = nil;
 
 static void initializeIPPrefixes() {
@@ -23,17 +23,21 @@ static void initializeIPPrefixes() {
     });
 }
 
-// توليد آبي ديناميكي جديد مع كل طلب
+// دالة توليد آبي ديناميكي محمية بالكامل
 static NSString *generateDynamicGlobalIP() {
-    initializeIPPrefixes();
-    if (!g_baseIPPrefixes || [g_baseIPPrefixes count] == 0) {
+    @try {
+        initializeIPPrefixes();
+        if (!g_baseIPPrefixes || [g_baseIPPrefixes count] == 0) {
+            return @"80.12.60.1";
+        }
+        int prefixIndex = arc4random_uniform((uint32_t)[g_baseIPPrefixes count]);
+        NSString *selectedPrefix = g_baseIPPrefixes[prefixIndex];
+        int lastOctet1 = 1 + arc4random_uniform(254);
+        int lastOctet2 = 1 + arc4random_uniform(254);
+        return [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, lastOctet1, lastOctet2];
+    } @catch (NSException *e) {
         return @"80.12.60.1";
     }
-    int prefixIndex = arc4random_uniform((uint32_t)[g_baseIPPrefixes count]);
-    NSString *selectedPrefix = g_baseIPPrefixes[prefixIndex];
-    int lastOctet1 = 1 + arc4random_uniform(254);
-    int lastOctet2 = 1 + arc4random_uniform(254);
-    return [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, lastOctet1, lastOctet2];
 }
 
 static NSString *getSecureUUID(NSString *key) {
@@ -88,19 +92,16 @@ static CLLocationCoordinate2D getGlobalAdCoordinate() {
 }
 %end
 
-// 1. حقن الآبي في جلسات الإعدادات العامة (NSURLSessionConfiguration)
+// 1. حقن الآبي في جلسات الشبكة العامة
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
         NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
         NSString *dynamicIP = generateDynamicGlobalIP();
-        
-        // حقن في أهم ترويسات تتبع الشبكة والبروكسي
-        [modifiedHeaders setObject:dynamicIP forKey:@"X-Forwarded-For"];
-        [modifiedHeaders setObject:dynamicIP forKey:@"Client-IP"];
-        [modifiedHeaders setObject:dynamicIP forKey:@"X-Real-IP"];
-        [modifiedHeaders setObject:dynamicIP forKey:@"True-Client-IP"];
-        
+        if (dynamicIP) {
+            [modifiedHeaders setObject:dynamicIP forKey:@"X-Forwarded-For"];
+            [modifiedHeaders setObject:dynamicIP forKey:@"Client-IP"];
+        }
         %orig(modifiedHeaders);
     } @catch (NSException *e) {
         %orig;
@@ -108,20 +109,15 @@ static CLLocationCoordinate2D getGlobalAdCoordinate() {
 }
 %end
 
-// 2. حقن الآبي في كل طلب شبكي فردي (NSMutableURLRequest)
+// 2. حقن إجباري ومباشر في كل طلب فردي يتم إنشاؤه عبر الطلبات (لضمان مرور كل الطلبات)
 %hook NSMutableURLRequest
-- (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
+- (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     @try {
-        NSString *dynamicIP = generateDynamicGlobalIP();
-        if (field) {
-            // إذا كان الطلب يستهدف أي ترويسة تخص الآبي، استبدلها بالآبي الديناميكي الجديد
-            if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
-                [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
-                [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame ||
-                [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame) {
-                %orig(dynamicIP, field);
-                return;
-            }
+        if (field && ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
+                      [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame)) {
+            NSString *dynamicIP = generateDynamicGlobalIP();
+            %orig(dynamicIP, field);
+            return;
         }
         %orig(value, field);
     } @catch (NSException *e) {
@@ -129,12 +125,11 @@ static CLLocationCoordinate2D getGlobalAdCoordinate() {
     }
 }
 
-// حقن الآبي إجبارياً حتى لو لم تكن الترويسة موجودة مسبقاً في الطلب
-- (void)addValue:(NSString * _Nonnull)value forHTTPHeaderField:(NSString * _Nonnull)field {
+- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     @try {
-        NSString *dynamicIP = generateDynamicGlobalIP();
         if (field && ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
                       [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame)) {
+            NSString *dynamicIP = generateDynamicGlobalIP();
             %orig(dynamicIP, field);
             return;
         }
@@ -144,3 +139,4 @@ static CLLocationCoordinate2D getGlobalAdCoordinate() {
     }
 }
 %end
+
