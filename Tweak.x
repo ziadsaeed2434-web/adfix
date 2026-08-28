@@ -23,7 +23,7 @@ static void initializeIPPrefixes() {
     });
 }
 
-// دالة توليد آبي ديناميكي محمية بنسبة 100%
+// دالة توليد آبي ديناميكي محمية بـ @try/@catch لمنع أي استثناء
 static NSString *generateDynamicGlobalIP() {
     @try {
         initializeIPPrefixes();
@@ -92,29 +92,21 @@ static CLLocationCoordinate2D getGlobalAdCoordinate() {
 }
 %end
 
-// الطريقة الأصح والأكثر توافقاً مع نظام الترجمة (Theos) لحقن الطلبات بدون أخطاء
-%hook NSMutableURLRequest
-- (instancetype)initWithURL:(NSURL *)URL {
-    id orig = %orig;
+// الطريقة الأقوى والأكثر استقراراً عالمياً لتمرير الترويسات والآبيات لجميع طلبات الجلسة دون كراش
+%hook NSURLSessionConfiguration
+- (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
+        NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
         NSString *dynamicIP = generateDynamicGlobalIP();
-        if (orig && dynamicIP) {
-            [orig setValue:dynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [orig setValue:dynamicIP forHTTPHeaderField:@"Client-IP"];
+        
+        if (dynamicIP) {
+            [modifiedHeaders setObject:dynamicIP forKey:@"X-Forwarded-For"];
+            [modifiedHeaders setObject:dynamicIP forKey:@"Client-IP"];
         }
-    } @catch (NSException *e) {}
-    return orig;
-}
-
-- (instancetype)initWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
-    id orig = %orig;
-    @try {
-        NSString *dynamicIP = generateDynamicGlobalIP();
-        if (orig && dynamicIP) {
-            [orig setValue:dynamicIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [orig setValue:dynamicIP forHTTPHeaderField:@"Client-IP"];
-        }
-    } @catch (NSException *e) {}
-    return orig;
+        
+        %orig(modifiedHeaders);
+    } @catch (NSException *e) {
+        %orig;
+    }
 }
 %end
