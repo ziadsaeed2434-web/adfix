@@ -2,11 +2,13 @@
 #import <CoreLocation/CoreLocation.h>
 #import <AdSupport/ASIdentifierManager.h>
 
-// قائمة ضخمة ومباشرة تحتوي على 500 عنوان آبي سكني حقيقي في أتلانتا (يتم الاختيار منها عشوائياً فقط)
-static NSString *get500AtlantaIPFromList() {
-    static NSArray *atlanta500List = nil;
-    if (!atlanta500List) {
-        atlanta500List = @[
+// تعريف المصفوفة خارج الدوال لتكون ثابتة وآمنة تماماً ضد الكراش
+static NSArray *g_atlanta500List = nil;
+
+static void initializeAtlantaIPListIfNeeded() {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        g_atlanta500List = @[
             // --- نطاقات Comcast Xfinity (أتلانتا) ---
             @"24.98.32.12", @"24.98.32.45", @"24.98.35.88", @"24.98.40.10", @"24.98.44.15", @"24.98.50.22", @"24.98.55.77", @"24.98.60.11", @"24.98.62.33", @"24.98.65.90",
             @"24.168.12.5", @"24.168.15.90", @"24.170.22.33", @"24.172.40.11", @"24.175.14.88", @"24.178.20.55", @"24.180.33.12", @"24.183.45.99", @"24.185.12.10", @"24.188.22.44",
@@ -40,11 +42,16 @@ static NSString *get500AtlantaIPFromList() {
             @"68.40.11.12", @"68.40.22.23", @"68.40.33.34", @"68.40.44.45", @"68.40.55.56", @"68.40.66.67", @"68.40.77.78", @"68.40.88.89", @"68.40.99.90", @"68.40.110.11",
             @"68.55.12.13", @"68.55.23.24", @"68.55.34.35", @"68.55.45.46", @"68.55.56.57", @"68.55.67.68", @"68.55.78.79", @"68.55.89.90", @"68.55.100.11", @"68.55.120.22"
         ];
+    });
+}
+
+static NSString *getSafeAtlantaIP() {
+    initializeAtlantaIPListIfNeeded();
+    if (!g_atlanta500List || [g_atlanta500List count] == 0) {
+        return @"24.98.32.12"; // قيمة احتياطية آمنة في حال الفراغ
     }
-    
-    // اختيار عشوائي بحت من قائمة الـ 500 عنوان الثابتة أعلاه
-    int randomIndex = arc4random_uniform((uint32_t)[atlanta500List count]);
-    return atlanta500List[randomIndex];
+    int randomIndex = arc4random_uniform((uint32_t)[g_atlanta500List count]);
+    return g_atlanta500List[randomIndex];
 }
 
 static NSString *getSecureUUID(NSString *key) {
@@ -58,14 +65,13 @@ static NSString *getSecureUUID(NSString *key) {
     return uuid;
 }
 
-// إحداثيات GPS ثابتة في أتلانتا
 static CLLocationCoordinate2D getAtlantaCoordinate() {
     return CLLocationCoordinate2DMake(33.7490, -84.3880);
 }
 
-// تنظيف الجلسة وتحديث الهوية عند فتح التطبيق
 %ctor {
     @autoreleasepool {
+        initializeAtlantaIPListIfNeeded();
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         [defaults removeObjectForKey:@"AtlantaAdSessionIDFA"];
         [defaults removeObjectForKey:@"AtlantaVendorID"];
@@ -73,7 +79,6 @@ static CLLocationCoordinate2D getAtlantaCoordinate() {
     }
 }
 
-// 1. تجديد بصمة الجهاز
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     @try {
@@ -87,32 +92,29 @@ static CLLocationCoordinate2D getAtlantaCoordinate() {
 }
 %end
 
-// 2. تجديد معرف الإعلانات
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     @try {
-        return [[NSUUID alloc] initWithUUIDString:getSecureUUID(@"AtlantaAdSessionIDFA")];
+        return [[NSUUID alloc] initWithUUIDString:getSecureUUID("AtlantaAdSessionIDFA")];
     } @catch (NSException *e) {}
     return %orig;
 }
 %end
 
-// 3. مطابقة الموقع الجغرافي
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return getAtlantaCoordinate();
 }
 %end
 
-// 4. حقن الآبي المختار من قائمة الـ 500 حصرياً
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
         NSMutableDictionary *modifiedHeaders = [HTTPAdditionalHeaders mutableCopy] ?: [NSMutableDictionary dictionary];
-        NSString *realIP = get500AtlantaIPFromList();
-        
-        [modifiedHeaders setObject:realIP forKey:@"X-Forwarded-For"];
-        
+        NSString *realIP = getSafeAtlantaIP();
+        if (realIP) {
+            [modifiedHeaders setObject:realIP forKey:@"X-Forwarded-For"];
+        }
         %orig(modifiedHeaders);
     } @catch (NSException *e) {
         %orig;
@@ -123,8 +125,8 @@ static CLLocationCoordinate2D getAtlantaCoordinate() {
 %hook NSMutableURLRequest
 - (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
-        NSString *realIP = get500AtlantaIPFromList();
-        if (field && [field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame) {
+        NSString *realIP = getSafeAtlantaIP();
+        if (field && [field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame && realIP) {
             %orig(realIP, field);
             return;
         }
