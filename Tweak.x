@@ -2,7 +2,7 @@
 #import <CoreLocation/CoreLocation.h>
 #import <AdSupport/ASIdentifierManager.h>
 
-// توليد آبي من نطاقات سكنية ومحمولة أمريكية حقيقية (Residential / Mobile Carrier) غير مكشوفة
+// 1. توليد آبي سكني أمريكي نظيف وغير مكشوف
 static NSString *getResidentialFakeIP() {
     int choice = arc4random_uniform(3);
     int p3 = arc4random_uniform(250) + 1;
@@ -17,8 +17,28 @@ static NSString *getResidentialFakeIP() {
     }
 }
 
-static NSString *getCleanFakeIDFA() {
-    return [[NSUUID UUID] UUIDString];
+// 2. IDFA ثابت طوال جلسة التطبيق (لتجنب الحظر ورفض الإعلانات)
+static NSString *getSessionIDFA() {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *savedIDFA = [defaults stringForKey:@"SMSAdSessionIDFA"];
+    if (!savedIDFA) {
+        savedIDFA = [[NSUUID UUID] UUIDString];
+        [defaults setObject:savedIDFA forKey:@"SMSAdSessionIDFA"];
+        [defaults synchronize];
+    }
+    return savedIDFA;
+}
+
+// 3. معرف جهاز وهمي جديد كلياً لكسر حظر الهاردوير القديم
+static NSString *getBypassedVendorID() {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *savedVendor = [defaults stringForKey:@"BypassedVendorUUID"];
+    if (!savedVendor) {
+        savedVendor = [[NSUUID UUID] UUIDString];
+        [defaults setObject:savedVendor forKey:@"BypassedVendorUUID"];
+        [defaults synchronize];
+    }
+    return savedVendor;
 }
 
 static CLLocationCoordinate2D getCleanFakeCoordinate() {
@@ -27,27 +47,57 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
     return CLLocationCoordinate2DMake(34.0522 + latOffset, -118.2437 + lonOffset);
 }
 
-// 1. تزييف الـ IDFA الإعلاني
+// تصفير جلسة الآبي والـ IDFA عند فتح التطبيق لتوليد بصمة نظيفة جديدة
+%ctor {
+    @autoreleasepool {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults removeObjectForKey:@"SMSAdSessionIDFA"];
+        [defaults synchronize];
+    }
+}
+
+// --- خطافات فك الحظر وتغيير البصمة ---
+
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
+    @try {
+        NSString *vendorStr = getBypassedVendorID();
+        return [[NSUUID alloc] initWithUUIDString:vendorStr];
+    } @catch (NSException *e) {}
+    return %orig;
+}
+
+- (NSString *)systemVersion {
+    return @"17.5"; // إصدار نظام متوافق
+}
+
+- (NSString *)model {
+    return @"iPhone";
+}
+%end
+
+// تزييف الـ IDFA الإعلاني لجلسة نظيفة
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     @try {
-        NSString *fakeIDFA = getCleanFakeIDFA();
-        if (fakeIDFA) {
-            return [[NSUUID alloc] initWithUUIDString:fakeIDFA];
+        NSString *activeIDFA = getSessionIDFA();
+        if (activeIDFA) {
+            return [[NSUUID alloc] initWithUUIDString:activeIDFA];
         }
     } @catch (NSException *e) {}
     return %orig;
 }
 %end
 
-// 2. تزييف الموقع الجغرافي GPS
+// تزييف الموقع الجغرافي GPS
 %hook CLLocation
 - (CLLocationCoordinate2D)coordinate {
     return getCleanFakeCoordinate();
 }
 %end
 
-// 3. حقن الآبي في إعدادات جلسات الشبكة الحديثة
+// --- خطافات شبكات الاتصال لحقن الآبي السكني الوهمي ---
+
 %hook NSURLSessionConfiguration
 - (void)setHTTPAdditionalHeaders:(NSDictionary *)HTTPAdditionalHeaders {
     @try {
@@ -66,7 +116,6 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
 }
 %end
 
-// 4. حقن الآبي في الطلبات القابلة للتعديل
 %hook NSMutableURLRequest
 - (void)addValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString * _Nonnull)field {
     @try {
@@ -116,7 +165,6 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
 }
 %end
 
-// 5. تعديل الطلبات العادية NSURLRequest
 %hook NSURLRequest
 - (NSDictionary<NSString *, NSString *> *)allHTTPHeaderFields {
     NSDictionary *origHeaders = %orig;
@@ -132,7 +180,6 @@ static CLLocationCoordinate2D getCleanFakeCoordinate() {
 }
 %end
 
-// 6. تغطية وحقن الآبي في اتصالات NSURLConnection القديمة
 %hook NSURLConnection
 - (id)initWithRequest:(NSURLRequest *)request delegate:(id)delegate startImmediately:(BOOL)startImmediately {
     @try {
