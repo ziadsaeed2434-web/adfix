@@ -4,12 +4,10 @@
 static NSString *rotatingIDFA = nil;
 static NSString *rotatingUUID = nil;
 static NSString *rotatingMAC = nil;
-static NSString *randomLocale = nil;
-static NSString *randomTimeZone = nil;
 static float randomBattery = 0.5f;
 
 static void generateStablePersona() {
-    // 1. معرفات الإعلانات والـ UUID تتجدد
+    // 1. معرفات الإعلانات والـ UUID تتجدد في كل إقلاع
     rotatingIDFA = [[NSUUID UUID] UUIDString];
     rotatingUUID = [[NSUUID UUID] UUIDString];
     
@@ -18,15 +16,7 @@ static void generateStablePersona() {
                    arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256),
                    arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256)];
     
-    // 3. لغة عشوائية
-    NSArray *locales = @[@"en_US", @"en_GB", @"en_CA", @"en_AU"];
-    randomLocale = locales[arc4random_uniform((uint32_t)locales.count)];
-    
-    // 4. منطقة زمنية عشوائية
-    NSArray *timeZones = @[@"America/New_York", @"America/Chicago", @"America/Los_Angeles", @"Europe/London"];
-    randomTimeZone = timeZones[arc4random_uniform((uint32_t)timeZones.count)];
-    
-    // 5. نسبة بطارية عشوائية لكل جلسة
+    // 3. نسبة بطارية عشوائية لكل جلسة
     randomBattery = (float)(arc4random_uniform(85) + 10) / 100.0f;
 }
 
@@ -47,7 +37,7 @@ static void generateStablePersona() {
         lbl.textColor = [UIColor whiteColor];
         lbl.textAlignment = NSTextAlignmentCenter;
         lbl.font = [UIFont boldSystemFontOfSize:11];
-        lbl.text = @"🛡️ MAC & Fingerprint Spoofer Active";
+        lbl.text = @"🛡️ Clean Fingerprint Spoofer Active";
         [window addSubview:lbl];
         
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -79,32 +69,12 @@ static void generateStablePersona() {
 }
 %end
 
-// 3. البطارية تتغير عشوائياً
+// 3. البطارية تتغير عشوائياً في كل إقلاع
 %hook UIDevice
 - (float)batteryLevel {
     return randomBattery;
 }
 - (BOOL)isBatteryMonitoringEnabled {
     return YES;
-}
-%end
-
-// 4. اللغة تتغير عشوائياً
-%hook NSLocale
-+ (NSString *)preferredLanguages {
-    return (NSString *)randomLocale;
-}
-- (NSString *)localeIdentifier {
-    return randomLocale;
-}
-%end
-
-// 5. المنطقة الزمنية تتغير عشوائياً
-%hook NSTimeZone
-+ (NSTimeZone *)localTimeZone {
-    return [NSTimeZone timeZoneWithName:randomTimeZone];
-}
-- (NSString *)name {
-    return randomTimeZone;
 }
 %end
