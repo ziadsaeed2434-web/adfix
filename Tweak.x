@@ -1,9 +1,5 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/ASIdentifierManager.h>
-#include <sys/socket.h>
-#include <sys/sysctl.h>
-#include <net/if.h>
-#include <net/if_dl.h>
 
 static NSString *rotatingNetworkID = nil;
 static NSString *rotatingMACAddress = nil;
@@ -12,7 +8,7 @@ static void generateRotatingPersona() {
     // 1. توليد هوية ومعرف شبكي جديد تماماً مع كل إقلاع
     rotatingNetworkID = [[NSUUID UUID] UUIDString];
     
-    // 2. توليد ماك أدرس عشوائي ومزيف بصيغة صحيحة (مثال: xx:xx:xx:xx:xx:xx)
+    // 2. توليد ماك أدرس عشوائي ومزيف بصيغة صحيحة
     rotatingMACAddress = [NSString stringWithFormat:@"%02x:%02x:%02x:%02x:%02x:%02x",
                           arc4random_uniform(256),
                           arc4random_uniform(256),
@@ -72,21 +68,9 @@ static void generateRotatingPersona() {
 }
 %end
 
-// 3. اعتراض دوال جلب عناوين الشبكة والماك أدرس لإرجاع الماك الوهمي المتجدد
-%hook NSString
-+ (id)stringWithUTF8String:(const char *)nullTerminatedCString {
-    if (nullTerminatedCString) {
-        NSString *str = %orig;
-        // إذا حاول التطبيق الاستعلام عن الماك أدرس عبر واجهات الربط (مثل en0)
-        return str;
-    }
-    return %orig;
-}
-%end
-
-// 4. تغيير أي استعلام برمجي عام للـ UUID
+// 3. تصحيح الخطأ عبر تغليف استعلام NSUUID داخل الهوك الصحيح
 %hook NSUUID
-- initWithUUIDString:(NSString *)string {
+- (instancetype)initWithUUIDString:(NSString *)string {
     return %orig(rotatingNetworkID);
 }
 %end
