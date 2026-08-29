@@ -32,17 +32,15 @@
         [AutoConsentHUD showStatus];
     });
     
-    // بدلاً من مسح كل البيانات التي تظهر النافذة، سنقوم بحقن قيم موافقة جاهزة في NSUserDefaults
-    // لكي يعتقد التطبيق أنك وافقت مسبقاً وتختفي النافذة تماماً للأبد
+    // حقن مفاتيح الموافقة الخاصة بشبكات الإعلانات (مثل Google UMP / GDPR)
     NSUserDefaults *def = [NSUserDefaults standardUserDefaults];
     
- أشهر مفاتيح الموافقة الخاصة بشبكات الإعلانات (مثل Google UMP / GDPR)
     [def setBool:YES forKey:@"IABConsent_ParsedVendorConsents"];
     [def setObject:@"1" forKey:@"IABConsent_ConsentString"];
     [def setInteger:1 forKey:@"IABTCF_gdprApplies"];
     [def setObject:@"CPQ..." forKey:@"IABTCF_TCString"];
     
-    // مفاتيح عامة غالباً تمنع ظهور نافذة الـ Consent عند تعيينها كقيم موافقة
+    // مفاتيح عامة لتجاوز الشروط ونافذة الموافقة
     [def setBool:YES forKey:@"gad_preferred_webview_utilization"];
     [def setBool:YES forKey:@"user_has_agreed_to_terms"];
     [def setBool:YES forKey:@"consent_given"];
@@ -50,25 +48,12 @@
     [def synchronize];
 }
 
-// مراقبة ظهور أي نافذة منبثقة (Alert / Popup) والبحث عن زر AGREE لضغطه تلقائياً في الخلفية
-%hook UIViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // المرور على العقد والبحث عن زر الموافقة AGREE لضغطه آلياً إذا ظهرت النافذة
-        for (UIView *subview in self.view.subviews) {
-            // يمكن للتيار البرمجي رصد الأزرار وتفعيلها
-        }
-    });
-}
-%end
-
-// محاولة رصد الكلاسات المسؤولة عن إظهار رسائل الـ Consent وإجبارها على اعتبار أن الموافقة تمّت
+// رصد مكتبة الـ UMP وإجبارها على اعتبار أن الموافقة تمت مسبقاً
 %hook UMPConsentInformation
 - (int)consentStatus {
-    return 3; // 3 عادة تعني Obtained (تم الحصول على الموافقة)
+    return 3; // 3 تعني Obtained (تم منح الموافقة)
 }
 - (BOOL)isConsentFormAvailable {
-    return NO; // منع ظهور نموذج الموافقة من الأساس
+    return NO; // منع إظهار نموذج الشروط والخصوصية نهائياً
 }
 %end
