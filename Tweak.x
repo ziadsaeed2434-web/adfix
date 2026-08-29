@@ -12,19 +12,20 @@ double randomInRange(double min, double max) {
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
-// توليد IP إسباني قوي ومطابقته مباشرة مع إحداثيات مدريد/إسبانيا
-void initializeSpainSession() {
-    NSArray *spanishPrefixes = @[@"81.32", @"88.12", @"212.145", @"193.147"];
-    NSString *selectedPrefix = spanishPrefixes[arc4random_uniform((uint32_t)spanishPrefixes.count)];
+// توليد IP بريطاني قوي جداً (نطاقات لندن - BT و Vodafone UK) ومطابقته بالـ GPS
+void initializeUKSession() {
+    // نطاقات بريطانية قوية ومعروفة بكثافة الإعلانات (مثل نطاقات BT و EE و Vodafone في لندن)
+    NSArray *ukPrefixes = @[@"25.120", @"82.132", @"86.130", @"90.192", @"151.225"];
+    NSString *selectedPrefix = ukPrefixes[arc4random_uniform((uint32_t)ukPrefixes.count)];
     
     int thirdBlock = arc4random_uniform(255);
     int fourthBlock = arc4random_uniform(255);
     
     sessionFakeIP = [NSString stringWithFormat:@"%@.%d.%d", selectedPrefix, thirdBlock, fourthBlock];
     
-    // ضبط الموقع الجغرافي (GPS) ليكون داخل إسبانيا (مدريد وضواحيها) ليتطابق مع الآبي
-    currentLat = randomInRange(40.3800, 40.4800);
-    currentLon = randomInRange(-3.7300, -3.6700);
+    // ضبط موقع الـ GPS ليكون بدقة داخل لندن، بريطانيا (ليتطابق تماماً مع الآبي البريطاني)
+    currentLat = randomInRange(51.5000, 51.5300);
+    currentLon = randomInRange(-0.1300, -0.0800);
 }
 
 void fetchRealIP() {
@@ -50,7 +51,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         path = [[path substringToIndex:30] stringByAppendingString:@"..."];
     }
     
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 إسبانيا IP: %@\n📍 الموقع المطابق: (%.4f, %.4f)", path, ip, lat, lon];
+    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🇬🇧 لندن IP: %@\n📍 الموقع المطابق: (%.4f, %.4f)", path, ip, lat, lon];
     
     @synchronized(networkLogs) {
         [networkLogs insertObject:logEntry atIndex:0];
@@ -61,10 +62,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // واجهة التقارير
-@interface SpainReportViewController : UIViewController
+@interface UKReportViewController : UIViewController
 @end
 
-@implementation SpainReportViewController
+@implementation UKReportViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.95];
@@ -77,8 +78,8 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     NSUUID *idfaUUID = [[ASIdentifierManager sharedManager] advertisingIdentifier];
     NSString *idfaStr = [idfaUUID UUIDString];
     
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع المطابق للـ IP (إسبانيا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🇪🇸 IP إسباني قوي ومطابق:\n%@\n\n🛡️ ايبى الشبكة الفعلي:\n%@", sessionFakeIP, currentRealIP];
+    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع المطابق للـ IP (لندن، بريطانيا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
+    NSString *ipInfo = [NSString stringWithFormat:@"🇬🇧 IP بريطاني قوي ومطابق:\n%@\n\n🛡️ ايبى الشبكة الفعلي:\n%@", sessionFakeIP, currentRealIP];
     NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
@@ -117,10 +118,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 @end
 
-@interface SpainWindow : UIWindow
+@interface UKWindow : UIWindow
 @end
 
-@implementation SpainWindow
+@implementation UKWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn = [self viewWithTag:999888];
     if (btn && CGRectContainsPoint(btn.frame, point)) {
@@ -130,17 +131,17 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 @end
 
-@interface SpainInfoManager : NSObject
-@property (strong, nonatomic) SpainWindow *floatingWindow;
+@interface UKInfoManager : NSObject
+@property (strong, nonatomic) UKWindow *floatingWindow;
 @property (strong, nonatomic) UIButton *floatingBtn;
 + (instancetype)sharedInstance;
 - (void)setupFloatingButton;
 @end
 
-@implementation SpainInfoManager
+@implementation UKInfoManager
 
 + (instancetype)sharedInstance {
-    static SpainInfoManager *sharedInstance = nil;
+    static UKInfoManager *sharedInstance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         sharedInstance = [[self alloc] init];
@@ -153,7 +154,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         if (self.floatingWindow) return;
         
         CGRect screenBounds = [UIScreen mainScreen].bounds;
-        self.floatingWindow = [[SpainWindow alloc] initWithFrame:screenBounds];
+        self.floatingWindow = [[UKWindow alloc] initWithFrame:screenBounds];
         self.floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
         self.floatingWindow.hidden = NO;
         self.floatingWindow.backgroundColor = [UIColor clearColor];
@@ -165,8 +166,8 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         self.floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.floatingBtn.tag = 999888;
         self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
-        self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.85 green:0.15 blue:0.15 alpha:0.9];
-        [self.floatingBtn setTitle:@"ESP" forState:UIControlStateNormal];
+        self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.35 blue:0.65 alpha:0.9]; // لون مميز لبريطانيا
+        [self.floatingBtn setTitle:@"UK" forState:UIControlStateNormal];
         [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
         self.floatingBtn.layer.cornerRadius = 30;
@@ -206,20 +207,20 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         rootVC = rootVC.presentedViewController;
     }
     
-    SpainReportViewController *reportVC = [[SpainReportViewController alloc] init];
+    UKReportViewController *reportVC = [[UKReportViewController alloc] init];
     reportVC.modalPresentationStyle = UIModalPresentationFullScreen;
     [rootVC presentViewController:reportVC animated:YES completion:nil];
 }
 
 @end
 
-// إعداد الجلسة فور تشغيل التطبيق وتوليد IP وموقع متطابقين تماماً
+// إعداد الجلسة فور تشغيل التطبيق وتوليد IP بريطاني وموقع متطابق تماماً
 %ctor {
-    initializeSpainSession();
+    initializeUKSession();
     fetchRealIP();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[SpainInfoManager sharedInstance] setupFloatingButton];
+        [[UKInfoManager sharedInstance] setupFloatingButton];
     });
 }
 
