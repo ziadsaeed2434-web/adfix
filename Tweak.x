@@ -6,21 +6,19 @@ static NSString *rotatingUUID = nil;
 static NSString *rotatingMAC = nil;
 static NSString *randomLocale = nil;
 static NSString *randomTimeZone = nil;
-static NSString *randomSystemVersion = nil;
 static float randomBattery = 0.5f;
-static CGFloat randomScale = 2.0f;
 
-static void generateUltimateFingerprintPersona() {
-    // 1. المعرفات تتجدد
+static void generateStablePersona() {
+    // 1. معرفات الإعلانات والـ UUID تتجدد
     rotatingIDFA = [[NSUUID UUID] UUIDString];
     rotatingUUID = [[NSUUID UUID] UUIDString];
     
-    // 2. توليد ماك أدرس عشوائي ومزيف بصيغة صحيحة لكل إقلاع
+    // 2. توليد ماك أدرس عشوائي ومتجدد لكل إقلاع
     rotatingMAC = [NSString stringWithFormat:@"%02x:%02x:%02x:%02x:%02x:%02x",
                    arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256),
                    arc4random_uniform(256), arc4random_uniform(256), arc4random_uniform(256)];
     
-    // 3. لغة ونطاق عشوائي
+    // 3. لغة عشوائية
     NSArray *locales = @[@"en_US", @"en_GB", @"en_CA", @"en_AU"];
     randomLocale = locales[arc4random_uniform((uint32_t)locales.count)];
     
@@ -28,34 +26,28 @@ static void generateUltimateFingerprintPersona() {
     NSArray *timeZones = @[@"America/New_York", @"America/Chicago", @"America/Los_Angeles", @"Europe/London"];
     randomTimeZone = timeZones[arc4random_uniform((uint32_t)timeZones.count)];
     
-    // 5. إصدارات نظام مختلفة
-    NSArray *versions = @[@"17.4", @"17.5", @"18.0", @"18.1", @"26.6"];
-    randomSystemVersion = versions[arc4random_uniform((uint32_t)versions.count)];
-    
-    // 6. نسبة بطارية وعرض عشوائية
+    // 5. نسبة بطارية عشوائية لكل جلسة
     randomBattery = (float)(arc4random_uniform(85) + 10) / 100.0f;
-    NSArray *scales = @[@2.0f, @3.0f];
-    randomScale = [scales[arc4random_uniform((uint32_t)scales.count)] floatValue];
 }
 
-@interface UltimateFingerprintHUD : NSObject
+@interface StableFingerprintHUD : NSObject
 + (void)showStatus;
 @end
 
-@implementation UltimateFingerprintHUD
+@implementation StableFingerprintHUD
 + (void)showStatus {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = [[UIWindow alloc] initWithFrame:CGRectMake(15, 40, 310, 30)];
         window.windowLevel = UIWindowLevelAlert + 9999;
         window.hidden = NO;
-        window.backgroundColor = [UIColor colorWithRed:0.1 green:0.6 blue:0.4 alpha:0.95];
+        window.backgroundColor = [UIColor colorWithRed:0.1 green:0.5 blue:0.7 alpha:0.95];
         window.layer.cornerRadius = 6;
         
         UILabel *lbl = [[UILabel alloc] initWithFrame:window.bounds];
         lbl.textColor = [UIColor whiteColor];
         lbl.textAlignment = NSTextAlignmentCenter;
         lbl.font = [UIFont boldSystemFontOfSize:11];
-        lbl.text = @"🔒 Safe Fingerprint Spoofer Active";
+        lbl.text = @"🛡️ MAC & Fingerprint Spoofer Active";
         [window addSubview:lbl];
         
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -66,31 +58,29 @@ static void generateUltimateFingerprintPersona() {
 @end
 
 %ctor {
-    generateUltimateFingerprintPersona();
+    generateStablePersona();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [UltimateFingerprintHUD showStatus];
+        [StableFingerprintHUD showStatus];
     });
 }
 
-// 1. معرفات الإعلانات والـ UUID المتجددة
+// 1. معرف الإعلانات يتجدد
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     return [[NSUUID alloc] initWithUUIDString:rotatingIDFA];
 }
 %end
 
+// 2. الـ UUID العام يتجدد
 %hook NSUUID
 - (instancetype)initWithUUIDString:(NSString *)string {
     return %orig(rotatingUUID);
 }
 %end
 
-// 2. إصدار النظام والبطارية الآمنة
+// 3. البطارية تتغير عشوائياً
 %hook UIDevice
-- (NSString *)systemVersion {
-    return randomSystemVersion;
-}
 - (float)batteryLevel {
     return randomBattery;
 }
@@ -99,14 +89,7 @@ static void generateUltimateFingerprintPersona() {
 }
 %end
 
-// 3. دقة الشاشة ومقياس العرض الآمن
-%hook UIScreen
-- (CGFloat)scale {
-    return randomScale;
-}
-%end
-
-// 4. اللغة والمنطقة الزمنية
+// 4. اللغة تتغير عشوائياً
 %hook NSLocale
 + (NSString *)preferredLanguages {
     return (NSString *)randomLocale;
@@ -116,6 +99,7 @@ static void generateUltimateFingerprintPersona() {
 }
 %end
 
+// 5. المنطقة الزمنية تتغير عشوائياً
 %hook NSTimeZone
 + (NSTimeZone *)localTimeZone {
     return [NSTimeZone timeZoneWithName:randomTimeZone];
