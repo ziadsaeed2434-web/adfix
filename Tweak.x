@@ -1,230 +1,28 @@
 #import <CoreLocation/CoreLocation.h>
 #import <UIKit/UIKit.h>
-#import <AdSupport/ASIdentifierManager.h>
+#import <CoreTelephony/CTTelephonyNetworkInfo.h>
+#import <CoreTelephony/CTCarrier.h>
 
 static double currentLat = 0.0;
 static double currentLon = 0.0;
-static NSString *sessionFakeIP = @"";
-static NSString *currentRealIP = @"جاري الجلب...";
-static NSMutableArray *networkLogs = nil;
 
+// توليد رقم عشوائي آمن
 double randomInRange(double min, double max) {
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
+// توليد إحداثيات عشوائية جديدة داخل مدينة أتلانطا، أمريكا
 void updateAtlantaLocation() {
     currentLat = randomInRange(33.7000, 33.8000);
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// توليد IP وهمي ضمن نطاقين فقط: 172.57 أو 172.59
-void initializeSessionIP() {
-    // اختيار الرقم الثالث إما 57 أو 59 عشوائياً
-    int thirdBlock = (arc4random_uniform(2) == 0) ? 57 : 59; 
-    int fourthBlock = arc4random_uniform(255);
-    sessionFakeIP = [NSString stringWithFormat:@"172.%d.%d.%d", thirdBlock, fourthBlock, arc4random_uniform(255)];
-}
-
-void fetchRealIP() {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
-        NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
-        if (ip && ip.length > 0) {
-            currentRealIP = ip;
-        } else {
-            currentRealIP = @"غير قادر على الجلب";
-        }
-    });
-}
-
-void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
-    if (!networkLogs) {
-        networkLogs = [[NSMutableArray alloc] init];
-    }
-    
-    NSURL *url = [NSURL URLWithString:urlStr];
-    NSString *path = url.path ? url.path : urlStr;
-    if (path.length > 30) {
-        path = [[path substringToIndex:30] stringByAppendingString:@"..."];
-    }
-    
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
-    
-    @synchronized(networkLogs) {
-        [networkLogs insertObject:logEntry atIndex:0];
-        if (networkLogs.count > 15) {
-            [networkLogs removeLastObject];
-        }
-    }
-}
-
-// واجهة منبثقة مخصصة (تمنع الكراش وتحتوي على زر إغلاق وتمرير سلس)
-@interface AtlantaReportViewController : UIViewController
-@end
-
-@implementation AtlantaReportViewController
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.95];
-    
-    // شاشة التمرير للتقارير الطويلة
-    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
-    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self.view addSubview:scrollView];
-    
-    // تجهيز النصوص
-    NSString *udidStr = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
-    NSUUID *idfaUUID = [[ASIdentifierManager sharedManager] advertisingIdentifier];
-    NSString *idfaStr = [idfaUUID UUIDString];
-    
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي الحالي:\n%@\n\n🛡️ ايبى الشبكة الفعلي (VPN):\n%@", sessionFakeIP, currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
-    
-    NSString *logsText = @"";
-    @synchronized(networkLogs) {
-        if (networkLogs && networkLogs.count > 0) {
-            logsText = [networkLogs componentsJoinedByString:@"\n\n--------------------\n\n"];
-        } else {
-            logsText = @"لا توجد طلبات مسجلة بعد.";
-        }
-    }
-    
-    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 تفاصيل الطلبات والآيبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
-    
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 60, self.view.bounds.size.width - 40, 0)];
-    label.text = fullReport;
-    label.textColor = [UIColor whiteColor];
-    label.font = [UIFont systemFontOfSize:13];
-    label.numberOfLines = 0;
-    [label sizeToFit];
-    
-    scrollView.contentSize = CGSizeMake(self.view.bounds.size.width, label.frame.size.height + 120);
-    [scrollView addSubview:label];
-    
-    // زر إغلاق واضح وسهل الاستخدام
-    UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeBtn.frame = CGRectMake(20, 20, 80, 35);
-    closeBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:1.0];
-    [closeBtn setTitle:@"إغلاق" forState:UIControlStateNormal];
-    [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    closeBtn.layer.cornerRadius = 8;
-    [closeBtn addTarget:self action:@selector(dismissPopup) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:closeBtn];
-}
-
-- (void)dismissPopup {
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
-@end
-
-@interface AtlantaWindow : UIWindow
-@end
-
-@implementation AtlantaWindow
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn = [self viewWithTag:999888];
-    if (btn && CGRectContainsPoint(btn.frame, point)) {
-        return YES;
-    }
-    return NO;
-}
-@end
-
-@interface AtlantaInfoManager : NSObject
-@property (strong, nonatomic) AtlantaWindow *floatingWindow;
-@property (strong, nonatomic) UIButton *floatingBtn;
-+ (instancetype)sharedInstance;
-- (void)setupFloatingButton;
-@end
-
-@implementation AtlantaInfoManager
-
-+ (instancetype)sharedInstance {
-    static AtlantaInfoManager *sharedInstance = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        sharedInstance = [[self alloc] init];
-    });
-    return sharedInstance;
-}
-
-- (void)setupFloatingButton {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.floatingWindow) return;
-        
-        CGRect screenBounds = [UIScreen mainScreen].bounds;
-        self.floatingWindow = [[AtlantaWindow alloc] initWithFrame:screenBounds];
-        self.floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
-        self.floatingWindow.hidden = NO;
-        self.floatingWindow.backgroundColor = [UIColor clearColor];
-        
-        UIViewController *vc = [[UIViewController alloc] init];
-        vc.view.backgroundColor = [UIColor clearColor];
-        self.floatingWindow.rootViewController = vc;
-        
-        self.floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.floatingBtn.tag = 999888;
-        self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
-        self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.floatingBtn setTitle:@"ATL" forState:UIControlStateNormal];
-        [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-        self.floatingBtn.layer.cornerRadius = 30;
-        self.floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.floatingBtn.layer.shadowOffset = CGSizeMake(0, 2);
-        self.floatingBtn.layer.shadowOpacity = 0.5;
-        self.floatingBtn.layer.shadowRadius = 5;
-        
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.floatingBtn addGestureRecognizer:pan];
-        
-        [self.floatingBtn addTarget:self action:@selector(showFullDetailsPopup) forControlEvents:UIControlEventTouchUpInside];
-        
-        [vc.view addSubview:self.floatingBtn];
-    });
-}
-
-- (void)handlePan:(UIPanGestureRecognizer * _Nonnull)gesture {
-    UIView *btn = gesture.view;
-    CGPoint translation = [gesture translationInView:btn.superview];
-    
-    CGFloat newX = btn.center.x + translation.x;
-    CGFloat newY = btn.center.y + translation.y;
-    
-    CGSize screenSize = [UIScreen mainScreen].bounds.size;
-    newX = MAX(30, MIN(screenSize.width - 30, newX));
-    newY = MAX(40, MIN(screenSize.height - 40, newY));
-    
-    btn.center = CGPointMake(newX, newY);
-    [gesture setTranslation:CGPointZero inView:btn.superview];
-}
-
-- (void)showFullDetailsPopup {
-    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-    UIViewController *rootVC = keyWindow.rootViewController;
-    while (rootVC.presentedViewController) {
-        rootVC = rootVC.presentedViewController;
-    }
-    
-    AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
-    reportVC.modalPresentationStyle = UIModalPresentationFullScreen;
-    [rootVC presentViewController:reportVC animated:YES completion:nil];
-}
-
-@end
-
-// إعداد الجلسة فور تشغيل التطبيق
+// تهيئة الموقع فور فتح التطبيق
 %ctor {
     updateAtlantaLocation();
-    initializeSessionIP(); // تثبيت IP واحد ضمن نطاق 172.57 أو 172.59 طوال الجلسة
-    fetchRealIP();
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[AtlantaInfoManager sharedInstance] setupFloatingButton];
-    });
 }
 
+// 1. خداع نظام تحديد الموقع (GPS) وتوجيهه لإحداثيات أتلانطا الوهمية
 %hook CLLocationManager
 - (void)startUpdatingLocation {
     updateAtlantaLocation();
@@ -233,26 +31,56 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
     }
 }
+
 - (CLLocation *)location {
     updateAtlantaLocation();
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
 }
 %end
 
-%hook NSURLSession
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    
-    // استخدام نفس الـ IP الثابت ضمن النطاقين المحددين طوال الجلسة
-    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-    [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
-    
-    NSString *urlString = request.URL.absoluteString;
-    if (urlString) {
-        logNetworkRequest(urlString, sessionFakeIP, currentLat, currentLon);
-    }
-    
-    return %orig(mutableReq, completionHandler);
+// 2. خداع المنطقة الزمنية لتوقيت أمريكا
+%hook NSTimeZone
++ (NSTimeZone *)localTimeZone {
+    NSTimeZone *atlantaTZ = [NSTimeZone timeZoneWithName:@"America/New_York"];
+    return atlantaTZ ? atlantaTZ : %orig;
+}
+
++ (NSTimeZone *)systemTimeZone {
+    NSTimeZone *atlantaTZ = [NSTimeZone timeZoneWithName:@"America/New_York"];
+    return atlantaTZ ? atlantaTZ : %orig;
+}
+%end
+
+// 3. خداع لغة ومنطقة الجهاز لتكون الولايات المتحدة (en_US)
+%hook NSLocale
++ (NSLocale *)currentLocale {
+    return [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
+}
+
++ (id)autoupdatingCurrentLocale {
+    return [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
+}
+%end
+
+// 4. خداع معلومات الشبكة والشريحة لتظهر كأنها شبكة أمريكية (Carrier)
+%hook CTCarrier
+- (NSString *)carrierName {
+    return @"AT&T"; // اسم شركة اتصالات أمريكية مشهورة
+}
+
+- (NSString *)mobileCountryCode {
+    return @"310"; // رمز الدولة (MCC) للولايات المتحدة
+}
+
+- (NSString *)mobileNetworkCode {
+    return @"410"; // رمز المزود (MNC) لأمريكا
+}
+
+- (NSString *)isoCountryCode {
+    return @"us"; // رمز الدولة ISO
+}
+
+- (BOOL)allowsVOIP {
+    return YES;
 }
 %end
