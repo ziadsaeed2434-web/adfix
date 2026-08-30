@@ -7,7 +7,7 @@
 static double currentLat = 0.0;
 static double currentLon = 0.0;
 static NSString *currentRealIP = @"جاري الجلب...";
-static NSString *sessionStaticIP = nil;
+static NSString *sessionStaticIP = nil; // 🔒 متغير لتثبيت الـ IP طوال الجلسة الحالية
 static NSMutableArray *networkLogs = nil;
 
 double randomInRange(double min, double max) {
@@ -15,12 +15,11 @@ double randomInRange(double min, double max) {
 }
 
 void updateAtlantaLocation() {
-    if (currentLat == 0.0 || currentLon == 0.0) {
-        currentLat = randomInRange(33.7000, 33.8000);
-        currentLon = randomInRange(-84.4500, -84.3500);
-    }
+    currentLat = randomInRange(33.7000, 33.8000);
+    currentLon = randomInRange(-84.4500, -84.3500);
 }
 
+// 🔒 مولد IP ثابت للجلسة الواحدة (يتغير فقط عند إعادة تشغيل التطبيق)
 NSString * getSessionStaticIP() {
     if (!sessionStaticIP) {
         int secondOctet = (arc4random_uniform(2) == 0) ? 57 : 59;
@@ -54,7 +53,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         path = [[path substringToIndex:30] stringByAppendingString:@"..."];
     }
     
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 IP الثابت: %@\n📍 الموقع الثابت: (%.4f, %.4f)", path, ip, lat, lon];
+    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 IP الجلسة الثابت: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
     
     @synchronized(networkLogs) {
         [networkLogs insertObject:logEntry atIndex:0];
@@ -64,6 +63,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     }
 }
 
+// واجهة التقارير للزر العائم
 @interface AtlantaReportViewController : UIViewController
 @end
 
@@ -80,8 +80,8 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     NSUUID *idfaUUID = [[ASIdentifierManager sharedManager] advertisingIdentifier];
     NSString *idfaStr = [idfaUUID UUIDString];
     
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الثابت للجلسة:\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 الـ IP الثابت للجلسة:\n%@\n\n🛡️ ايبى الشبكة الفعلي (VPN):\n%@", sessionStaticIP, currentRealIP];
+    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 الـ IP الثابت لهذه الجلسة:\n%@\n(ثابت طوال فترة فتح التطبيق)\n\n🛡️ ايبى الشبكة الفعلي (VPN):\n%@", sessionStaticIP, currentRealIP];
     NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
@@ -203,74 +203,52 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 - (void)showFullDetailsPopup {
-    // 🛡️ حماية آمنة لجلب الـ rootViewController بدون كرش
-    UIWindow *keyWindow = nil;
-    for (UIWindow *window in [UIApplication sharedApplication].windows) {
-        if (window.isKeyWindow) {
-            keyWindow = window;
-            break;
-        }
-    }
-    if (!keyWindow) keyWindow = [UIApplication sharedApplication].delegate.window;
-    
+    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = keyWindow.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
     
-    if (rootVC) {
-        AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
-        reportVC.modalPresentationStyle = UIModalPresentationFullScreen;
-        [rootVC presentViewController:reportVC animated:YES completion:nil];
-    }
+    AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
+    reportVC.modalPresentationStyle = UIModalPresentationFullScreen;
+    [rootVC presentViewController:reportVC animated:YES completion:nil];
 }
 
 @end
 
-// 🛡️ دالة الإقلاع الآمنة لمنع الـ Crash
+// التنفيذ عند تشغيل التطبيق وتوليد الـ IP للجلسة الحالية
 %ctor {
     @autoreleasepool {
         updateAtlantaLocation();
-        getSessionStaticIP();
+        getSessionStaticIP(); // توليد وتثبيت الـ IP فور إقلاع التطبيق
         fetchRealIP();
         
-        @try {
-            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-            [defaults setInteger:0 forKey:@"RV_CappingManager.IS_CAPPED_ENABLED_DefaultRewardedVideo"];
-            [defaults setInteger:0 forKey:@"IS_CappingManager.IS_DELETABLE_ENABLED_DefaultInterstitial"];
-            [defaults setInteger:0 forKey:@"BN_CappingManager.IS_DELETABLE_DELAY_ENABLED_DefaultBanner"];
-            
-            [defaults removeObjectForKey:@"uuidStringFromStore"];
-            [defaults removeObjectForKey:@"User.id"];
-            [defaults removeObjectForKey:@"unityads-idfi"];
-            
-            NSDictionary *dict = [defaults dictionaryRepresentation];
-            for (NSString *key in dict.allKeys) {
-                if (key && [key isKindOfClass:[NSString class]]) {
-                    NSString *lowerKey = [key lowercaseString];
-                    if ([lowerKey containsString:@"capping"] || 
-                        [lowerKey containsString:@"idfi"] || 
-                        [lowerKey containsString:@"cap"] || 
-                        [lowerKey containsString:@"limit"] ||
-                        [lowerKey containsString:@"ads"]) {
-                        [defaults removeObjectForKey:key];
-                    }
-                }
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setInteger:0 forKey:@"RV_CappingManager.IS_CAPPED_ENABLED_DefaultRewardedVideo"];
+        [defaults setInteger:0 forKey:@"IS_CappingManager.IS_DELETABLE_ENABLED_DefaultInterstitial"];
+        [defaults setInteger:0 forKey:@"BN_CappingManager.IS_DELETABLE_DELAY_ENABLED_DefaultBanner"];
+        
+        [defaults removeObjectForKey:@"uuidStringFromStore"];
+        [defaults removeObjectForKey:@"User.id"];
+        [defaults removeObjectForKey:@"unityads-idfi"];
+        
+        NSDictionary *dict = [defaults dictionaryRepresentation];
+        for (NSString *key in dict.allKeys) {
+            NSString *lowerKey = [key lowercaseString];
+            if ([lowerKey containsString:@"capping"] || 
+                [lowerKey containsString:@"idfi"] || 
+                [lowerKey containsString:@"cap"] || 
+                [lowerKey containsString:@"limit"] ||
+                [lowerKey containsString:@"ads"]) {
+                [defaults removeObjectForKey:key];
             }
-            
-            NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-            for (NSHTTPCookie *cookie in cookieStorage.cookies) {
-                [cookieStorage deleteCookie:cookie];
-            }
-            
-            [[NSURLCache sharedURLCache] removeAllCachedResponses];
-            [defaults synchronize];
-        } @catch (NSException *exception) {
-            NSLog(@"[AtlantaTweak] Clean exception: %@", exception.reason);
         }
         
-        // إظهار الزر العائم بـ Delay آمن يضمن اكتمال تهيئة نافذة التطبيق الأساسية
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[NSHTTPCookieStorage sharedHTTPCookieStorage] removeCookiesSinceDate:[NSDate distantPast]];
+        [[NSURLCache sharedURLCache] removeAllCachedResponses];
+        [defaults synchronize];
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [[AtlantaInfoManager sharedInstance] setupFloatingButton];
         });
     }
@@ -293,20 +271,19 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
-    if (!mutableReq) return %orig;
     
-    NSString *staticIP = getSessionStaticIP();
-    if (staticIP) {
-        [mutableReq setValue:staticIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [mutableReq setValue:staticIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:staticIP forHTTPHeaderField:@"X-Real-IP"];
-    }
+    // 🔒 استخدام نفس الـ IP الثابت طوال الجلسة الحالية دون تغيره مع كل طلب
+    NSString *sessionIP = getSessionStaticIP();
+    
+    [mutableReq setValue:sessionIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:sessionIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:sessionIP forHTTPHeaderField:@"X-Real-IP"];
     
     [mutableReq setCachePolicy:NSURLRequestReloadIgnoringLocalCacheData];
     
     NSString *urlString = request.URL.absoluteString;
     if (urlString) {
-        logNetworkRequest(urlString, staticIP ? staticIP : @"Unknown", currentLat, currentLon);
+        logNetworkRequest(urlString, sessionIP, currentLat, currentLon);
     }
     
     return %orig(mutableReq, completionHandler);
