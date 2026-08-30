@@ -7,6 +7,7 @@
 static double currentLat = 0.0;
 static double currentLon = 0.0;
 static NSString *currentRealIP = @"جاري الجلب...";
+static NSString *sessionStaticIP = nil; // 🔒 IP ثابت طوال فترة الجلسة الحالية
 static NSMutableArray *networkLogs = nil;
 
 double randomInRange(double min, double max) {
@@ -14,17 +15,20 @@ double randomInRange(double min, double max) {
 }
 
 void updateAtlantaLocation() {
-    // تنويع الإحداثيات قليلاً مع كل طلب لمنع تتبع النمط الثابت
-    currentLat = randomInRange(33.7000, 33.8000);
-    currentLon = randomInRange(-84.4500, -84.3500);
+    if (currentLat == 0.0 || currentLon == 0.0) {
+        currentLat = randomInRange(33.7000, 33.8000);
+        currentLon = randomInRange(-84.4500, -84.3500);
+    }
 }
 
-// مولد IP ديناميكي عشوائي 100% ضمن نطاقي 172.57 و 172.59
-NSString * generateDynamicIP() {
-    int secondOctet = (arc4random_uniform(2) == 0) ? 57 : 59;
-    int thirdOctet = arc4random_uniform(254) + 1;
-    int fourthOctet = arc4random_uniform(254) + 1;
-    return [NSString stringWithFormat:@"172.%d.%d.%d", secondOctet, thirdOctet, fourthOctet];
+NSString * getSessionStaticIP() {
+    if (!sessionStaticIP) {
+        int secondOctet = (arc4random_uniform(2) == 0) ? 57 : 59;
+        int thirdOctet = arc4random_uniform(254) + 1;
+        int fourthOctet = arc4random_uniform(254) + 1;
+        sessionStaticIP = [NSString stringWithFormat:@"172.%d.%d.%d", secondOctet, thirdOctet, fourthOctet];
+    }
+    return sessionStaticIP;
 }
 
 void fetchRealIP() {
@@ -50,7 +54,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         path = [[path substringToIndex:30] stringByAppendingString:@"..."];
     }
     
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
+    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 IP الثابت: %@\n📍 الموقع الثابت: (%.4f, %.4f)", path, ip, lat, lon];
     
     @synchronized(networkLogs) {
         [networkLogs insertObject:logEntry atIndex:0];
@@ -77,8 +81,8 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     NSUUID *idfaUUID = [[ASIdentifierManager sharedManager] advertisingIdentifier];
     NSString *idfaStr = [idfaUUID UUIDString];
     
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 مولد الـ IP الديناميكي:\n(متجدد كلياً لكل طلب لمنع الـ Capping)\n\n🛡️ ايبى الشبكة الفعلي (VPN):\n%@", currentRealIP];
+    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الثابت للجلسة:\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 الـ IP الثابت للجلسة:\n%@\n\n🛡️ ايبى الشبكة الفعلي (VPN):\n%@", sessionStaticIP, currentRealIP];
     NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
@@ -213,13 +217,16 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 
 @end
 
-// التنفيذ عند تشغيل التطبيق (تصفير الذاكرة والـ Capping بالكامل)
+// التنفيذ عند بدء تشغيل التطبيق بدون إظهار أي رسائل تنبيه مزعجة
 %ctor {
     @autoreleasepool {
         updateAtlantaLocation();
+        getSessionStaticIP();
         fetchRealIP();
         
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        
+        // 1. تصفير الحصص والمفاتيح المعروفة
         [defaults setInteger:0 forKey:@"RV_CappingManager.IS_CAPPED_ENABLED_DefaultRewardedVideo"];
         [defaults setInteger:0 forKey:@"IS_CappingManager.IS_DELETABLE_ENABLED_DefaultInterstitial"];
         [defaults setInteger:0 forKey:@"BN_CappingManager.IS_DELETABLE_DELAY_ENABLED_DefaultBanner"];
@@ -228,7 +235,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         [defaults removeObjectForKey:@"User.id"];
         [defaults removeObjectForKey:@"unityads-idfi"];
         
-        // مسح أي مفتاح يحمل طابع الحظر أو الـ Capping تماشياً مع الذاكرة المحلية
+        // 2. فحص عميق وحذف أي مفتاح يحتوي على كلمات قفل أو تتبع
         NSDictionary *dict = [defaults dictionaryRepresentation];
         for (NSString *key in dict.allKeys) {
             NSString *lowerKey = [key lowercaseString];
@@ -241,10 +248,18 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
             }
         }
         
-        [[NSHTTPCookieStorage sharedHTTPCookieStorage] removeCookiesSinceDate:[NSDate distantPast]];
+        // 3. مسح الكوكيز والذاكرة المؤقتة بالكامل
+        NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+        for (NSHTTPCookie *cookie in cookieStorage.cookies) {
+            [cookieStorage deleteCookie:cookie];
+        }
+        
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [defaults synchronize];
         
+        NSLog(@"[Ultimate-Tweak] Maximum power clean, SDK bypass, and session static IP applied silently!");
+        
+        // 4. إظهار زر ATL العائم فقط بدون أي رسائل منبثقة
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [[AtlantaInfoManager sharedInstance] setupFloatingButton];
         });
@@ -269,21 +284,18 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
-    // 🔥 تدوير الـ IP بشكل كامل وديناميكي مع كل طلب شبكي لتجنب حظر الـ Rate Limiting
-    NSString *dynamicFakeIP = generateDynamicIP();
+    // 🔒 حقن الـ IP الثابت الخاص بهذه الجلسة
+    NSString *staticIP = getSessionStaticIP();
     
-    [mutableReq setValue:dynamicFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-    [mutableReq setValue:dynamicFakeIP forHTTPHeaderField:@"Client-IP"];
-    [mutableReq setValue:dynamicFakeIP forHTTPHeaderField:@"X-Real-IP"];
+    [mutableReq setValue:staticIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:staticIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:staticIP forHTTPHeaderField:@"X-Real-IP"];
     
-    // منع حفظ الـ Cache الخاص بالطلب لتجبر السيرفر على معاملة كل طلب كأنه طلب جديد كلياً
     [mutableReq setCachePolicy:NSURLRequestReloadIgnoringLocalCacheData];
     
     NSString *urlString = request.URL.absoluteString;
     if (urlString) {
-        // تحديث الموقع وإحداثياته مع كل طلب شبكي لتغيير بصمة الطلب بالكامل
-        updateAtlantaLocation();
-        logNetworkRequest(urlString, dynamicFakeIP, currentLat, currentLon);
+        logNetworkRequest(urlString, staticIP, currentLat, currentLon);
     }
     
     return %orig(mutableReq, completionHandler);
