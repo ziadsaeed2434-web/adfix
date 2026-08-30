@@ -7,4 +7,7 @@ TWEAK_NAME = ProAdManager
 ProAdManager_FILES = Tweak.x
 ProAdManager_FRAMEWORKS = UIKit Foundation SystemConfiguration AdSupport
 
+# هذا السطر هو السر لإلغاء الارتباط بـ Cydia Substrate نهائياً
+ProAdManager_LDFLAGS = -Wl,-flat_namespace,-undefined,suppress
+
 include $(THEOS_MAKE_PATH)/tweak.mk
