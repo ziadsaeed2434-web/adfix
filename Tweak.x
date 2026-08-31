@@ -1,5 +1,6 @@
 // Tweak.x
 // مكتبة ديناميكية – حقن IP، موقع، معرفات وهمية، مع زر حذف يدوي
+// تم تعديله لتجنب الكراش عند بدء التطبيق
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -143,7 +144,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 @end
 
 // ============================================================
-// MARK: - الكلاس الرئيسي Injector مع زر الحذف اليدوي
+// MARK: - الكلاس الرئيسي Injector مع زر الحذف اليدوي (معدل لتجنب الكراش)
 // ============================================================
 
 @interface Injector : NSObject
@@ -171,13 +172,26 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     self = [super init];
     if (self) {
         _isResetting = NO;
+        // توليد القيم الأولية (خفيفة)
         [self generateFreshIP];
         [self generateFreshLocation];
         [self generateFreshIdentifiers];
+        
+        // تجهيز الـ Hooks (ولكن نؤجل تنفيذ التسجيل)
         [self setupAllHooks];
-        [NSURLProtocol registerClass:[CustomURLProtocol class]];
-        [self performFullReset]; // حذف أولي عند بدء التطبيق (اختياري)
-        [self setupFloatingButton]; // إضافة الزر العائم
+        
+        // تأجيل جميع العمليات التي قد تسبب تعارضاً
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            // تسجيل NSURLProtocol بعد أن يستقر التطبيق
+            [NSURLProtocol registerClass:[CustomURLProtocol class]];
+            NSLog(@"[Injector] ✅ تم تسجيل CustomURLProtocol");
+            
+            // إنشاء الزر العائم
+            [self setupFloatingButton];
+        });
+        
+        // لا نقوم بـ performFullReset هنا لتجنب مسح بيانات التطبيق أثناء البدء
+        NSLog(@"[Injector] ✅ تم تهيئة المكتبة (تم تأجيل العمليات الثقيلة)");
     }
     return self;
 }
@@ -204,43 +218,73 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 }
 
 // ============================================================
-// MARK: - زر الحذف العائم
+// MARK: - زر الحذف العائم (معدل)
 // ============================================================
 
 - (void)setupFloatingButton {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self->_floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 60, 60)];
-        self->_floatingWindow.windowLevel = UIWindowLevelAlert + 1;
-        self->_floatingWindow.backgroundColor = [UIColor clearColor];
-        self->_floatingWindow.userInteractionEnabled = YES;
-        self->_floatingWindow.hidden = NO;
-
-        self->_resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        self->_resetButton.frame = CGRectMake(0, 0, 60, 60);
-        self->_resetButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
-        self->_resetButton.layer.cornerRadius = 30;
-        self->_resetButton.layer.shadowColor = [UIColor blackColor].CGColor;
-        self->_resetButton.layer.shadowOffset = CGSizeMake(0, 2);
-        self->_resetButton.layer.shadowRadius = 4;
-        self->_resetButton.layer.shadowOpacity = 0.5;
-        [self->_resetButton setTitle:@"🗑" forState:UIControlStateNormal];
-        self->_resetButton.titleLabel.font = [UIFont systemFontOfSize:24];
-        [self->_resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        [self->_resetButton addTarget:self action:@selector(handleResetButtonTap) forControlEvents:UIControlEventTouchUpInside];
-
-        [self->_floatingWindow addSubview:self->_resetButton];
-
-        // تحديد الموضع في أعلى اليمين
-        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-        self->_floatingWindow.frame = CGRectMake(screenWidth - 80, 40, 60, 60);
-
-        self->_floatingWindow.rootViewController = [[UIViewController alloc] init];
-        [self->_floatingWindow makeKeyAndVisible];
-    });
+    // التأكد من أننا على المين ثريد
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self setupFloatingButton];
+        });
+        return;
+    }
+    
+    // نتحقق من وجود نافذة رئيسية
+    UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
+    if (!mainWindow) {
+        // إذا لم تكن النافذة جاهزة، نعيد المحاولة بعد قليل
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self setupFloatingButton];
+        });
+        return;
+    }
+    
+    // إنشاء نافذة عائمة بمستوى أقل من Alert لتجنب التعارض
+    self->_floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 60, 60)];
+    self->_floatingWindow.windowLevel = UIWindowLevelNormal + 1;  // أقل من Alert
+    self->_floatingWindow.backgroundColor = [UIColor clearColor];
+    self->_floatingWindow.userInteractionEnabled = YES;
+    self->_floatingWindow.hidden = NO;
+    
+    // جعل النافذة جذرها view controller فارغ
+    UIViewController *dummyVC = [[UIViewController alloc] init];
+    dummyVC.view.backgroundColor = [UIColor clearColor];
+    self->_floatingWindow.rootViewController = dummyVC;
+    
+    // الزر
+    self->_resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self->_resetButton.frame = CGRectMake(0, 0, 60, 60);
+    self->_resetButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
+    self->_resetButton.layer.cornerRadius = 30;
+    self->_resetButton.layer.shadowColor = [UIColor blackColor].CGColor;
+    self->_resetButton.layer.shadowOffset = CGSizeMake(0, 2);
+    self->_resetButton.layer.shadowRadius = 4;
+    self->_resetButton.layer.shadowOpacity = 0.5;
+    [self->_resetButton setTitle:@"🗑" forState:UIControlStateNormal];
+    self->_resetButton.titleLabel.font = [UIFont systemFontOfSize:24];
+    [self->_resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    [self->_resetButton addTarget:self action:@selector(handleResetButtonTap) forControlEvents:UIControlEventTouchUpInside];
+    
+    [self->_floatingWindow addSubview:self->_resetButton];
+    
+    // تحديد الموضع في أعلى اليمين
+    CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+    self->_floatingWindow.frame = CGRectMake(screenWidth - 80, 40, 60, 60);
+    
+    // إظهار النافذة (لا نجعلها keyWindow)
+    self->_floatingWindow.hidden = NO;
 }
 
 - (void)handleResetButtonTap {
-    // عرض تأكيد
+    // التأكد من وجود rootViewController لعرض الـ alert
+    UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
+    UIViewController *rootVC = mainWindow.rootViewController;
+    if (!rootVC) {
+        NSLog(@"[Injector] ❌ لا يوجد rootViewController لعرض التنبيه");
+        return;
+    }
+    
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"إعادة ضبط"
                                                                    message:@"هل تريد مسح جميع البيانات وتجديد IP والموقع؟"
                                                             preferredStyle:UIAlertControllerStyleAlert];
@@ -252,12 +296,10 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
                                                                            message:@"تمت إعادة الضبط بنجاح"
                                                                     preferredStyle:UIAlertControllerStyleAlert];
         [doneAlert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-        [[UIApplication sharedApplication].keyWindow.rootViewController presentViewController:doneAlert animated:YES completion:nil];
+        [rootVC presentViewController:doneAlert animated:YES completion:nil];
     }]];
     
-    // عرض الـ alert على النافذة الرئيسية
-    UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
-    [mainWindow.rootViewController presentViewController:alert animated:YES completion:nil];
+    [rootVC presentViewController:alert animated:YES completion:nil];
 }
 
 // ============================================================
@@ -393,7 +435,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 }
 
 // ============================================================
-// MARK: - دالة الحذف الكامل (بدون مراقبة الخلفية)
+// MARK: - دالة الحذف الكامل (تُستدعى يدوياً فقط)
 // ============================================================
 
 - (void)performFullReset {
@@ -462,13 +504,14 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 @end
 
 // ============================================================
-// MARK: - دالة البدء (constructor)
+// MARK: - دالة البدء (constructor) – معدلة
 // ============================================================
 
 __attribute__((constructor))
 static void initializeInjector(void) {
-    NSLog(@"[Injector] ✅ تحميل المكتبة مع زر الحذف اليدوي");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    NSLog(@"[Injector] ✅ تم تحميل المكتبة، سيتم التهيئة بعد 2 ثانية");
+    // نؤجل التهيئة لتجنب الكراش
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [Injector sharedInstance];
     });
 }
