@@ -3,28 +3,80 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/ASIdentifierManager.h>
 #import <objc/runtime.h>
+#import <Security/Security.h>
 
 // إحداثيات أتلانتا، جورجيا، أمريكا (Atlanta, Georgia, USA)
 static double kFakeLatitude = 33.7490;
 static double kFakeLongitude = -84.3880;
 
-// متغيرات لتخزين البصمة الرقمية المتغيرة لكل جلسة
+// متغيرات البصمة والمتغيرات العشوائية الجديدة لكل جلسة
 static NSString *currentRandomIDFA = nil;
 static NSString *currentVendorID = nil;
+static NSString *currentGlobalUUID = nil;
 static NSString *currentMockIP = nil;
 
-// دالة لتوليد هوية جديدة وعنوان IP أمريكي وهمي ونظيف لكل طلب أو جلسة
-void randomizeDeviceFingerprintAndIP() {
-    // 1. توليد IDFA و IDFV عشوائي جديد تماماً
+// دالة تفريغ وحذف بيانات الجلسة وتوليد UUID جديد كلياً
+void wipeAppSessionData() {
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    
+    // 1. مسح الـ NSUserDefaults بالكامل
+    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+    if (bundleIdentifier) {
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+    
+    // 2. مسح ملفات Caches المؤقتة
+    NSArray *cachePaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+    NSString *cacheDirectory = [cachePaths firstObject];
+    if (cacheDirectory) {
+        NSError *error = nil;
+        NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:cacheDirectory error:&error];
+        for (NSString *file in contents) {
+            NSString *fullPath = [cacheDirectory stringByAppendingPathComponent:file];
+            [[NSFileManager defaultManager] removeItemAtPath:fullPath error:nil];
+        }
+    }
+    
+    // 3. مسح الـ Keychain بالكامل عدا العناصر المستثناة (userIDKey & accessTokenKey)
+    NSDictionary *query = @{
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword
+    };
+    
+    CFArrayRef result = NULL;
+    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result) == errSecSuccess && result) {
+        NSArray *items = (__bridge_transfer NSArray *)result;
+        for (NSDictionary *item in items) {
+            NSString *service = item[(__bridge id)kSecAttrService];
+            NSString *account = item[(__bridge id)kSecAttrAccount];
+            
+            BOOL isExcepted = ([service isEqualToString:@"com.codebysms"] && 
+                               ([account isEqualToString:@"userIDKey"] || [account isEqualToString:@"accessTokenKey"]));
+            
+            if (!isExcepted) {
+                NSDictionary *delQuery = @{
+                    (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                    (__bridge id)kSecAttrService: service ?: @"",
+                    (__bridge id)kSecAttrAccount: account ?: @""
+                };
+                SecItemDelete((__bridge CFDictionaryRef)delQuery);
+            }
+        }
+    }
+    
+    // 4. توليد هويات جهاز جديدة بالكامل (بما فيها UUID عالمي جديد)
     currentRandomIDFA = [[NSUUID UUID] UUIDString];
     currentVendorID = [[NSUUID UUID] UUIDString];
+    currentGlobalUUID = [[NSUUID UUID] UUIDString];
     
-    // 2. توليد نطاق IP أمريكي عشوائي ونظيف (مثلاً في نطاق ولاية جورجيا / أتلانتا)
-    int thirdOctet = arc4random_uniform(20) + 10;   // نطاق عشوائي نظيف
+    // 5. توليد IP أمريكي جديد في أتلانتا
+    int thirdOctet = arc4random_uniform(20) + 10;
     int fourthOctet = arc4random_uniform(250) + 2;
     currentMockIP = [NSString stringWithFormat:@"12.186.%d.%d", thirdOctet, fourthOctet];
     
-    NSLog(@"[Anti-GeoBlock] Rotated Fingerprint -> IDFA: %@ | Mock IP: %@", currentRandomIDFA, currentMockIP);
+    NSLog(@"[CleanSlate] Full wipe & UUID rotated. New UUID: %@ | IP: %@", currentGlobalUUID, currentMockIP);
+    
+    [pool drain];
 }
 
 // ==========================================
@@ -62,7 +114,7 @@ void randomizeDeviceFingerprintAndIP() {
 %end
 
 // ==========================================
-// 2. تزييف معرفات الأجهزة والملفات (IDFA & Device)
+// 2. تزييف معرفات الأجهزة والـ UUID
 // ==========================================
 %hook ASIdentifierManager
 
@@ -88,76 +140,61 @@ void randomizeDeviceFingerprintAndIP() {
 
 %end
 
-// ==========================================
-// 3. حقن الـ IP المزود ونطاقات الطلبات (Network Hooking)
-// ==========================================
-%hook NSMutableURLRequest
+// اعتراض دوال إنشاط الـ NSUUID لمنح التطبيق UUID متجدد بالكامل
+%hook NSUUID
 
-- (void)setAllHTTPHeaderFields:(NSDictionary<NSString *,NSString *> *)fields {
-    NSMutableDictionary *newFields = [fields mutableCopy];
-    if (!newFields) {
-        newFields = [NSMutableDictionary dictionary];
+- (instancetype)initWithUUIDString:(NSString *)string {
+    if (currentGlobalUUID) {
+        return %orig(currentGlobalUUID);
     }
-    
-    // حقن رأس ترويسي يحاكي الـ IP الأمريكي الوهمي والنظيف في كل طلب شبكي
-    if (currentMockIP) {
-        [newFields setObject:currentMockIP forKey:@"X-Forwarded-For"];
-        [newFields setObject:currentMockIP forKey:@"X-Client-IP"];
-        [newFields setObject:currentMockIP forKey:@"Client-IP"];
-    }
-    
-    %orig(newFields);
+    return %orig;
 }
 
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame && currentMockIP) {
-        value = currentMockIP;
++ (id)UUID {
+    if (currentGlobalUUID) {
+        return [[NSUUID alloc] initWithUUIDString:currentGlobalUUID];
     }
-    %orig(value, field);
+    return %orig;
 }
 
 %end
 
-// اعتراض NSURLSession وتحديث الـ Headers لكل طلب يتم إنشاؤه
+// ==========================================
+// 3. حقن الـ IP عبر NSURLSession بأمان تام
+// ==========================================
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
-    
-    if (currentMockIP) {
+    if (mutableReq && currentMockIP) {
         [mutableReq setValue:currentMockIP forHTTPHeaderField:@"X-Forwarded-For"];
         [mutableReq setValue:currentMockIP forHTTPHeaderField:@"X-Client-IP"];
     }
-    
-    return %orig(mutableReq, completionHandler);
+    return %orig(mutableReq ? mutableReq : request, completionHandler);
 }
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
-    
-    if (currentMockIP) {
+    if (mutableReq && currentMockIP) {
         [mutableReq setValue:currentMockIP forHTTPHeaderField:@"X-Forwarded-For"];
         [mutableReq setValue:currentMockIP forHTTPHeaderField:@"X-Client-IP"];
     }
-    
-    return %orig(mutableReq);
+    return %orig(mutableReq ? mutableReq : request);
 }
 
 %end
 
 // ==========================================
-// 4. مراقبة تفعيل التطبيق وتدوير الهوية تلقائياً
+// 4. تدوير الهوية ومسح البيانات عند فتح وإغلاق التطبيق
 // ==========================================
 %ctor {
-    // توليد بصمة و IP أولي عند الحقن
-    randomizeDeviceFingerprintAndIP();
+    wipeAppSessionData();
     
-    // رصد العودة للتطبيق (Foreground) لتغيير البصمة والـ IP الوهمي فوراً
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
-        randomizeDeviceFingerprintAndIP();
-        NSLog(@"[Anti-GeoBlock] App resumed. Fingerprint and IP rotated completely!");
+        wipeAppSessionData();
+        NSLog(@"[CleanSlate] App resumed. New UUID and clean environment applied.");
     }];
 }
