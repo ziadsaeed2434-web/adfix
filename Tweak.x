@@ -1,5 +1,5 @@
 // Tweak.x
-// مكتبة ديناميكية محسّنة – تعمل مع Theos
+// مكتبة ديناميكية – حقن IP، موقع، معرفات وهمية، مع زر حذف يدوي
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -24,7 +24,7 @@ static NSUUID *cachedVendorID = nil;
 static NSUUID *cachedAdvertisingID = nil;
 
 // ============================================================
-// MARK: - تعريف المولدات (IP, Location) قبل استخدامها في Injector
+// MARK: - مولد IP
 // ============================================================
 
 @interface IPGenerator : NSObject
@@ -48,6 +48,10 @@ static NSUUID *cachedAdvertisingID = nil;
 }
 @end
 
+// ============================================================
+// MARK: - مولد الموقع (أتلانتا)
+// ============================================================
+
 @interface LocationGenerator : NSObject
 + (CLLocation *)generateLocationInAtlanta;
 @end
@@ -69,7 +73,7 @@ static NSUUID *cachedAdvertisingID = nil;
 @end
 
 // ============================================================
-// MARK: - تعريف CustomURLProtocol مع التزام بالبروتوكولات
+// MARK: - NSURLProtocol لاعتراض كل الطلبات
 // ============================================================
 
 @interface CustomURLProtocol : NSURLProtocol <NSURLSessionDelegate, NSURLSessionTaskDelegate>
@@ -94,8 +98,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     NSMutableURLRequest *mutableRequest = [[self request] mutableCopy];
     [NSURLProtocol setProperty:@YES forKey:CustomURLProtocolHandledKey inRequest:mutableRequest];
 
-    // حقن الترويسات باستخدام Injector (سيتم تعريفه لاحقاً، لكن يمكن استدعاء الدالة مباشرة)
-    // نستخدم معرف خارجي، سنقوم بتمرير الطلب إلى Injector عبر دالة ثابتة
+    // حقن الترويسات
     NSMutableURLRequest *modifiedRequest = [self injectHeadersIntoRequest:mutableRequest];
 
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
@@ -116,11 +119,8 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     [task resume];
 }
 
-- (void)stopLoading {
-    // لا حاجة
-}
+- (void)stopLoading {}
 
-// دالة مساعدة لحقن الترويسات (مكررة هنا لعدم الاعتماد على Injector)
 - (NSMutableURLRequest *)injectHeadersIntoRequest:(NSURLRequest *)request {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     if (!cachedFakeIP) {
@@ -135,8 +135,6 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     return mutableReq;
 }
 
-#pragma mark - NSURLSessionTaskDelegate
-
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completionHandler {
     NSMutableURLRequest *redirectRequest = [self injectHeadersIntoRequest:request];
     completionHandler(redirectRequest);
@@ -145,7 +143,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 @end
 
 // ============================================================
-// MARK: - الكلاس الرئيسي Injector (يُعرَّف بعد استخداماته)
+// MARK: - الكلاس الرئيسي Injector مع زر الحذف اليدوي
 // ============================================================
 
 @interface Injector : NSObject
@@ -156,6 +154,8 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 
 @implementation Injector {
     BOOL _isResetting;
+    UIWindow *_floatingWindow;
+    UIButton *_resetButton;
 }
 
 + (instancetype)sharedInstance {
@@ -175,12 +175,16 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
         [self generateFreshLocation];
         [self generateFreshIdentifiers];
         [self setupAllHooks];
-        [self setupLifecycleNotifications];
         [NSURLProtocol registerClass:[CustomURLProtocol class]];
-        [self performFullReset];
+        [self performFullReset]; // حذف أولي عند بدء التطبيق (اختياري)
+        [self setupFloatingButton]; // إضافة الزر العائم
     }
     return self;
 }
+
+// ============================================================
+// MARK: - توليد القيم الجديدة
+// ============================================================
 
 - (void)generateFreshIP {
     cachedFakeIP = [IPGenerator generateAmericanIP];
@@ -198,6 +202,74 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     cachedVendorID = [NSUUID UUID];
     cachedAdvertisingID = [NSUUID UUID];
 }
+
+// ============================================================
+// MARK: - زر الحذف العائم
+// ============================================================
+
+- (void)setupFloatingButton {
+    // ننتظر حتى يصبح التطبيق جاهزاً
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // إنشاء نافذة عائمة
+        self->_floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 60, 60)];
+        self->_floatingWindow.windowLevel = UIWindowLevelAlert + 1;
+        self->_floatingWindow.backgroundColor = [UIColor clearColor];
+        self->_floatingWindow.userInteractionEnabled = YES;
+        self->_floatingWindow.hidden = NO;
+
+        // زر الحذف
+        self->_resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        self->_resetButton.frame = CGRectMake(0, 0, 60, 60);
+        self->_resetButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
+        self->_resetButton.layer.cornerRadius = 30;
+        self->_resetButton.layer.shadowColor = [UIColor blackColor].CGColor;
+        self->_resetButton.layer.shadowOffset = CGSizeMake(0, 2);
+        self->_resetButton.layer.shadowRadius = 4;
+        self->_resetButton.layer.shadowOpacity = 0.5;
+        [self->_resetButton setTitle:@"🗑" forState:UIControlStateNormal];
+        self->_resetButton.titleLabel.font = [UIFont systemFontOfSize:24];
+        [self->_resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self->_resetButton addTarget:self action:@selector(handleResetButtonTap) forControlEvents:UIControlEventTouchUpInside];
+
+        // إضافة الزر إلى النافذة
+        [self->_floatingWindow addSubview:self->_resetButton];
+
+        // وضع النافذة في أعلى اليمين مع مسافة بسيطة من الحافة
+        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+        CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
+        // نضعها في الزاوية العلوية اليمنى
+        self->_floatingWindow.frame = CGRectMake(screenWidth - 80, 40, 60, 60);
+
+        // جعل النافذة تظهر
+        self->_floatingWindow.rootViewController = [[UIViewController alloc] init];
+        [self->_floatingWindow makeKeyAndVisible];
+    });
+}
+
+- (void)handleResetButtonTap {
+    // عرض تأكيد
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"إعادة ضبط"
+                                                                   message:@"هل تريد مسح جميع البيانات وتجديد IP والموقع؟"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"حذف" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
+        [self performFullReset];
+        // إشعار نجاح
+        UIAlertController *doneAlert = [UIAlertController alertControllerWithTitle:@"تم"
+                                                                           message:@"تمت إعادة الضبط بنجاح"
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+        [doneAlert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+        [[UIApplication sharedApplication].keyWindow.rootViewController presentViewController:doneAlert animated:YES completion:nil];
+    }]];
+    
+    // عرض الـ alert على النافذة الرئيسية
+    UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
+    [mainWindow.rootViewController presentViewController:alert animated:YES completion:nil];
+}
+
+// ============================================================
+// MARK: - إعداد الـ Hooks
+// ============================================================
 
 - (void)setupAllHooks {
     [self hookNetworkClasses];
@@ -327,31 +399,15 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     return cachedAdvertisingID ?: [NSUUID UUID];
 }
 
-#pragma mark - Lifecycle & Reset
-
-- (void)setupLifecycleNotifications {
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(applicationDidEnterBackground:)
-                                                 name:UIApplicationDidEnterBackgroundNotification
-                                               object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(applicationWillEnterForeground:)
-                                                 name:UIApplicationWillEnterForegroundNotification
-                                               object:nil];
-}
-
-- (void)applicationDidEnterBackground:(NSNotification *)notification {}
-
-- (void)applicationWillEnterForeground:(NSNotification *)notification {
-    if (!_isResetting) {
-        _isResetting = YES;
-        [self performFullReset];
-        _isResetting = NO;
-    }
-}
+// ============================================================
+// MARK: - دالة الحذف الكامل (بدون مراقبة الخلفية)
+// ============================================================
 
 - (void)performFullReset {
-    NSLog(@"[Injector] 🔄 إعادة ضبط...");
+    if (_isResetting) return;
+    _isResetting = YES;
+    
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط (يدوي)");
     [self clearCachesAndCookies];
     [self clearUserDefaults];
     [self clearLocalStorage];
@@ -359,7 +415,8 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     [self generateFreshIP];
     [self generateFreshLocation];
     [self generateFreshIdentifiers];
-    NSLog(@"[Injector] ✅ اكتمل.");
+    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط");
+    _isResetting = NO;
 }
 
 - (void)clearCachesAndCookies {
@@ -417,7 +474,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 
 __attribute__((constructor))
 static void initializeInjector(void) {
-    NSLog(@"[Injector] ✅ تحميل المكتبة");
+    NSLog(@"[Injector] ✅ تحميل المكتبة مع زر الحذف اليدوي");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [Injector sharedInstance];
     });
