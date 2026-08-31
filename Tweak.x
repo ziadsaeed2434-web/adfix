@@ -3,84 +3,26 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/ASIdentifierManager.h>
 #import <objc/runtime.h>
-#import <Security/Security.h>
 
 // إحداثيات أتلانتا، جورجيا، أمريكا (Atlanta, Georgia, USA)
 static double kFakeLatitude = 33.7490;
 static double kFakeLongitude = -84.3880;
 
-// متغيرات البصمة للجلسة الحالية
+// متغيرات البصمة والـ IP المتغيرة لكل جلسة فتح للتطبيق
 static NSString *currentRandomIDFA = nil;
 static NSString *currentVendorID = nil;
 static NSString *currentMockIP = nil;
 
-// دالة مسح البيانات والـ Keychain بأمان تام
-void wipeAppSessionData() {
-    @try {
-        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-        
-        // 1. مسح الـ NSUserDefaults بالكامل
-        NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleIdentifier) {
-            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
-            [[NSUserDefaults standardUserDefaults] synchronize];
-        }
-        
-        // 2. مسح ملفات Caches المؤقتة
-        NSArray *cachePaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-        NSString *cacheDirectory = [cachePaths firstObject];
-        if (cacheDirectory) {
-            NSFileManager *fileManager = [NSFileManager defaultManager];
-            NSArray *contents = [fileManager contentsOfDirectoryAtPath:cacheDirectory error:nil];
-            for (NSString *file in contents) {
-                NSString *fullPath = [cacheDirectory stringByAppendingPathComponent:file];
-                [fileManager removeItemAtPath:fullPath error:nil];
-            }
-        }
-        
-        // 3. مسح الـ Keychain بأمان عدا المفاتيح المستثناة
-        NSDictionary *query = @{
-            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-            (__bridge id)kSecReturnAttributes: @YES,
-            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
-        };
-        
-        CFArrayRef result = NULL;
-        if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result) == errSecSuccess && result) {
-            NSArray *items = (__bridge NSArray *)result;
-            for (NSDictionary *item in items) {
-                NSString *service = item[(__bridge id)kSecAttrService];
-                NSString *account = item[(__bridge id)kSecAttrAccount];
-                
-                BOOL isExcepted = ([service isEqualToString:@"com.codebysms"] && 
-                                   ([account isEqualToString:@"userIDKey"] || [account isEqualToString:@"accessTokenKey"]));
-                
-                if (!isExcepted) {
-                    NSDictionary *delQuery = @{
-                        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                        (__bridge id)kSecAttrService: service ?: @"",
-                        (__bridge id)kSecAttrAccount: account ?: @""
-                    };
-                    SecItemDelete((__bridge CFDictionaryRef)delQuery);
-                }
-            }
-            CFRelease(result);
-        }
-        
-        // 4. توليد هويات جديدة للجلسة
-        currentRandomIDFA = [[NSUUID UUID] UUIDString];
-        currentVendorID = [[NSUUID UUID] UUIDString];
-        
-        int thirdOctet = arc4random_uniform(20) + 10;
-        int fourthOctet = arc4random_uniform(250) + 2;
-        currentMockIP = [NSString stringWithFormat:@"12.186.%d.%d", thirdOctet, fourthOctet];
-        
-        NSLog(@"[CleanSlate] Session Wiped Successfully! New IDFA: %@ | IP: %@", currentRandomIDFA, currentMockIP);
-        
-        [pool drain];
-    } @catch (NSException *exception) {
-        NSLog(@"[Anti-GeoBlock] Exception caught during wipe: %@", exception);
-    }
+// دالة توليد بصمة جديدة و IP أمريكي جديد نظيف
+void rotateIPAndFingerprint() {
+    currentRandomIDFA = [[NSUUID UUID] UUIDString];
+    currentVendorID = [[NSUUID UUID] UUIDString];
+    
+    int thirdOctet = arc4random_uniform(20) + 10;
+    int fourthOctet = arc4random_uniform(250) + 2;
+    currentMockIP = [NSString stringWithFormat:@"12.186.%d.%d", thirdOctet, fourthOctet];
+    
+    NSLog(@"[GeoIP] Rotated -> IDFA: %@ | Mock IP: %@", currentRandomIDFA, currentMockIP);
 }
 
 // ==========================================
@@ -145,7 +87,7 @@ void wipeAppSessionData() {
 %end
 
 // ==========================================
-// 3. حقن الـ IP بأمان تام عبر NSURLSession
+// 3. حقن الـ IP المزود في كل طلب شبكي (NSURLSession)
 // ==========================================
 %hook NSURLSession
 
@@ -170,9 +112,18 @@ void wipeAppSessionData() {
 %end
 
 // ==========================================
-// 4. التشغيل الآمن عند بدء التطبيق
+// 4. تغيير الـ IP والبصمة مع كل فتحة جديدة للتطبيق
 // ==========================================
 %ctor {
-    // تنفيذ التنظيف وتوليد البصمة بسلام ودون أي تعارض مع الواجهات
-    wipeAppSessionData();
+    // تدوير الـ IP والبصمة عند فتح التطبيق أول مرة
+    rotateIPAndFingerprint();
+    
+    // تدوير الـ IP والبصمة تلقائياً في كل مرة تخرج من التطبيق وتعود إليه (Foreground)
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        rotateIPAndFingerprint();
+        NSLog(@"[GeoIP] App resumed. New IP and location parameters applied!");
+    }];
 }
