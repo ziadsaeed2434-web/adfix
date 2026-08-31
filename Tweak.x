@@ -208,16 +208,13 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 // ============================================================
 
 - (void)setupFloatingButton {
-    // ننتظر حتى يصبح التطبيق جاهزاً
     dispatch_async(dispatch_get_main_queue(), ^{
-        // إنشاء نافذة عائمة
         self->_floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 60, 60)];
         self->_floatingWindow.windowLevel = UIWindowLevelAlert + 1;
         self->_floatingWindow.backgroundColor = [UIColor clearColor];
         self->_floatingWindow.userInteractionEnabled = YES;
         self->_floatingWindow.hidden = NO;
 
-        // زر الحذف
         self->_resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
         self->_resetButton.frame = CGRectMake(0, 0, 60, 60);
         self->_resetButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
@@ -231,16 +228,12 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
         [self->_resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         [self->_resetButton addTarget:self action:@selector(handleResetButtonTap) forControlEvents:UIControlEventTouchUpInside];
 
-        // إضافة الزر إلى النافذة
         [self->_floatingWindow addSubview:self->_resetButton];
 
-        // وضع النافذة في أعلى اليمين مع مسافة بسيطة من الحافة
+        // تحديد الموضع في أعلى اليمين
         CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-        CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
-        // نضعها في الزاوية العلوية اليمنى
         self->_floatingWindow.frame = CGRectMake(screenWidth - 80, 40, 60, 60);
 
-        // جعل النافذة تظهر
         self->_floatingWindow.rootViewController = [[UIViewController alloc] init];
         [self->_floatingWindow makeKeyAndVisible];
     });
