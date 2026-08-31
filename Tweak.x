@@ -9,77 +9,76 @@
 static double kFakeLatitude = 33.7490;
 static double kFakeLongitude = -84.3880;
 
-// متغيرات البصمة والمتغيرات العشوائية الجديدة لكل جلسة
+// متغيرات البصمة للجلسة الحالية
 static NSString *currentRandomIDFA = nil;
 static NSString *currentVendorID = nil;
-static NSString *currentGlobalUUID = nil;
 static NSString *currentMockIP = nil;
 
-// دالة تفريغ وحذف بيانات الجلسة وتوليد UUID جديد كلياً
+// دالة مسح البيانات والـ Keychain بأمان تام وبدون كراش
 void wipeAppSessionData() {
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    
-    // 1. مسح الـ NSUserDefaults بالكامل
-    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
-    if (bundleIdentifier) {
-        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-    }
-    
-    // 2. مسح ملفات Caches المؤقتة
-    NSArray *cachePaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-    NSString *cacheDirectory = [cachePaths firstObject];
-    if (cacheDirectory) {
-        NSError *error = nil;
-        NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:cacheDirectory error:&error];
-        for (NSString *file in contents) {
-            NSString *fullPath = [cacheDirectory stringByAppendingPathComponent:file];
-            [[NSFileManager defaultManager] removeItemAtPath:fullPath error:nil];
+    @try {
+        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+        
+        // 1. مسح الـ NSUserDefaults بالكامل
+        NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+        if (bundleIdentifier) {
+            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+            [[NSUserDefaults standardUserDefaults] synchronize];
         }
-    }
-    
-    // 3. مسح الـ Keychain بالكامل عدا العناصر المستثناة (userIDKey & accessTokenKey)
-    NSDictionary *query = @{
-        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecReturnAttributes: @YES,
-        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
-    };
-    
-    CFArrayRef result = NULL;
-    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result) == errSecSuccess && result) {
-        NSArray *items = (__bridge NSArray *)result;
-        for (NSDictionary *item in items) {
-            NSString *service = item[(__bridge id)kSecAttrService];
-            NSString *account = item[(__bridge id)kSecAttrAccount];
-            
-            BOOL isExcepted = ([service isEqualToString:@"com.codebysms"] && 
-                               ([account isEqualToString:@"userIDKey"] || [account isEqualToString:@"accessTokenKey"]));
-            
-            if (!isExcepted) {
-                NSDictionary *delQuery = @{
-                    (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                    (__bridge id)kSecAttrService: service ?: @"",
-                    (__bridge id)kSecAttrAccount: account ?: @""
-                };
-                SecItemDelete((__bridge CFDictionaryRef)delQuery);
+        
+        // 2. مسح ملفات Caches المؤقتة
+        NSArray *cachePaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+        NSString *cacheDirectory = [cachePaths firstObject];
+        if (cacheDirectory) {
+            NSFileManager *fileManager = [NSFileManager defaultManager];
+            NSArray *contents = [fileManager contentsOfDirectoryAtPath:cacheDirectory error:nil];
+            for (NSString *file in contents) {
+                NSString *fullPath = [cacheDirectory stringByAppendingPathComponent:file];
+                [fileManager removeItemAtPath:fullPath error:nil];
             }
         }
-        CFRelease(result);
+        
+        // 3. مسح الـ Keychain بأمان عدا المفاتيح المستثناة
+        NSDictionary *query = @{
+            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecReturnAttributes: @YES,
+            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
+        };
+        
+        CFArrayRef result = NULL;
+        if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result) == errSecSuccess && result) {
+            NSArray *items = (__bridge NSArray *)result;
+            for (NSDictionary *item in items) {
+                NSString *service = item[(__bridge id)kSecAttrService];
+                NSString *account = item[(__bridge id)kSecAttrAccount];
+                
+                BOOL isExcepted = ([service isEqualToString:@"com.codebysms"] && 
+                                   ([account isEqualToString:@"userIDKey"] || [account isEqualToString:@"accessTokenKey"]));
+                
+                if (!isExcepted) {
+                    NSDictionary *delQuery = @{
+                        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                        (__bridge id)kSecAttrService: service ?: @"",
+                        (__bridge id)kSecAttrAccount: account ?: @""
+                    };
+                    SecItemDelete((__bridge CFDictionaryRef)delQuery);
+                }
+            }
+            CFRelease(result);
+        }
+        
+        // 4. توليد هويات جديدة للجلسة
+        currentRandomIDFA = [[NSUUID UUID] UUIDString];
+        currentVendorID = [[NSUUID UUID] UUIDString];
+        
+        int thirdOctet = arc4random_uniform(20) + 10;
+        int fourthOctet = arc4random_uniform(250) + 2;
+        currentMockIP = [NSString stringWithFormat:@"12.186.%d.%d", thirdOctet, fourthOctet];
+        
+        [pool drain];
+    } @catch (NSException *exception) {
+        NSLog(@"[Anti-GeoBlock] Exception caught during wipe: %@", exception);
     }
-    
-    // 4. توليد هويات جهاز جديدة بالكامل (بما فيها UUID عالمي جديد)
-    currentRandomIDFA = [[NSUUID UUID] UUIDString];
-    currentVendorID = [[NSUUID UUID] UUIDString];
-    currentGlobalUUID = [[NSUUID UUID] UUIDString];
-    
-    // 5. توليد IP أمريكي جديد في أتلانتا
-    int thirdOctet = arc4random_uniform(20) + 10;
-    int fourthOctet = arc4random_uniform(250) + 2;
-    currentMockIP = [NSString stringWithFormat:@"12.186.%d.%d", thirdOctet, fourthOctet];
-    
-    NSLog(@"[CleanSlate] Full wipe & UUID rotated. New UUID: %@ | IP: %@", currentGlobalUUID, currentMockIP);
-    
-    [pool drain];
 }
 
 // ==========================================
@@ -117,7 +116,7 @@ void wipeAppSessionData() {
 %end
 
 // ==========================================
-// 2. تزييف معرفات الأجهزة والـ UUID
+// 2. تزييف معرفات الأجهزة (IDFA & IDFV)
 // ==========================================
 %hook ASIdentifierManager
 
@@ -143,27 +142,8 @@ void wipeAppSessionData() {
 
 %end
 
-// اعتراض دوال إنشاء الـ NSUUID لمنح التطبيق UUID متجدد بالكامل
-%hook NSUUID
-
-- (instancetype)initWithUUIDString:(NSString *)string {
-    if (currentGlobalUUID) {
-        return %orig(currentGlobalUUID);
-    }
-    return %orig;
-}
-
-+ (id)UUID {
-    if (currentGlobalUUID) {
-        return [[NSUUID alloc] initWithUUIDString:currentGlobalUUID];
-    }
-    return %orig;
-}
-
-%end
-
 // ==========================================
-// 3. حقن الـ IP عبر NSURLSession بأمان تام
+// 3. حقن الـ IP بأمان تام عبر NSURLSession
 // ==========================================
 %hook NSURLSession
 
@@ -188,7 +168,7 @@ void wipeAppSessionData() {
 %end
 
 // ==========================================
-// 4. تدوير الهوية ومسح البيانات عند فتح وإغلاق التطبيق
+// 4. تنفيذ التنظيف الآمن عند التشغيل والعودة
 // ==========================================
 %ctor {
     wipeAppSessionData();
@@ -198,6 +178,6 @@ void wipeAppSessionData() {
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
         wipeAppSessionData();
-        NSLog(@"[CleanSlate] App resumed. New UUID and clean environment applied.");
+        NSLog(@"[CleanSlate] App resumed safely. Environment wiped.");
     }];
 }
