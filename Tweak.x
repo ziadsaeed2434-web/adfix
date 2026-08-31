@@ -30,30 +30,311 @@ void updateAtlantaLocation() {
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// توليد IP وهمي من نطاقات حقيقية (أمريكية)
+// ============================================================
+// MARK: - توليد IP من مزودي الإنترنت السكنيين الأمريكيين
+// ============================================================
+
+// بنية لتخزين نطاق IP (CIDR) لكل مزود
+typedef struct {
+    char *name;
+    int prefix;      // البايت الأول (البت الثابت)
+    int secondStart; // بداية النطاق للبايت الثاني
+    int secondEnd;   // نهاية النطاق للبايت الثاني
+    int thirdStart;  // بداية النطاق للبايت الثالث (اختياري 0-255)
+    int thirdEnd;    // نهاية النطاق للبايت الثالث
+} ISPBlock;
+
+// قائمة بأهم مزودي الإنترنت السكنيين في أمريكا ونطاقاتهم (مأخوذة من ARIN)
+static ISPBlock ispBlocks[] = {
+    // 1. AT&T (AS7018) - نطاقات رئيسية
+    {.name = "AT&T", .prefix = 12, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 32, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 68, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 70, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 72, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 74, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 99, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 107, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 108, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 135, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 136, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 137, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 138, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 139, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 140, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 141, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 142, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 143, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 144, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 145, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 146, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 147, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 148, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 149, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 150, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 151, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 152, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 153, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 154, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 155, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 156, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 157, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 158, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 159, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 160, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 161, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 162, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 163, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 164, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 165, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 166, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 167, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 168, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 169, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 170, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 171, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 172, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 173, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 174, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 175, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 176, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 177, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 178, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 179, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 180, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 181, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 182, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 183, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 184, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 185, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 186, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 187, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 188, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 189, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 190, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 191, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 192, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 193, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 194, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 195, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 196, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 197, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 198, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "AT&T", .prefix = 199, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    // 2. Comcast / Xfinity (AS7922)
+    {.name = "Comcast", .prefix = 23, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 24, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 50, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 67, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 68, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 69, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 70, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 71, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 72, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 73, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 74, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 75, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 76, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 96, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 97, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 98, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 99, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 100, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 104, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 108, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 128, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 129, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 130, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 131, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 132, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 133, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 134, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 135, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 136, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 137, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 138, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 139, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 140, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 141, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 142, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 143, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 144, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 145, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 146, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 147, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 148, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 149, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 150, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 151, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 152, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 153, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 154, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 155, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 156, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 157, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 158, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 159, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 160, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 161, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 162, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 163, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 164, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 165, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 166, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 167, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 168, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 169, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Comcast", .prefix = 170, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    // 3. Google Fiber (AS16591)
+    {.name = "Google Fiber", .prefix = 104, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Google Fiber", .prefix = 108, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Google Fiber", .prefix = 136, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Google Fiber", .prefix = 137, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Google Fiber", .prefix = 138, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    // 4. Spectrum / Charter (AS20115)
+    {.name = "Spectrum", .prefix = 47, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 62, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 66, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 67, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 68, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 69, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 70, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 71, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 72, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 73, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 74, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 75, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 76, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 97, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 98, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 99, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 100, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 104, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 107, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 108, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 128, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 129, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 130, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 131, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 132, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 133, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 134, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Spectrum", .prefix = 135, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    // 5. Cox Communications (AS22773)
+    {.name = "Cox", .prefix = 24, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 32, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 50, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 51, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 68, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 69, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 70, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 71, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 72, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 73, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 74, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 75, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 76, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 98, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Cox", .prefix = 99, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    // 6. T-Mobile Home Internet (AS21928)
+    {.name = "T-Mobile", .prefix = 23, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 44, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 64, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 65, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 66, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 67, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 68, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 69, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 70, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 71, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 72, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 73, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 74, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 75, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "T-Mobile", .prefix = 76, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    // 7. Verizon (AS701 / AS6167)
+    {.name = "Verizon", .prefix = 23, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 24, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 25, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 26, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 27, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 28, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 29, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 30, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 32, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 33, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 34, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 35, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 36, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 37, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 38, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 39, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 40, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 41, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 42, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 43, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 44, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 45, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 46, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 47, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 48, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 49, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 50, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 51, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 52, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 53, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 54, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 55, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 56, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 57, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 58, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 59, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 60, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 61, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 62, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 63, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 64, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 65, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 66, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 67, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 68, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 69, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 70, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 71, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 72, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 73, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 74, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 75, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+    {.name = "Verizon", .prefix = 76, .secondStart = 0, .secondEnd = 255, .thirdStart = 0, .thirdEnd = 255},
+};
+
+// توليد IP من مزود عشوائي
 void generateSessionIP() {
-    NSArray *americanPrefixes = @[
-        @12, @13, @23, @44, @52, @54, @63, @64, @65, @66, @67, @68, @69,
-        @70, @71, @72, @73, @74, @75, @76,
-        @96, @97, @98, @99,
-        @104, @107, @108,
-        @131, @132, @133, @134, @135, @136, @137, @138, @139,
-        @140, @141, @142, @143, @144, @145, @146, @147, @148, @149,
-        @150, @151, @152, @153, @154, @155, @156, @157, @158, @159,
-        @160, @161, @162, @163, @164, @165, @166, @167,
-        @170, @171,
-        @173, @174, @175, @176, @177, @178, @179, @180, @181, @182, @183,
-        @184, @185, @186, @187, @188, @189, @190, @191,
-        @193, @194, @195, @196, @197, @198, @199,
-        @204, @205, @206, @207, @208, @209, @210, @211, @212, @213, @214, @215,
-        @216, @217, @218, @219, @220, @221, @222, @223
-    ];
-    int prefix = [americanPrefixes[arc4random_uniform((uint32_t)americanPrefixes.count)] intValue];
-    int oct2 = arc4random_uniform(256);
-    int oct3 = arc4random_uniform(256);
-    int oct4 = arc4random_uniform(256);
+    int totalBlocks = sizeof(ispBlocks) / sizeof(ISPBlock);
+    int index = arc4random_uniform(totalBlocks);
+    ISPBlock block = ispBlocks[index];
+    
+    int prefix = block.prefix;
+    int second = block.secondStart + arc4random_uniform(block.secondEnd - block.secondStart + 1);
+    int third = block.thirdStart + arc4random_uniform(block.thirdEnd - block.thirdStart + 1);
+    int fourth = arc4random_uniform(256);
+    
+    // تجنب النطاقات الخاصة (اختياري)
     if (prefix == 127) prefix = 12;
-    sessionFakeIP = [NSString stringWithFormat:@"%d.%d.%d.%d", prefix, oct2, oct3, oct4];
+    if (prefix == 10) prefix = 12;
+    if (prefix == 192 && second == 168) { // نطاق خاص 192.168.x.x
+        second = arc4random_uniform(256);
+    }
+    if (prefix == 172 && second >= 16 && second <= 31) { // نطاق خاص 172.16-31.x.x
+        second = 32 + arc4random_uniform(224);
+    }
+    
+    sessionFakeIP = [NSString stringWithFormat:@"%d.%d.%d.%d", prefix, second, third, fourth];
+    
+    // تسجيل المزود في الـ log (للتحقق)
+    // يمكن إضافة اسم المزود إلى الـ log إذا أردت
+    // لكننا سنحتفظ بـ IP فقط للخصوصية
+    NSLog(@"[Injector] 🌐 تم توليد IP من مزود: %s -> %@", block.name, sessionFakeIP);
 }
 
 void generateFakeIdentifiers() {
@@ -156,7 +437,7 @@ void performFullReset() {
 }
 
 // ============================================================
-// MARK: - واجهة عرض التفاصيل (اختيارية، يمكن إزالتها)
+// MARK: - واجهة عرض التفاصيل (اختيارية)
 // ============================================================
 
 @interface AtlantaReportViewController : UIViewController
@@ -175,7 +456,7 @@ void performFullReset() {
     NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (من نطاق حقيقي):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (من مزود سكني أمريكي):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
     NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
@@ -279,7 +560,6 @@ void performFullReset() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
         
-        // عند الضغط: تنفيذ إعادة الضبط مباشرة دون تأكيد
         [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.floatingBtn];
@@ -298,12 +578,8 @@ void performFullReset() {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 
-// دالة الزر: تنفيذ إعادة الضبط فوراً وعرض رسالة نجاح
 - (void)handleReset {
-    // تنفيذ إعادة الضبط
     performFullReset();
-    
-    // عرض رسالة نجاح (بدون تأكيد)
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = keyWindow.rootViewController;
     while (rootVC.presentedViewController) {
