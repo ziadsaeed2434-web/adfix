@@ -14,30 +14,26 @@ double randomInRange(double min, double max) {
 }
 
 void updateAtlantaLocation() {
-    // نطاق دقيق لمدينة أتلانتا، جورجيا
     currentLat = randomInRange(33.7000, 33.8000);
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// توليد IP حقيقي ونظيف يتبع لمزودي خدمة الإنترنت في أتلانتا (Comcast, AT&T, Charter)
 void initializeSessionIP() {
-    // مصفوفة تحتوي على بادئات أشهر مزودي خدمة الإنترنت (ISPs) في أتلانتا
     NSArray *ispSubnets = @[
-        @"73.136", // Comcast Cable (Atlanta Residential)
-        @"73.140", // Comcast Cable
-        @"73.220", // Comcast Cable
-        @"104.13.", // AT&T Internet / U-verse Atlanta
-        @"104.14.", // AT&T Internet
-        @"135.84.", // AT&T Mobility / Fiber Atlanta
-        @"24.98.",  // Charter Communications / Spectrum Atlanta
-        @"24.168."  // Charter Communications
+        @"73.136",
+        @"73.140",
+        @"73.220",
+        @"104.13.",
+        @"104.14.",
+        @"135.84.",
+        @"24.98.",
+        @"24.168."
     ];
     
-    // اختيار مزود خدمة عشوائي من القائمة
-    int randomISPIndex = arc4random_uniform((uint32_arith_t)ispSubnets.count);
+    // تصحيح نوع البيانات هنا لاستخدام uint32_t القياسي
+    int randomISPIndex = arc4random_uniform((uint32_t)ispSubnets.count);
     NSString *selectedPrefix = ispSubnets[randomISPIndex];
     
-    // إكمال البادئة برقمين عشوائيين لضمان تفرد الـ IP لكل جلسة
     int third = arc4random_uniform(254) + 1;
     int fourth = arc4random_uniform(254) + 1;
     
@@ -81,18 +77,15 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     }
 }
 
-// دالة مسح البيانات والجلسات بالكامل عند الخروج والعودة (Fresh State Reset)
 void performFullSessionReset() {
     updateAtlantaLocation();
-    initializeSessionIP(); // توليد IP نظيف جديد من مزودي أتلانطا
+    initializeSessionIP();
     
-    // مسح NSUserDefaults
     NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
     if (appDomain) {
         [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
     }
     
-    // مسح كاش الإنترنت والـ Cookies والـ WebKit Data
     NSURLCache *sharedCache = [NSURLCache sharedURLCache];
     [sharedCache removeAllCachedResponses];
     
@@ -103,7 +96,8 @@ void performFullSessionReset() {
     
     if (@available(iOS 9.0, *)) {
         WKWebsiteDataStore *dateStore = [WKWebsiteDataStore defaultDataStore];
-        NSArray *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+        // تصحيح نوع البيانات من NSArray إلى NSSet لتوافق متطلبات الـ WebKit API
+        NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
         NSDate *dateFrom = [NSDate dateWithTimeIntervalSince1970:0];
         [dateStore removeDataOfTypes:dataTypes modifiedSince:dateFrom completionHandler:^{
             // تم التنظيف بنجاح
@@ -123,7 +117,6 @@ void injectHeadersToRequest(NSMutableURLRequest *mutableReq, NSString *urlString
     }
 }
 
-// واجهة التقرير المنبثقة العائمة
 @interface AtlantaReportViewController : UIViewController
 @end
 
@@ -276,7 +269,6 @@ void injectHeadersToRequest(NSMutableURLRequest *mutableReq, NSString *urlString
 
 @end
 
-// دورة الحياة وتحديث الجلسة عند العودة للملف الأمامي
 %ctor {
     updateAtlantaLocation();
     initializeSessionIP();
@@ -292,7 +284,6 @@ void injectHeadersToRequest(NSMutableURLRequest *mutableReq, NSString *urlString
     });
 }
 
-// الهوكات
 %hook CLLocationManager
 - (void)startUpdatingLocation {
     updateAtlantaLocation();
