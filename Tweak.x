@@ -131,7 +131,6 @@ void wipeAppSessionData() {
             
             [wipeBtn addTarget:self action:@selector(handleWipeAction) forControlEvents:UIControlEventTouchUpInside];
             
-            // جعل الزر قابلاً للسحب أو عائماً فوق الشاشات
             [window addSubview:wipeBtn];
             [window bringSubviewToFront:wipeBtn];
         }
@@ -141,7 +140,6 @@ void wipeAppSessionData() {
 - (void)handleWipeAction {
     wipeAppSessionData();
     
-    // إظهار تنبيه بسيط للمستخدم بأن العملية تمت بنجاح
     UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
@@ -150,8 +148,8 @@ void wipeAppSessionData() {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تم بنجاح" 
                                                                    message:@"تم مسح البيانات وتغيير هوية الجهاز كأنه تم تثبيته لأول مرة!" 
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithActionTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-    // استخدام KVC أو استدعاء مباشر لتفادي أي تحذير في الترجمة
+    // تم تصحيح اسم الدالة هنا لتوافق UIKit الصحيح
+    [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
     [rootVC presentViewController:alert animated:YES completion:nil];
 }
 
@@ -247,10 +245,8 @@ void wipeAppSessionData() {
 // 4. حقن الزر العائم عند تشغيل التطبيق
 // ==========================================
 %ctor {
-    // توليد هوية أولية
     wipeAppSessionData();
     
-    // إظهار زر التحكم العائم بمجرد تشغيل التطبيق
     dispatch_async(dispatch_get_main_queue(), ^{
         [CleanButtonManager sharedInstance];
     });
