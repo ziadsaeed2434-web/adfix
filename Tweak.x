@@ -1,6 +1,5 @@
 // Tweak.x
-// مكتبة ديناميكية – حقن IP، موقع، معرفات وهمية، مع زر حذف يدوي
-// تم تعديله لتجنب الكراش عند بدء التطبيق
+// مكتبة ديناميكية – حقن IP، موقع، معرفات وهمية، مع زر حذف يدوي (آمن)
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -99,7 +98,6 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     NSMutableURLRequest *mutableRequest = [[self request] mutableCopy];
     [NSURLProtocol setProperty:@YES forKey:CustomURLProtocolHandledKey inRequest:mutableRequest];
 
-    // حقن الترويسات
     NSMutableURLRequest *modifiedRequest = [self injectHeadersIntoRequest:mutableRequest];
 
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
@@ -144,7 +142,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 @end
 
 // ============================================================
-// MARK: - الكلاس الرئيسي Injector مع زر الحذف اليدوي (معدل لتجنب الكراش)
+// MARK: - الكلاس الرئيسي Injector (آمن)
 // ============================================================
 
 @interface Injector : NSObject
@@ -155,8 +153,8 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 
 @implementation Injector {
     BOOL _isResetting;
-    UIWindow *_floatingWindow;
     UIButton *_resetButton;
+    BOOL _buttonAdded;
 }
 
 + (instancetype)sharedInstance {
@@ -172,28 +170,40 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     self = [super init];
     if (self) {
         _isResetting = NO;
-        // توليد القيم الأولية (خفيفة)
+        _buttonAdded = NO;
+        
+        // توليد القيم الأولية
         [self generateFreshIP];
         [self generateFreshLocation];
         [self generateFreshIdentifiers];
         
-        // تجهيز الـ Hooks (ولكن نؤجل تنفيذ التسجيل)
+        // إعداد الـ Hooks
         [self setupAllHooks];
         
-        // تأجيل جميع العمليات التي قد تسبب تعارضاً
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            // تسجيل NSURLProtocol بعد أن يستقر التطبيق
+        // تسجيل NSURLProtocol بأمان
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [NSURLProtocol registerClass:[CustomURLProtocol class]];
             NSLog(@"[Injector] ✅ تم تسجيل CustomURLProtocol");
-            
-            // إنشاء الزر العائم
-            [self setupFloatingButton];
         });
         
-        // لا نقوم بـ performFullReset هنا لتجنب مسح بيانات التطبيق أثناء البدء
-        NSLog(@"[Injector] ✅ تم تهيئة المكتبة (تم تأجيل العمليات الثقيلة)");
+        // مراقبة إشعار أن التطبيق أصبح نشطاً لإضافة الزر
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(applicationDidBecomeActive:)
+                                                     name:UIApplicationDidBecomeActiveNotification
+                                                   object:nil];
+        
+        NSLog(@"[Injector] ✅ تم تهيئة المكتبة");
     }
     return self;
+}
+
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    // إضافة الزر بعد أن يصبح التطبيق نشطاً وبعد تأخير إضافي
+    if (!_buttonAdded) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self addResetButtonToMainWindow];
+        });
+    }
 }
 
 // ============================================================
@@ -218,44 +228,36 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 }
 
 // ============================================================
-// MARK: - زر الحذف العائم (معدل)
+// MARK: - زر الحذف (يضاف إلى نافذة التطبيق الرئيسية)
 // ============================================================
 
-- (void)setupFloatingButton {
+- (void)addResetButtonToMainWindow {
     // التأكد من أننا على المين ثريد
     if (![NSThread isMainThread]) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self setupFloatingButton];
+            [self addResetButtonToMainWindow];
         });
         return;
     }
     
-    // نتحقق من وجود نافذة رئيسية
+    // الحصول على النافذة الرئيسية
     UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
     if (!mainWindow) {
         // إذا لم تكن النافذة جاهزة، نعيد المحاولة بعد قليل
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self setupFloatingButton];
+            [self addResetButtonToMainWindow];
         });
         return;
     }
     
-    // إنشاء نافذة عائمة بمستوى أقل من Alert لتجنب التعارض
-    self->_floatingWindow = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 60, 60)];
-    self->_floatingWindow.windowLevel = UIWindowLevelNormal + 1;  // أقل من Alert
-    self->_floatingWindow.backgroundColor = [UIColor clearColor];
-    self->_floatingWindow.userInteractionEnabled = YES;
-    self->_floatingWindow.hidden = NO;
+    // منع الإضافة المتكررة
+    if (_buttonAdded) return;
+    _buttonAdded = YES;
     
-    // جعل النافذة جذرها view controller فارغ
-    UIViewController *dummyVC = [[UIViewController alloc] init];
-    dummyVC.view.backgroundColor = [UIColor clearColor];
-    self->_floatingWindow.rootViewController = dummyVC;
-    
-    // الزر
+    // إنشاء الزر
     self->_resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self->_resetButton.frame = CGRectMake(0, 0, 60, 60);
-    self->_resetButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.8];
+    self->_resetButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.85];
     self->_resetButton.layer.cornerRadius = 30;
     self->_resetButton.layer.shadowColor = [UIColor blackColor].CGColor;
     self->_resetButton.layer.shadowOffset = CGSizeMake(0, 2);
@@ -266,18 +268,26 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     [self->_resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     [self->_resetButton addTarget:self action:@selector(handleResetButtonTap) forControlEvents:UIControlEventTouchUpInside];
     
-    [self->_floatingWindow addSubview:self->_resetButton];
+    // إضافة الزر إلى النافذة الرئيسية فوق كل المحتويات
+    [mainWindow addSubview:self->_resetButton];
     
     // تحديد الموضع في أعلى اليمين
     CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-    self->_floatingWindow.frame = CGRectMake(screenWidth - 80, 40, 60, 60);
+    CGFloat topInset = 40;
+    // التحقق من وجود notch
+    if (@available(iOS 11.0, *)) {
+        UIEdgeInsets safeInsets = mainWindow.safeAreaInsets;
+        topInset = safeInsets.top + 10;
+    }
+    self->_resetButton.frame = CGRectMake(screenWidth - 80, topInset, 60, 60);
     
-    // إظهار النافذة (لا نجعلها keyWindow)
-    self->_floatingWindow.hidden = NO;
+    // جعل الزر فوق كل العناصر
+    [mainWindow bringSubviewToFront:self->_resetButton];
+    
+    NSLog(@"[Injector] ✅ تم إضافة زر الحذف إلى النافذة الرئيسية");
 }
 
 - (void)handleResetButtonTap {
-    // التأكد من وجود rootViewController لعرض الـ alert
     UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = mainWindow.rootViewController;
     if (!rootVC) {
@@ -291,7 +301,6 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"حذف" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
         [self performFullReset];
-        // إشعار نجاح
         UIAlertController *doneAlert = [UIAlertController alertControllerWithTitle:@"تم"
                                                                            message:@"تمت إعادة الضبط بنجاح"
                                                                     preferredStyle:UIAlertControllerStyleAlert];
@@ -435,7 +444,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 }
 
 // ============================================================
-// MARK: - دالة الحذف الكامل (تُستدعى يدوياً فقط)
+// MARK: - دالة الحذف الكامل
 // ============================================================
 
 - (void)performFullReset {
@@ -504,14 +513,13 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 @end
 
 // ============================================================
-// MARK: - دالة البدء (constructor) – معدلة
+// MARK: - دالة البدء (constructor)
 // ============================================================
 
 __attribute__((constructor))
 static void initializeInjector(void) {
-    NSLog(@"[Injector] ✅ تم تحميل المكتبة، سيتم التهيئة بعد 2 ثانية");
-    // نؤجل التهيئة لتجنب الكراش
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    NSLog(@"[Injector] ✅ تم تحميل المكتبة");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [Injector sharedInstance];
     });
 }
