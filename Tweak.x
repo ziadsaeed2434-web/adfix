@@ -40,12 +40,14 @@ void wipeAppSessionData() {
     
     // 3. مسح الـ Keychain بالكامل عدا العناصر المستثناة (userIDKey & accessTokenKey)
     NSDictionary *query = @{
-        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecReturnAttributes: @YES,
+        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
     };
     
     CFArrayRef result = NULL;
     if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result) == errSecSuccess && result) {
-        NSArray *items = (__bridge_transfer NSArray *)result;
+        NSArray *items = (__bridge NSArray *)result;
         for (NSDictionary *item in items) {
             NSString *service = item[(__bridge id)kSecAttrService];
             NSString *account = item[(__bridge id)kSecAttrAccount];
@@ -62,6 +64,7 @@ void wipeAppSessionData() {
                 SecItemDelete((__bridge CFDictionaryRef)delQuery);
             }
         }
+        CFRelease(result);
     }
     
     // 4. توليد هويات جهاز جديدة بالكامل (بما فيها UUID عالمي جديد)
@@ -140,7 +143,7 @@ void wipeAppSessionData() {
 
 %end
 
-// اعتراض دوال إنشاط الـ NSUUID لمنح التطبيق UUID متجدد بالكامل
+// اعتراض دوال إنشاء الـ NSUUID لمنح التطبيق UUID متجدد بالكامل
 %hook NSUUID
 
 - (instancetype)initWithUUIDString:(NSString *)string {
