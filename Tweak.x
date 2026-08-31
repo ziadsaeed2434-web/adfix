@@ -30,7 +30,7 @@ void updateAtlantaLocation() {
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// توليد IP وهمي من نطاقات حقيقية (أمريكية) - المصفوفة مُعرَّفة محلياً
+// توليد IP وهمي من نطاقات حقيقية (أمريكية)
 void generateSessionIP() {
     NSArray *americanPrefixes = @[
         @12, @13, @23, @44, @52, @54, @63, @64, @65, @66, @67, @68, @69,
@@ -52,17 +52,15 @@ void generateSessionIP() {
     int oct2 = arc4random_uniform(256);
     int oct3 = arc4random_uniform(256);
     int oct4 = arc4random_uniform(256);
-    if (prefix == 127) prefix = 12; // حماية إضافية
+    if (prefix == 127) prefix = 12;
     sessionFakeIP = [NSString stringWithFormat:@"%d.%d.%d.%d", prefix, oct2, oct3, oct4];
 }
 
-// توليد معرفات وهمية جديدة
 void generateFakeIdentifiers() {
     fakeVendorID = [NSUUID UUID];
     fakeAdvertisingID = [NSUUID UUID];
 }
 
-// جلب IP الحقيقي من API (للعلم)
 void fetchRealIP() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
@@ -75,7 +73,6 @@ void fetchRealIP() {
     });
 }
 
-// تسجيل الطلبات في السجل
 void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     if (!networkLogs) {
         networkLogs = [[NSMutableArray alloc] init];
@@ -159,7 +156,7 @@ void performFullReset() {
 }
 
 // ============================================================
-// MARK: - واجهة عرض التفاصيل
+// MARK: - واجهة عرض التفاصيل (اختيارية، يمكن إزالتها)
 // ============================================================
 
 @interface AtlantaReportViewController : UIViewController
@@ -202,7 +199,6 @@ void performFullReset() {
     scrollView.contentSize = CGSizeMake(self.view.bounds.size.width, label.frame.size.height + 160);
     [scrollView addSubview:label];
     
-    // زر إغلاق
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     closeBtn.frame = CGRectMake(20, 30, 80, 35);
     closeBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:1.0];
@@ -211,40 +207,15 @@ void performFullReset() {
     closeBtn.layer.cornerRadius = 8;
     [closeBtn addTarget:self action:@selector(dismissPopup) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:closeBtn];
-    
-    // زر إعادة ضبط
-    UIButton *resetBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    resetBtn.frame = CGRectMake(self.view.bounds.size.width - 100, 30, 80, 35);
-    resetBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0];
-    [resetBtn setTitle:@"إعادة ضبط" forState:UIControlStateNormal];
-    [resetBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    resetBtn.layer.cornerRadius = 8;
-    [resetBtn addTarget:self action:@selector(resetAndClose) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:resetBtn];
 }
 
 - (void)dismissPopup {
     [self dismissViewControllerAnimated:YES completion:nil];
 }
-
-- (void)resetAndClose {
-    [self dismissViewControllerAnimated:YES completion:^{
-        performFullReset();
-        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-        UIViewController *rootVC = keyWindow.rootViewController;
-        if (rootVC) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تم"
-                                                                           message:@"تمت إعادة الضبط بنجاح"
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-            [rootVC presentViewController:alert animated:YES completion:nil];
-        }
-    }];
-}
 @end
 
 // ============================================================
-// MARK: - النافذة العائمة والزر
+// MARK: - النافذة العائمة والزر (بدون نافذة تأكيد)
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -296,9 +267,9 @@ void performFullReset() {
         self.floatingBtn.tag = 999888;
         self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
         self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.floatingBtn setTitle:@"⚙️" forState:UIControlStateNormal];
+        [self.floatingBtn setTitle:@"🔄" forState:UIControlStateNormal];
         [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
+        self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:24];
         self.floatingBtn.layer.cornerRadius = 30;
         self.floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
         self.floatingBtn.layer.shadowOffset = CGSizeMake(0, 2);
@@ -308,7 +279,8 @@ void performFullReset() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
         
-        [self.floatingBtn addTarget:self action:@selector(showPopupMenu) forControlEvents:UIControlEventTouchUpInside];
+        // عند الضغط: تنفيذ إعادة الضبط مباشرة دون تأكيد
+        [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.floatingBtn];
     });
@@ -326,41 +298,22 @@ void performFullReset() {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 
-- (void)showPopupMenu {
+// دالة الزر: تنفيذ إعادة الضبط فوراً وعرض رسالة نجاح
+- (void)handleReset {
+    // تنفيذ إعادة الضبط
+    performFullReset();
+    
+    // عرض رسالة نجاح (بدون تأكيد)
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = keyWindow.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
-    
-    UIAlertController *menu = [UIAlertController alertControllerWithTitle:@"التحكم"
-                                                                  message:@"اختر الإجراء المطلوب"
-                                                           preferredStyle:UIAlertControllerStyleActionSheet];
-    
-    [menu addAction:[UIAlertAction actionWithTitle:@"عرض التفاصيل" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
-        reportVC.modalPresentationStyle = UIModalPresentationFullScreen;
-        [rootVC presentViewController:reportVC animated:YES completion:nil];
-    }]];
-    
-    [menu addAction:[UIAlertAction actionWithTitle:@"إعادة ضبط كاملة" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-        UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"تأكيد إعادة الضبط"
-                                                                         message:@"سيتم مسح جميع البيانات المحلية وتجديد IP والموقع. هل أنت متأكد؟"
-                                                                  preferredStyle:UIAlertControllerStyleAlert];
-        [confirm addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-        [confirm addAction:[UIAlertAction actionWithTitle:@"تأكيد" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-            performFullReset();
-            UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
-                                                                          message:@"تمت إعادة الضبط بنجاح"
-                                                                   preferredStyle:UIAlertControllerStyleAlert];
-            [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-            [rootVC presentViewController:done animated:YES completion:nil];
-        }]];
-        [rootVC presentViewController:confirm animated:YES completion:nil];
-    }]];
-    
-    [menu addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-    [rootVC presentViewController:menu animated:YES completion:nil];
+    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
+                                                                  message:@"تمت إعادة الضبط بنجاح"
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+    [rootVC presentViewController:done animated:YES completion:nil];
 }
 
 @end
