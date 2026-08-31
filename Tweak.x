@@ -14,7 +14,7 @@ static NSString *currentRandomIDFA = nil;
 static NSString *currentVendorID = nil;
 static NSString *currentMockIP = nil;
 
-// دالة مسح البيانات والـ Keychain بأمان تام عند الضغط على الزر
+// دالة مسح البيانات والـ Keychain بأمان تام
 void wipeAppSessionData() {
     @try {
         NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -75,85 +75,13 @@ void wipeAppSessionData() {
         int fourthOctet = arc4random_uniform(250) + 2;
         currentMockIP = [NSString stringWithFormat:@"12.186.%d.%d", thirdOctet, fourthOctet];
         
-        NSLog(@"[CleanSlate] Manual Wipe Executed! New IDFA: %@ | IP: %@", currentRandomIDFA, currentMockIP);
+        NSLog(@"[CleanSlate] Session Wiped Successfully! New IDFA: %@ | IP: %@", currentRandomIDFA, currentMockIP);
         
         [pool drain];
     } @catch (NSException *exception) {
-        NSLog(@"[Anti-GeoBlock] Exception caught during manual wipe: %@", exception);
+        NSLog(@"[Anti-GeoBlock] Exception caught during wipe: %@", exception);
     }
 }
-
-// دالة لإضافة زر عائم على واجهة التطبيق لتنفيذ الحذف يدوياً
-@interface CleanButtonManager : NSObject
-+ (void)sharedInstance;
-@end
-
-@implementation CleanButtonManager
-
-+ (void)sharedInstance {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        [[[self alloc] init] setupButton];
-    });
-}
-
-- (void)setupButton {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *window = nil;
-        if (@available(iOS 13.0, *)) {
-            for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                if (scene.activationState == UISceneActivationStateForegroundActive) {
-                    for (UIWindow *w in scene.windows) {
-                        if (w.isKeyWindow) {
-                            window = w;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (!window) {
-            window = [UIApplication sharedApplication].keyWindow;
-        }
-        
-        if (window) {
-            // تصميم زر عائم (أزرق مكتوب عليه ATL للتحكم السريع)
-            UIButton *wipeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-            wipeBtn.frame = CGRectMake(20, 100, 60, 60);
-            wipeBtn.backgroundColor = [UIColor systemBlueColor];
-            [wipeBtn setTitle:@"ATL" forState:UIControlStateNormal];
-            [wipeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            wipeBtn.layer.cornerRadius = 30;
-            wipeBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-            wipeBtn.layer.shadowOffset = CGSizeMake(0, 2);
-            wipeBtn.layer.shadowOpacity = 0.5;
-            wipeBtn.layer.shadowRadius = 4.0;
-            
-            [wipeBtn addTarget:self action:@selector(handleWipeAction) forControlEvents:UIControlEventTouchUpInside];
-            
-            [window addSubview:wipeBtn];
-            [window bringSubviewToFront:wipeBtn];
-        }
-    });
-}
-
-- (void)handleWipeAction {
-    wipeAppSessionData();
-    
-    UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-    while (rootVC.presentedViewController) {
-        rootVC = rootVC.presentedViewController;
-    }
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تم بنجاح" 
-                                                                   message:@"تم مسح البيانات وتغيير هوية الجهاز كأنه تم تثبيته لأول مرة!" 
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    // تم تصحيح اسم الدالة هنا لتوافق UIKit الصحيح
-    [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-    [rootVC presentViewController:alert animated:YES completion:nil];
-}
-
-@end
 
 // ==========================================
 // 1. تزييف الموقع الجغرافي (Location Spoofing)
@@ -242,12 +170,9 @@ void wipeAppSessionData() {
 %end
 
 // ==========================================
-// 4. حقن الزر العائم عند تشغيل التطبيق
+// 4. التشغيل الآمن عند بدء التطبيق
 // ==========================================
 %ctor {
+    // تنفيذ التنظيف وتوليد البصمة بسلام ودون أي تعارض مع الواجهات
     wipeAppSessionData();
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [CleanButtonManager sharedInstance];
-    });
 }
