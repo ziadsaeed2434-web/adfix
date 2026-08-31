@@ -1,5 +1,5 @@
 // Tweak.x
-// مكتبة ديناميكية – حقن IP، موقع، معرفات وهمية، مع زر حذف يدوي (آمن)
+// مكتبة ديناميكية آمنة – حقن IP، موقع، معرفات وهمية، مع زر حذف يدوي
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -73,7 +73,7 @@ static NSUUID *cachedAdvertisingID = nil;
 @end
 
 // ============================================================
-// MARK: - NSURLProtocol لاعتراض كل الطلبات
+// MARK: - NSURLProtocol لاعتراض كل الطلبات (آمن)
 // ============================================================
 
 @interface CustomURLProtocol : NSURLProtocol <NSURLSessionDelegate, NSURLSessionTaskDelegate>
@@ -84,10 +84,14 @@ static NSUUID *cachedAdvertisingID = nil;
 static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled";
 
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
-    if ([NSURLProtocol propertyForKey:CustomURLProtocolHandledKey inRequest:request]) {
+    @try {
+        if ([NSURLProtocol propertyForKey:CustomURLProtocolHandledKey inRequest:request]) {
+            return NO;
+        }
+        return YES;
+    } @catch (NSException *exception) {
         return NO;
     }
-    return YES;
 }
 
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request {
@@ -95,27 +99,31 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 }
 
 - (void)startLoading {
-    NSMutableURLRequest *mutableRequest = [[self request] mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:CustomURLProtocolHandledKey inRequest:mutableRequest];
+    @try {
+        NSMutableURLRequest *mutableRequest = [[self request] mutableCopy];
+        [NSURLProtocol setProperty:@YES forKey:CustomURLProtocolHandledKey inRequest:mutableRequest];
 
-    NSMutableURLRequest *modifiedRequest = [self injectHeadersIntoRequest:mutableRequest];
+        NSMutableURLRequest *modifiedRequest = [self injectHeadersIntoRequest:mutableRequest];
 
-    NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
-    NSURLSession *session = [NSURLSession sessionWithConfiguration:config
-                                                          delegate:self
-                                                     delegateQueue:nil];
-    NSURLSessionDataTask *task = [session dataTaskWithRequest:modifiedRequest
-                                            completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (error) {
-            [self.client URLProtocol:self didFailWithError:error];
-        } else {
-            [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageAllowed];
-            [self.client URLProtocol:self didLoadData:data];
-            [self.client URLProtocolDidFinishLoading:self];
-        }
-        [session finishTasksAndInvalidate];
-    }];
-    [task resume];
+        NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+        NSURLSession *session = [NSURLSession sessionWithConfiguration:config
+                                                              delegate:self
+                                                         delegateQueue:nil];
+        NSURLSessionDataTask *task = [session dataTaskWithRequest:modifiedRequest
+                                                completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            if (error) {
+                [self.client URLProtocol:self didFailWithError:error];
+            } else {
+                [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageAllowed];
+                [self.client URLProtocol:self didLoadData:data];
+                [self.client URLProtocolDidFinishLoading:self];
+            }
+            [session finishTasksAndInvalidate];
+        }];
+        [task resume];
+    } @catch (NSException *exception) {
+        NSLog(@"[Injector] ❌ خطأ في startLoading: %@", exception);
+    }
 }
 
 - (void)stopLoading {}
@@ -142,7 +150,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 @end
 
 // ============================================================
-// MARK: - الكلاس الرئيسي Injector (آمن)
+// MARK: - الكلاس الرئيسي Injector (آمن تماماً)
 // ============================================================
 
 @interface Injector : NSObject
@@ -154,7 +162,7 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 @implementation Injector {
     BOOL _isResetting;
     UIButton *_resetButton;
-    BOOL _buttonAdded;
+    BOOL _initialized;
 }
 
 + (instancetype)sharedInstance {
@@ -170,39 +178,38 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     self = [super init];
     if (self) {
         _isResetting = NO;
-        _buttonAdded = NO;
+        _initialized = NO;
         
         // توليد القيم الأولية
         [self generateFreshIP];
         [self generateFreshLocation];
         [self generateFreshIdentifiers];
         
-        // إعداد الـ Hooks
+        // إعداد الـ Hooks (بأمان)
         [self setupAllHooks];
         
-        // تسجيل NSURLProtocol بأمان
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [NSURLProtocol registerClass:[CustomURLProtocol class]];
-            NSLog(@"[Injector] ✅ تم تسجيل CustomURLProtocol");
+        // تأجيل كل العمليات التي قد تسبب كراش
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self performSafeInitialization];
         });
         
-        // مراقبة إشعار أن التطبيق أصبح نشطاً لإضافة الزر
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(applicationDidBecomeActive:)
-                                                     name:UIApplicationDidBecomeActiveNotification
-                                                   object:nil];
-        
-        NSLog(@"[Injector] ✅ تم تهيئة المكتبة");
+        NSLog(@"[Injector] ✅ تم تهيئة المكتبة (سيتم تفعيلها بعد 3 ثوان)");
     }
     return self;
 }
 
-- (void)applicationDidBecomeActive:(NSNotification *)notification {
-    // إضافة الزر بعد أن يصبح التطبيق نشطاً وبعد تأخير إضافي
-    if (!_buttonAdded) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self addResetButtonToMainWindow];
-        });
+- (void)performSafeInitialization {
+    @try {
+        // تسجيل NSURLProtocol
+        [NSURLProtocol registerClass:[CustomURLProtocol class]];
+        NSLog(@"[Injector] ✅ تم تسجيل CustomURLProtocol");
+        
+        // إضافة الزر
+        [self addResetButtonSafely];
+        
+        _initialized = YES;
+    } @catch (NSException *exception) {
+        NSLog(@"[Injector] ❌ خطأ في التهيئة: %@", exception);
     }
 }
 
@@ -228,91 +235,98 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 }
 
 // ============================================================
-// MARK: - زر الحذف (يضاف إلى نافذة التطبيق الرئيسية)
+// MARK: - زر الحذف (إضافة آمنة)
 // ============================================================
 
-- (void)addResetButtonToMainWindow {
-    // التأكد من أننا على المين ثريد
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self addResetButtonToMainWindow];
-        });
-        return;
+- (void)addResetButtonSafely {
+    @try {
+        // الحصول على النافذة المناسبة
+        UIWindow *targetWindow = nil;
+        NSArray *windows = [UIApplication sharedApplication].windows;
+        for (UIWindow *win in windows) {
+            if (win.isKeyWindow || win.windowLevel == UIWindowLevelNormal) {
+                targetWindow = win;
+                break;
+            }
+        }
+        if (!targetWindow && windows.count > 0) {
+            targetWindow = windows.firstObject;
+        }
+        
+        if (!targetWindow) {
+            // إذا لم توجد نافذة، نعيد المحاولة بعد ثانية
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self addResetButtonSafely];
+            });
+            return;
+        }
+        
+        // إنشاء الزر
+        self->_resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        self->_resetButton.frame = CGRectMake(0, 0, 60, 60);
+        self->_resetButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.85];
+        self->_resetButton.layer.cornerRadius = 30;
+        self->_resetButton.layer.shadowColor = [UIColor blackColor].CGColor;
+        self->_resetButton.layer.shadowOffset = CGSizeMake(0, 2);
+        self->_resetButton.layer.shadowRadius = 4;
+        self->_resetButton.layer.shadowOpacity = 0.5;
+        [self->_resetButton setTitle:@"🗑" forState:UIControlStateNormal];
+        self->_resetButton.titleLabel.font = [UIFont systemFontOfSize:24];
+        [self->_resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self->_resetButton addTarget:self action:@selector(handleResetButtonTap) forControlEvents:UIControlEventTouchUpInside];
+        
+        // إضافة الزر إلى النافذة
+        [targetWindow addSubview:self->_resetButton];
+        
+        // تحديد الموضع في أعلى اليمين مع مراعاة الـ safe area
+        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+        CGFloat topInset = 40;
+        if (@available(iOS 11.0, *)) {
+            topInset = targetWindow.safeAreaInsets.top + 10;
+        }
+        self->_resetButton.frame = CGRectMake(screenWidth - 80, topInset, 60, 60);
+        
+        [targetWindow bringSubviewToFront:self->_resetButton];
+        
+        NSLog(@"[Injector] ✅ تم إضافة زر الحذف بنجاح");
+    } @catch (NSException *exception) {
+        NSLog(@"[Injector] ❌ فشل إضافة الزر: %@", exception);
     }
-    
-    // الحصول على النافذة الرئيسية
-    UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
-    if (!mainWindow) {
-        // إذا لم تكن النافذة جاهزة، نعيد المحاولة بعد قليل
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self addResetButtonToMainWindow];
-        });
-        return;
-    }
-    
-    // منع الإضافة المتكررة
-    if (_buttonAdded) return;
-    _buttonAdded = YES;
-    
-    // إنشاء الزر
-    self->_resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self->_resetButton.frame = CGRectMake(0, 0, 60, 60);
-    self->_resetButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.85];
-    self->_resetButton.layer.cornerRadius = 30;
-    self->_resetButton.layer.shadowColor = [UIColor blackColor].CGColor;
-    self->_resetButton.layer.shadowOffset = CGSizeMake(0, 2);
-    self->_resetButton.layer.shadowRadius = 4;
-    self->_resetButton.layer.shadowOpacity = 0.5;
-    [self->_resetButton setTitle:@"🗑" forState:UIControlStateNormal];
-    self->_resetButton.titleLabel.font = [UIFont systemFontOfSize:24];
-    [self->_resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    [self->_resetButton addTarget:self action:@selector(handleResetButtonTap) forControlEvents:UIControlEventTouchUpInside];
-    
-    // إضافة الزر إلى النافذة الرئيسية فوق كل المحتويات
-    [mainWindow addSubview:self->_resetButton];
-    
-    // تحديد الموضع في أعلى اليمين
-    CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-    CGFloat topInset = 40;
-    // التحقق من وجود notch
-    if (@available(iOS 11.0, *)) {
-        UIEdgeInsets safeInsets = mainWindow.safeAreaInsets;
-        topInset = safeInsets.top + 10;
-    }
-    self->_resetButton.frame = CGRectMake(screenWidth - 80, topInset, 60, 60);
-    
-    // جعل الزر فوق كل العناصر
-    [mainWindow bringSubviewToFront:self->_resetButton];
-    
-    NSLog(@"[Injector] ✅ تم إضافة زر الحذف إلى النافذة الرئيسية");
 }
 
 - (void)handleResetButtonTap {
-    UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
-    UIViewController *rootVC = mainWindow.rootViewController;
-    if (!rootVC) {
-        NSLog(@"[Injector] ❌ لا يوجد rootViewController لعرض التنبيه");
-        return;
+    @try {
+        UIWindow *mainWindow = [UIApplication sharedApplication].keyWindow;
+        if (!mainWindow) {
+            mainWindow = [[UIApplication sharedApplication].windows firstObject];
+        }
+        UIViewController *rootVC = mainWindow.rootViewController;
+        if (!rootVC) {
+            NSLog(@"[Injector] ❌ لا يوجد rootViewController لعرض التنبيه");
+            return;
+        }
+        
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"إعادة ضبط"
+                                                                       message:@"هل تريد مسح جميع البيانات وتجديد IP والموقع؟"
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"حذف" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
+            [self performFullReset];
+            UIAlertController *doneAlert = [UIAlertController alertControllerWithTitle:@"تم"
+                                                                               message:@"تمت إعادة الضبط بنجاح"
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+            [doneAlert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+            [rootVC presentViewController:doneAlert animated:YES completion:nil];
+        }]];
+        
+        [rootVC presentViewController:alert animated:YES completion:nil];
+    } @catch (NSException *exception) {
+        NSLog(@"[Injector] ❌ خطأ في زر الحذف: %@", exception);
     }
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"إعادة ضبط"
-                                                                   message:@"هل تريد مسح جميع البيانات وتجديد IP والموقع؟"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"حذف" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-        [self performFullReset];
-        UIAlertController *doneAlert = [UIAlertController alertControllerWithTitle:@"تم"
-                                                                           message:@"تمت إعادة الضبط بنجاح"
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-        [doneAlert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-        [rootVC presentViewController:doneAlert animated:YES completion:nil];
-    }]];
-    
-    [rootVC presentViewController:alert animated:YES completion:nil];
 }
 
 // ============================================================
-// MARK: - إعداد الـ Hooks
+// MARK: - إعداد الـ Hooks (مع التحقق من وجود الفئات)
 // ============================================================
 
 - (void)setupAllHooks {
@@ -324,15 +338,23 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 #pragma mark - Network Hooks
 
 - (void)hookNetworkClasses {
-    Class sessionClass = NSClassFromString(@"NSURLSession");
-    SEL origSel1 = @selector(dataTaskWithRequest:completionHandler:);
-    SEL swizzSel1 = @selector(swizzled_dataTaskWithRequest:completionHandler:);
-    [self swizzleInstanceMethod:sessionClass from:origSel1 to:swizzSel1];
-
-    Class connectionClass = NSClassFromString(@"NSURLConnection");
-    SEL origSel2 = @selector(sendAsynchronousRequest:queue:completionHandler:);
-    SEL swizzSel2 = @selector(swizzled_sendAsynchronousRequest:queue:completionHandler:);
-    [self swizzleClassMethod:connectionClass from:origSel2 to:swizzSel2];
+    @try {
+        Class sessionClass = NSClassFromString(@"NSURLSession");
+        if (sessionClass) {
+            SEL origSel1 = @selector(dataTaskWithRequest:completionHandler:);
+            SEL swizzSel1 = @selector(swizzled_dataTaskWithRequest:completionHandler:);
+            [self swizzleInstanceMethod:sessionClass from:origSel1 to:swizzSel1];
+        }
+        
+        Class connectionClass = NSClassFromString(@"NSURLConnection");
+        if (connectionClass) {
+            SEL origSel2 = @selector(sendAsynchronousRequest:queue:completionHandler:);
+            SEL swizzSel2 = @selector(swizzled_sendAsynchronousRequest:queue:completionHandler:);
+            [self swizzleClassMethod:connectionClass from:origSel2 to:swizzSel2];
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[Injector] ❌ خطأ في Hook الشبكة: %@", exception);
+    }
 }
 
 - (void)swizzleInstanceMethod:(Class)class from:(SEL)orig to:(SEL)new {
@@ -376,18 +398,24 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 #pragma mark - Location Hooks
 
 - (void)hookLocationClasses {
-    Class managerClass = NSClassFromString(@"CLLocationManager");
-    SEL setDelSel = @selector(setDelegate:);
-    SEL swizzSetDelSel = @selector(swizzled_setDelegate:);
-    [self swizzleInstanceMethod:managerClass from:setDelSel to:swizzSetDelSel];
+    @try {
+        Class managerClass = NSClassFromString(@"CLLocationManager");
+        if (!managerClass) return;
+        
+        SEL setDelSel = @selector(setDelegate:);
+        SEL swizzSetDelSel = @selector(swizzled_setDelegate:);
+        [self swizzleInstanceMethod:managerClass from:setDelSel to:swizzSetDelSel];
 
-    SEL locSel = @selector(location);
-    SEL swizzLocSel = @selector(swizzled_location);
-    [self swizzleInstanceMethod:managerClass from:locSel to:swizzLocSel];
+        SEL locSel = @selector(location);
+        SEL swizzLocSel = @selector(swizzled_location);
+        [self swizzleInstanceMethod:managerClass from:locSel to:swizzLocSel];
 
-    SEL startSel = @selector(startUpdatingLocation);
-    SEL swizzStartSel = @selector(swizzled_startUpdatingLocation);
-    [self swizzleInstanceMethod:managerClass from:startSel to:swizzStartSel];
+        SEL startSel = @selector(startUpdatingLocation);
+        SEL swizzStartSel = @selector(swizzled_startUpdatingLocation);
+        [self swizzleInstanceMethod:managerClass from:startSel to:swizzStartSel];
+    } @catch (NSException *exception) {
+        NSLog(@"[Injector] ❌ خطأ في Hook الموقع: %@", exception);
+    }
 }
 
 - (void)swizzled_setDelegate:(id<CLLocationManagerDelegate>)delegate {
@@ -422,16 +450,20 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 #pragma mark - Device Identifiers Hooks
 
 - (void)hookDeviceIdentifiers {
-    Class deviceClass = [UIDevice class];
-    SEL vendorSel = @selector(identifierForVendor);
-    SEL swizzVendorSel = @selector(swizzled_identifierForVendor);
-    [self swizzleInstanceMethod:deviceClass from:vendorSel to:swizzVendorSel];
+    @try {
+        Class deviceClass = [UIDevice class];
+        SEL vendorSel = @selector(identifierForVendor);
+        SEL swizzVendorSel = @selector(swizzled_identifierForVendor);
+        [self swizzleInstanceMethod:deviceClass from:vendorSel to:swizzVendorSel];
 
-    Class asManagerClass = NSClassFromString(@"ASIdentifierManager");
-    if (asManagerClass) {
-        SEL advSel = @selector(advertisingIdentifier);
-        SEL swizzAdvSel = @selector(swizzled_advertisingIdentifier);
-        [self swizzleInstanceMethod:asManagerClass from:advSel to:swizzAdvSel];
+        Class asManagerClass = NSClassFromString(@"ASIdentifierManager");
+        if (asManagerClass) {
+            SEL advSel = @selector(advertisingIdentifier);
+            SEL swizzAdvSel = @selector(swizzled_advertisingIdentifier);
+            [self swizzleInstanceMethod:asManagerClass from:advSel to:swizzAdvSel];
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[Injector] ❌ خطأ في Hook المعرفات: %@", exception);
     }
 }
 
@@ -451,15 +483,20 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
     if (_isResetting) return;
     _isResetting = YES;
     
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط (يدوي)");
-    [self clearCachesAndCookies];
-    [self clearUserDefaults];
-    [self clearLocalStorage];
-    [self clearWebKitData];
-    [self generateFreshIP];
-    [self generateFreshLocation];
-    [self generateFreshIdentifiers];
-    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط");
+    @try {
+        NSLog(@"[Injector] 🔄 بدء إعادة الضبط (يدوي)");
+        [self clearCachesAndCookies];
+        [self clearUserDefaults];
+        [self clearLocalStorage];
+        [self clearWebKitData];
+        [self generateFreshIP];
+        [self generateFreshLocation];
+        [self generateFreshIdentifiers];
+        NSLog(@"[Injector] ✅ اكتملت إعادة الضبط");
+    } @catch (NSException *exception) {
+        NSLog(@"[Injector] ❌ خطأ في إعادة الضبط: %@", exception);
+    }
+    
     _isResetting = NO;
 }
 
@@ -518,8 +555,8 @@ static NSString *const CustomURLProtocolHandledKey = @"CustomURLProtocolHandled"
 
 __attribute__((constructor))
 static void initializeInjector(void) {
-    NSLog(@"[Injector] ✅ تم تحميل المكتبة");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    NSLog(@"[Injector] ✅ تم تحميل المكتبة، سيتم التهيئة بعد 3 ثوان");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [Injector sharedInstance];
     });
 }
