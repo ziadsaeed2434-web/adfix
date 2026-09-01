@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/ASIdentifierManager.h>
 #import <WebKit/WebKit.h>
+#import <objc/runtime.h>
 
 // ============================================================
 // MARK: - المتغيرات العامة
@@ -12,12 +13,10 @@ static double currentLon = 0.0;
 static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
-
-// المعرفات الوهمية (فقط IDFA، وليس UDID)
 static NSUUID *fakeAdvertisingID = nil;
 
 // ============================================================
-// MARK: - دوال مساعدة
+// MARK: - دوال مساعدة وتوليد البيانات
 // ============================================================
 
 double randomInRange(double min, double max) {
@@ -29,19 +28,14 @@ void updateAtlantaLocation() {
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
-// ============================================================
-// MARK: - توليد IP من النطاقات: 172.56.x.x و 172.57.x.x و 172.59.x.x
-// ============================================================
-
 void generateSessionIP() {
-    int allowedSecondOctets[] = {100, 150, 200};
+    int allowedSecondOctets[] = {56, 57, 59};
     int index = arc4random_uniform(3);
     int second = allowedSecondOctets[index];
     int third = arc4random_uniform(256);
     int fourth = arc4random_uniform(256);
     
-    sessionFakeIP = [NSString stringWithFormat:@"73.%d.%d.%d", second, third, fourth];
-    NSLog(@"[Injector] 🌐 تم توليد IP من نطاق 172.%d.x.x: %@", second, sessionFakeIP);
+    sessionFakeIP = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
 }
 
 void generateFakeAdvertisingID() {
@@ -79,69 +73,39 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - دالة إعادة الضبط الكاملة
+// MARK: - مسح الكاش فقط (دون حذف بيانات الحساب)
 // ============================================================
 
-void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة في الخلفية...");
-    
-    // 1. مسح الكوكيز والكاش
+void clearAppCacheOnly() {
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
     
-    // 2. مسح NSUserDefaults
-    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
-    if (appDomain) {
-        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-    }
-    
-    // 3. مسح الملفات المحلية (Documents, Library)
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docPath = [paths firstObject];
-    if (docPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:docPath error:nil]) {
-            [fm removeItemAtPath:[docPath stringByAppendingPathComponent:item] error:nil];
-        }
-    }
-    paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libPath = [paths firstObject];
     if (libPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:libPath error:nil]) {
-            if (![item isEqualToString:@"Preferences"] && ![item isEqualToString:@"Caches"]) {
-                [fm removeItemAtPath:[libPath stringByAppendingPathComponent:item] error:nil];
-            }
-        }
         NSString *cachePath = [libPath stringByAppendingPathComponent:@"Caches"];
         for (NSString *item in [fm contentsOfDirectoryAtPath:cachePath error:nil]) {
             [fm removeItemAtPath:[cachePath stringByAppendingPathComponent:item] error:nil];
         }
     }
     
-    // 4. مسح بيانات WebKit
     NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
     [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes
                                                modifiedSince:[NSDate distantPast]
-                                           completionHandler:^{
-        NSLog(@"[Injector] 🧹 WebKit مسح بنجاح.");
-    }];
+                                           completionHandler:^{}];
     
-    // 5. تجديد الموقع والـ IP والمعرفات
     updateAtlantaLocation();
     generateSessionIP();
     generateFakeAdvertisingID();
     fetchRealIP();
     
-    // 6. مسح سجل الطلبات
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
-    
-    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط بنجاح في الخلفية. IP الجديد: %@", sessionFakeIP);
 }
 
 // ============================================================
@@ -203,10 +167,6 @@ void performFullReset() {
 }
 @end
 
-// ============================================================
-// MARK: - النافذة العائمة والزر
-// ============================================================
-
 @interface AtlantaWindow : UIWindow
 @end
 
@@ -256,7 +216,7 @@ void performFullReset() {
         self.floatingBtn.tag = 999888;
         self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
         self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.floatingBtn setTitle:@"📊" forState:UIControlStateNormal];
+        [self.floatingBtn setTitle:@"🔄" forState:UIControlStateNormal];
         [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:24];
         self.floatingBtn.layer.cornerRadius = 30;
@@ -268,8 +228,7 @@ void performFullReset() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
         
-        [self.floatingBtn addTarget:self action:@selector(showReportModal) forControlEvents:UIControlEventTouchUpInside];
-        
+        [self.floatingBtn addTarget:self action:@selector(handleCacheReset) forControlEvents:UIControlEventTouchUpInside];
         [vc.view addSubview:self.floatingBtn];
     });
 }
@@ -286,67 +245,57 @@ void performFullReset() {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 
-- (void)showReportModal {
+- (void)handleCacheReset {
+    clearAppCacheOnly();
+    
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = keyWindow.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
-    AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
-    reportVC.modalPresentationStyle = UIModalPresentationPageSheet;
-    [rootVC presentViewController:reportVC animated:YES completion:nil];
+    
+    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم التجديد بنجاح"
+                                                                  message:[NSString stringWithFormat:@"تم مسح الكاش وتوليد IP جديد:\n%@", sessionFakeIP]
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    
+    [done addAction:[UIAlertAction actionWithTitle:@"عرض التفاصيل" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
+        reportVC.modalPresentationStyle = UIModalPresentationPageSheet;
+        [rootVC presentViewController:reportVC animated:YES completion:nil];
+    }]];
+    
+    [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleCancel handler:nil]];
+    [rootVC presentViewController:done animated:YES completion:nil];
 }
 
 @end
 
 // ============================================================
-// MARK: - الـ Hooks وإدارة الخلفية
+// MARK: - Method Swizzling البديل للـ Substrate (بدون جلبريك)
 // ============================================================
 
-%ctor {
-    // التهيئة الأولى عند التشغيل
-    updateAtlantaLocation();
-    generateSessionIP();
-    generateFakeAdvertisingID();
-    fetchRealIP();
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[AtlantaInfoManager sharedInstance] setupFloatingButton];
-    });
-    
-    // مراقبة أحداث الخلفية والإغلاق لتنفيذ إعادة الضبط التلقائية دون Crash
-    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
-    [center addObserverForName:UIApplicationDidEnterBackgroundNotification
-                        object:nil
-                         queue:[NSOperationQueue mainQueue]
-                    usingBlock:^(NSNotification *note) {
-        performFullReset();
-    }];
-    
-    [center addObserverForName:UIApplicationWillTerminateNotification
-                        object:nil
-                         queue:[NSOperationQueue mainQueue]
-                    usingBlock:^(NSNotification *note) {
-        performFullReset();
-    }];
-}
+@interface FakeSwizzler : NSObject
+@end
 
-%hook CLLocationManager
-- (void)startUpdatingLocation {
+@implementation FakeSwizzler
+
+// تزوير LocationManager
+- (void)swizzled_startUpdatingLocation {
     updateAtlantaLocation();
     CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-    if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-        [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
+    id delegate = [self valueForKey:@"delegate"];
+    if (delegate && [delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+        [delegate locationManager:delegate didUpdateLocations:@[fakeLocation]];
     }
 }
-- (CLLocation *)location {
+
+- (CLLocation *)swizzled_location {
     updateAtlantaLocation();
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
 }
-%end
 
-%hook NSURLSession
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+// تزوير NSURLSession
+- (NSURLSessionDataTask *)swizzled_dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     if (sessionFakeIP) {
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
@@ -355,33 +304,69 @@ void performFullReset() {
     }
     NSString *urlString = request.URL.absoluteString;
     if (urlString) {
-        logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
+        logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon];
     }
-    return %orig(mutableReq, completionHandler);
+    // استدعاء الدالة الأصلية عبر Swizzling
+    return [self swizzled_dataTaskWithRequest:mutableReq completionHandler:completionHandler];
 }
-%end
 
-%hook NSURLConnection
-+ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    if (sessionFakeIP) {
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
-    }
-    NSString *urlString = request.URL.absoluteString;
-    if (urlString) {
-        logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
-    }
-    %orig(mutableReq, queue, handler);
-}
-%end
-
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
+// تزوير ASIdentifierManager (IDFA)
+- (NSUUID *)swizzled_advertisingIdentifier {
     if (fakeAdvertisingID) {
         return fakeAdvertisingID;
     }
-    return %orig;
+    return [self swizzled_advertisingIdentifier];
 }
-%end
+
++ (void)load {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        updateAtlantaLocation();
+        generateSessionIP();
+        generateFakeAdvertisingID();
+        fetchRealIP();
+        
+        // إعداد الزر العائم بعد التشغيل بقليل
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [[AtlantaInfoManager sharedInstance] setupFloatingButton];
+        });
+        
+        // مراقبة الخلفية لتنظيف الكاش تلقائياً دون حذف الحساب
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
+                                                            object:nil
+                                                             queue:[NSOperationQueue mainQueue]
+                                                        usingBlock:^(NSNotification *note) {
+            clearAppCacheOnly();
+        }];
+        
+        // تطبيق Swizzling لـ CLLocationManager
+        Class locClass = NSClassFromString(@"CLLocationManager");
+        if (locClass) {
+            Method originalStart = class_getInstanceMethod(locClass, @selector(startUpdatingLocation));
+            Method swizzledStart = class_getInstanceMethod([FakeSwizzler class], @selector(swizzled_startUpdatingLocation));
+            method_exchangeImplementations(originalStart, swizzledStart);
+            
+            Method originalLoc = class_getInstanceMethod(locClass, @selector(location));
+            Method swizzledLoc = class_getInstanceMethod([FakeSwizzler class], @selector(swizzled_location));
+            method_exchangeImplementations(originalLoc, swizzledLoc);
+        }
+        
+        // تطبيق Swizzling لـ NSURLSession
+        Class sessionClass = NSClassFromString(@"NSURLSession");
+        if (sessionClass) {
+            Method originalTask = class_getInstanceMethod(sessionClass, @selector(dataTaskWithRequest:completionHandler:));
+            Method swizzledTask = class_getInstanceMethod([FakeSwizzler class], @selector(swizzled_dataTaskWithRequest:completionHandler:));
+            method_exchangeImplementations(originalTask, swizzledTask);
+        }
+        
+        // تطبيق Swizzling لـ ASIdentifierManager
+        Class adClass = NSClassFromString(@"ASIdentifierManager");
+        if (adClass) {
+            Method originalAd = class_getInstanceMethod(adClass, @selector(advertisingIdentifier));
+            Method swizzledAd = class_getInstanceMethod([FakeSwizzler class], @selector(swizzled_advertisingIdentifier));
+            method_exchangeImplementations(originalAd, swizzledAd);
+        }
+    });
+}
+
+@end
