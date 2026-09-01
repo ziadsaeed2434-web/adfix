@@ -13,10 +13,12 @@ static double currentLon = 0.0;
 static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
+
 static NSUUID *fakeAdvertisingID = nil;
+static NSString *fakeUDID = nil; // معرف UDID وهمي جديد لكل جلسة
 
 // ============================================================
-// MARK: - دوال مساعدة وتوليد البيانات
+// MARK: - دوال مساعدة وتوليد البيانات المتجددة
 // ============================================================
 
 double randomInRange(double min, double max) {
@@ -38,8 +40,9 @@ void generateSessionIP() {
     sessionFakeIP = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
 }
 
-void generateFakeAdvertisingID() {
+void generateFakeIdentifiers() {
     fakeAdvertisingID = [NSUUID UUID];
+    fakeUDID = [[NSUUID UUID] UUIDString]; // توليد UDID وهمي جديد كلياً
 }
 
 void fetchRealIP() {
@@ -73,7 +76,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح الكاش فقط (دون حذف بيانات الحساب)
+// MARK: - مسح الكاش وتوليد هوية جديدة بالكامل (IP, الموقع, UDID, IDFA)
 // ============================================================
 
 void clearAppCacheOnly() {
@@ -98,9 +101,10 @@ void clearAppCacheOnly() {
                                                modifiedSince:[NSDate distantPast]
                                            completionHandler:^{}];
     
+    // تجديد كافة بيانات الهوية والشبكة
     updateAtlantaLocation();
     generateSessionIP();
-    generateFakeAdvertisingID();
+    generateFakeIdentifiers();
     fetchRealIP();
     
     @synchronized(networkLogs) {
@@ -124,12 +128,12 @@ void clearAppCacheOnly() {
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
     
-    NSString *udidStr = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
+    NSString *udidStr = fakeUDID ?: [[[UIDevice currentDevice] identifierForVendor] UUIDString];
     NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (نطاق 172.56/57/59):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (حقيقي): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات الوهمية:\nUDID (وهمي جديد): %@\nIDFA (وهمي جديد): %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -255,7 +259,7 @@ void clearAppCacheOnly() {
     }
     
     UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم التجديد بنجاح"
-                                                                  message:[NSString stringWithFormat:@"تم مسح الكاش وتوليد IP جديد:\n%@", sessionFakeIP]
+                                                                  message:[NSString stringWithFormat:@"تم تغيير الهوية (UDID و IDFA) وتوليد IP جديد:\n%@", sessionFakeIP]
                                                            preferredStyle:UIAlertControllerStyleAlert];
     
     [done addAction:[UIAlertAction actionWithTitle:@"عرض التفاصيل" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
@@ -271,7 +275,7 @@ void clearAppCacheOnly() {
 @end
 
 // ============================================================
-// MARK: - Method Swizzling البديل للـ Substrate (بدون جلبريك)
+// MARK: - Method Swizzling البديل (بدون جلبريك) وتزوير المعرفات
 // ============================================================
 
 @interface FakeSwizzler : NSObject
@@ -279,7 +283,6 @@ void clearAppCacheOnly() {
 
 @implementation FakeSwizzler
 
-// تزوير LocationManager
 - (void)swizzled_startUpdatingLocation {
     updateAtlantaLocation();
     CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
@@ -294,7 +297,6 @@ void clearAppCacheOnly() {
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
 }
 
-// تزوير NSURLSession
 - (NSURLSessionDataTask *)swizzled_dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     if (sessionFakeIP) {
@@ -304,13 +306,12 @@ void clearAppCacheOnly() {
     }
     NSString *urlString = request.URL.absoluteString;
     if (urlString) {
-        logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon];
+        // تم تصحيح القوس هنا لتجنب خطأ التجميع
+        logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
     }
-    // استدعاء الدالة الأصلية عبر Swizzling
     return [self swizzled_dataTaskWithRequest:mutableReq completionHandler:completionHandler];
 }
 
-// تزوير ASIdentifierManager (IDFA)
 - (NSUUID *)swizzled_advertisingIdentifier {
     if (fakeAdvertisingID) {
         return fakeAdvertisingID;
@@ -318,20 +319,26 @@ void clearAppCacheOnly() {
     return [self swizzled_advertisingIdentifier];
 }
 
+// تزوير الـ UDID (معرف الجهاز للمورد identifierForVendor) ليتغير في كل مرة
+- (NSUUID *)swizzled_identifierForVendor {
+    if (fakeUDID) {
+        return [[NSUUID alloc] initWithUUIDString:fakeUDID];
+    }
+    return [self swizzled_identifierForVendor];
+}
+
 + (void)load {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         updateAtlantaLocation();
         generateSessionIP();
-        generateFakeAdvertisingID();
+        generateFakeIdentifiers();
         fetchRealIP();
         
-        // إعداد الزر العائم بعد التشغيل بقليل
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [[AtlantaInfoManager sharedInstance] setupFloatingButton];
         });
         
-        // مراقبة الخلفية لتنظيف الكاش تلقائياً دون حذف الحساب
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
                                                             object:nil
                                                              queue:[NSOperationQueue mainQueue]
@@ -339,7 +346,7 @@ void clearAppCacheOnly() {
             clearAppCacheOnly();
         }];
         
-        // تطبيق Swizzling لـ CLLocationManager
+        // Swizzling CLLocationManager
         Class locClass = NSClassFromString(@"CLLocationManager");
         if (locClass) {
             Method originalStart = class_getInstanceMethod(locClass, @selector(startUpdatingLocation));
@@ -351,7 +358,7 @@ void clearAppCacheOnly() {
             method_exchangeImplementations(originalLoc, swizzledLoc);
         }
         
-        // تطبيق Swizzling لـ NSURLSession
+        // Swizzling NSURLSession
         Class sessionClass = NSClassFromString(@"NSURLSession");
         if (sessionClass) {
             Method originalTask = class_getInstanceMethod(sessionClass, @selector(dataTaskWithRequest:completionHandler:));
@@ -359,14 +366,23 @@ void clearAppCacheOnly() {
             method_exchangeImplementations(originalTask, swizzledTask);
         }
         
-        // تطبيق Swizzling لـ ASIdentifierManager
+        // Swizzling ASIdentifierManager (IDFA)
         Class adClass = NSClassFromString(@"ASIdentifierManager");
         if (adClass) {
             Method originalAd = class_getInstanceMethod(adClass, @selector(advertisingIdentifier));
             Method swizzledAd = class_getInstanceMethod([FakeSwizzler class], @selector(swizzled_advertisingIdentifier));
             method_exchangeImplementations(originalAd, swizzledAd);
         }
+
+        // Swizzling UIDevice لجعل الـ UDID (identifierForVendor) يتغير باستمرار
+        Class deviceClass = NSClassFromString(@"UIDevice");
+        if (deviceClass) {
+            Method originalVendor = class_getInstanceMethod(deviceClass, @selector(identifierForVendor));
+            Method swizzledVendor = class_getInstanceMethod([FakeSwizzler class], @selector(swizzled_identifierForVendor));
+            method_exchangeImplementations(originalVendor, swizzledVendor);
+        }
     });
 }
 
 @end
+
