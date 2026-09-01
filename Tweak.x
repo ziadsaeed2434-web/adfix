@@ -13,9 +13,6 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
-// قائمة تحتوي على 1000 IP (تُولَّد عند بدء التشغيل)
-static NSArray *ipList = nil;
-
 // المعرفات الوهمية (فقط IDFA، وليس UDID)
 static NSUUID *fakeAdvertisingID = nil;
 
@@ -33,25 +30,21 @@ void updateAtlantaLocation() {
 }
 
 // ============================================================
-// MARK: - توليد قائمة 1000 IP عشوائية (نطاقات 172.56/57/59)
+// MARK: - توليد 10 IPs عشوائية (نطاقات 172.56/57/59)
 // ============================================================
 
-void generateIPList() {
-    if (ipList) return;
-
-    NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:1000];
+NSArray *generate10IPs() {
+    NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
     int allowedSecondOctets[] = {56, 57, 59};
     
-    for (int i = 0; i < 1000; i++) {
+    for (int i = 0; i < 10; i++) {
         int second = allowedSecondOctets[arc4random_uniform(3)];
         int third = arc4random_uniform(256);
         int fourth = arc4random_uniform(256);
         NSString *ip = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
         [tempList addObject:ip];
     }
-    
-    ipList = [tempList copy];
-    NSLog(@"[Injector] ✅ تم توليد قائمة تحتوي على 1000 IP (نطاقات 172.56/57/59).");
+    return [tempList copy];
 }
 
 // ============================================================
@@ -62,107 +55,83 @@ void generateIPList() {
 BOOL verifyIPQuality(NSString *ip) {
     if (!ip || ip.length == 0) return NO;
     
-    // نستخدم ip-api.com للحصول على معلومات عن الـ IP (سريع ومجاني)
     NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,isp,org,as", ip];
     NSURL *url = [NSURL URLWithString:urlString];
     
-    // إعداد طلب مع مهلة 3 ثوانٍ
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     [request setTimeoutInterval:3.0];
     
     __block NSData *responseData = nil;
-    __block BOOL finished = NO;
-    
-    // نرسل الطلب بشكل متزامن مع استخدام semaphore لتجنب تجميد الخيط الرئيسي
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         responseData = data;
-        finished = YES;
         dispatch_semaphore_signal(semaphore);
     }];
     [task resume];
     
-    // ننتظر حتى 3 ثوانٍ
     dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)));
     
     if (!responseData) {
-        // إذا لم يستجب الخادم، نعتبر IP جيداً افتراضياً (لتجنب الفشل الكامل)
-        return YES;
+        return YES; // إذا لم يستجب، نعتبره جيداً افتراضياً
     }
     
     NSError *jsonError = nil;
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
     if (jsonError || !json) {
-        return YES; // في حال خطأ في JSON، نعتبره جيداً
+        return YES;
     }
     
-    // التحقق من الحالة
     NSString *status = json[@"status"];
     if (![status isEqualToString:@"success"]) {
-        return YES; // إذا فشل الطلب، نعتبره جيداً (قد يكون IP غير معروف لكننا نجربه)
+        return YES;
     }
     
-    // نتحقق من حقل org أو isp
     NSString *org = json[@"org"] ?: @"";
     NSString *isp = json[@"isp"] ?: @"";
     NSString *as = json[@"as"] ?: @"";
     
-    // قائمة بالكلمات التي تشير إلى مركز بيانات
     NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
-    
     NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", org, isp, as];
     for (NSString *keyword in badKeywords) {
         if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            NSLog(@"[Injector] ❌ IP %@ غير جيد (يحتوي على: %@)", ip, keyword);
             return NO;
         }
     }
     
-    // إذا كان org يحتوي على "Residential" أو "ISP" أو "Broadband"، فهو جيد
     NSArray *goodKeywords = @[@"Residential", @"ISP", @"Broadband", @"Cable", @"Fiber", @"DSL", @"Mobile", @"Wireless"];
     for (NSString *keyword in goodKeywords) {
         if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            NSLog(@"[Injector] ✅ IP %@ جيد (يحتوي على: %@)", ip, keyword);
             return YES;
         }
     }
     
-    // إذا لم نعثر على أي كلمة، نعتبره جيداً افتراضياً (لتجنب رفض الكثير)
-    NSLog(@"[Injector] ⚠️ IP %@ لم يتم تصنيفه، نعتبره جيداً افتراضياً", ip);
-    return YES;
+    return YES; // افتراضي جيد
 }
 
 // ============================================================
-// MARK: - اختيار IP عشوائي من القائمة مع التحقق من الجودة
+// MARK: - اختيار IP من 10 عشوائية مع التحقق
 // ============================================================
 
 void generateSessionIP() {
-    if (!ipList) {
-        generateIPList();
-    }
+    // توليد 10 IPs عشوائية
+    NSArray *candidates = generate10IPs();
+    NSLog(@"[Injector] 🔍 تم توليد 10 IPs، جاري التحقق منها...");
     
-    int maxAttempts = 5;
     NSString *selectedIP = nil;
-    BOOL foundGood = NO;
-    
-    for (int attempt = 0; attempt < maxAttempts; attempt++) {
-        int index = arc4random_uniform((uint32_t)ipList.count);
-        NSString *candidate = ipList[index];
-        NSLog(@"[Injector] 🔍 اختبار IP: %@ (محاولة %d/%d)", candidate, attempt+1, maxAttempts);
-        
-        if (verifyIPQuality(candidate)) {
-            selectedIP = candidate;
-            foundGood = YES;
-            NSLog(@"[Injector] ✅ تم اختيار IP جيد: %@", selectedIP);
+    for (int i = 0; i < candidates.count; i++) {
+        NSString *ip = candidates[i];
+        NSLog(@"[Injector] 🔍 اختبار IP %d: %@", i+1, ip);
+        if (verifyIPQuality(ip)) {
+            selectedIP = ip;
+            NSLog(@"[Injector] ✅ تم اختيار IP جيد: %@ (بعد %d محاولة)", ip, i+1);
             break;
         }
     }
     
-    if (!foundGood) {
-        // إذا لم نجد IP جيداً، نستخدم IP عشوائي من القائمة
-        int index = arc4random_uniform((uint32_t)ipList.count);
-        selectedIP = ipList[index];
-        NSLog(@"[Injector] ⚠️ لم نجد IP جيداً بعد %d محاولات، نستخدم IP عشوائي: %@", maxAttempts, selectedIP);
+    // إذا لم نجد أي IP جيداً، نختار آخر IP تم اختباره
+    if (!selectedIP) {
+        selectedIP = candidates.lastObject;
+        NSLog(@"[Injector] ⚠️ لم نجد IP جيداً، نستخدم الأخير: %@", selectedIP);
     }
     
     sessionFakeIP = selectedIP;
@@ -204,7 +173,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - دالة إعادة الضبط الكاملة (تُجدِّد القائمة وتختار IP جديد)
+// MARK: - دالة إعادة الضبط الكاملة (تُجدد الـ 10 IPs وتختار الأفضل)
 // ============================================================
 
 void performFullReset() {
@@ -253,12 +222,11 @@ void performFullReset() {
         NSLog(@"[Injector] 🧹 WebKit مسح.");
     }];
     
-    // 5. إعادة توليد القائمة بالكامل وتحديث IP الجلسة
-    ipList = nil; // تفريغ القائمة القديمة
-    generateIPList(); // توليد قائمة جديدة
-    generateSessionIP(); // اختيار IP جديد مع التحقق
+    // 5. تجديد IP و ID
+    generateSessionIP(); // 10 IPs جديدة مع التحقق
     generateFakeAdvertisingID();
     fetchRealIP();
+    updateAtlantaLocation();
     
     // 6. مسح سجل الطلبات
     @synchronized(networkLogs) {
@@ -432,9 +400,7 @@ void performFullReset() {
 // ============================================================
 
 %ctor {
-    // توليد القائمة الأولى عند بدء التطبيق
-    generateIPList();
-    generateSessionIP(); // سيتم التحقق من الجودة
+    generateSessionIP(); // توليد 10 IPs واختيار الأفضل
     generateFakeAdvertisingID();
     fetchRealIP();
     updateAtlantaLocation();
