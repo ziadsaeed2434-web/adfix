@@ -34,7 +34,6 @@ void updateAtlantaLocation() {
 // ============================================================
 
 void generateSessionIP() {
-    // النطاقات المسموح بها: 56, 57, 59
     int allowedSecondOctets[] = {56, 57, 59};
     int index = arc4random_uniform(3);
     int second = allowedSecondOctets[index];
@@ -45,7 +44,6 @@ void generateSessionIP() {
     NSLog(@"[Injector] 🌐 تم توليد IP من نطاق 172.%d.x.x: %@", second, sessionFakeIP);
 }
 
-// توليد IDFA وهمي فقط (بدون تغيير UDID)
 void generateFakeAdvertisingID() {
     fakeAdvertisingID = [NSUUID UUID];
 }
@@ -85,7 +83,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 // ============================================================
 
 void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة...");
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة في الخلفية...");
     
     // 1. مسح الكوكيز والكاش
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
@@ -96,8 +94,10 @@ void performFullReset() {
     
     // 2. مسح NSUserDefaults
     NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
-    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+    if (appDomain) {
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    }
     
     // 3. مسح الملفات المحلية (Documents, Library)
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -127,7 +127,7 @@ void performFullReset() {
     [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes
                                                modifiedSince:[NSDate distantPast]
                                            completionHandler:^{
-        NSLog(@"[Injector] 🧹 WebKit مسح.");
+        NSLog(@"[Injector] 🧹 WebKit مسح بنجاح.");
     }];
     
     // 5. تجديد الموقع والـ IP والمعرفات
@@ -141,11 +141,11 @@ void performFullReset() {
         [networkLogs removeAllObjects];
     }
     
-    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط. IP الحالي: %@", sessionFakeIP);
+    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط بنجاح في الخلفية. IP الجديد: %@", sessionFakeIP);
 }
 
 // ============================================================
-// MARK: - واجهة عرض التفاصيل
+// MARK: - واجهة عرض التفاصيل (الزر العائم)
 // ============================================================
 
 @interface AtlantaReportViewController : UIViewController
@@ -160,7 +160,6 @@ void performFullReset() {
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
     
-    // استخدام UDID الحقيقي (بدون تغيير)
     NSString *udidStr = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
     NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     
@@ -177,7 +176,7 @@ void performFullReset() {
         }
     }
     
-    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 تفاصيل الطلبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
+    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 سجل الطلبات الشبكية:\n%@", locationInfo, ipInfo, identsInfo, logsText];
     
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, self.view.bounds.size.width - 40, 0)];
     label.text = fullReport;
@@ -205,7 +204,7 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - النافذة العائمة والزر (بدون تأكيد)
+// MARK: - النافذة العائمة والزر
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -257,7 +256,7 @@ void performFullReset() {
         self.floatingBtn.tag = 999888;
         self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
         self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.floatingBtn setTitle:@"🔄" forState:UIControlStateNormal];
+        [self.floatingBtn setTitle:@"📊" forState:UIControlStateNormal];
         [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:24];
         self.floatingBtn.layer.cornerRadius = 30;
@@ -269,7 +268,7 @@ void performFullReset() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
         
-        [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
+        [self.floatingBtn addTarget:self action:@selector(showReportModal) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.floatingBtn];
     });
@@ -287,27 +286,25 @@ void performFullReset() {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 
-- (void)handleReset {
-    performFullReset();
+- (void)showReportModal {
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = keyWindow.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
-    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
-                                                                  message:@"تمت إعادة الضبط بنجاح"
-                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-    [rootVC presentViewController:done animated:YES completion:nil];
+    AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
+    reportVC.modalPresentationStyle = UIModalPresentationPageSheet;
+    [rootVC presentViewController:reportVC animated:YES completion:nil];
 }
 
 @end
 
 // ============================================================
-// MARK: - الـ Hooks باستخدام %hook
+// MARK: - الـ Hooks وإدارة الخلفية
 // ============================================================
 
 %ctor {
+    // التهيئة الأولى عند التشغيل
     updateAtlantaLocation();
     generateSessionIP();
     generateFakeAdvertisingID();
@@ -316,6 +313,22 @@ void performFullReset() {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AtlantaInfoManager sharedInstance] setupFloatingButton];
     });
+    
+    // مراقبة أحداث الخلفية والإغلاق لتنفيذ إعادة الضبط التلقائية دون Crash
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserverForName:UIApplicationDidEnterBackgroundNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) {
+        performFullReset();
+    }];
+    
+    [center addObserverForName:UIApplicationWillTerminateNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) {
+        performFullReset();
+    }];
 }
 
 %hook CLLocationManager
@@ -364,9 +377,6 @@ void performFullReset() {
 }
 %end
 
-// ===== إزالة Hook UIDevice نهائياً (يبقى UDID حقيقياً) =====
-
-// ===== Hook ASIdentifierManager فقط لتغيير IDFA =====
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     if (fakeAdvertisingID) {
