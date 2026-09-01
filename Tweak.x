@@ -34,13 +34,13 @@ void updateAtlantaLocation() {
 // ============================================================
 
 void generateSessionIP() {
-    int allowedSecondOctets[] = {56, 57, 59};
+    int allowedSecondOctets[] = {154, 180, 124};
     int index = arc4random_uniform(3);
     int second = allowedSecondOctets[index];
     int third = arc4random_uniform(256);
     int fourth = arc4random_uniform(256);
     
-    sessionFakeIP = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
+    sessionFakeIP = [NSString stringWithFormat:@"24.%d.%d.%d", second, third, fourth];
     NSLog(@"[Injector] 🌐 تم توليد IP من نطاق 172.%d.x.x: %@", second, sessionFakeIP);
 }
 
