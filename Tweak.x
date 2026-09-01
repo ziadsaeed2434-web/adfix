@@ -15,10 +15,10 @@ static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
 static NSUUID *fakeAdvertisingID = nil;
-static NSString *fakeUDID = nil; // معرف UDID وهمي جديد لكل جلسة
+static NSString *fakeUDID = nil;
 
 // ============================================================
-// MARK: - دوال مساعدة وتوليد البيانات المتجددة
+// MARK: - دوال مساعدة وتوليد الهوية الجديدة
 // ============================================================
 
 double randomInRange(double min, double max) {
@@ -42,7 +42,7 @@ void generateSessionIP() {
 
 void generateFakeIdentifiers() {
     fakeAdvertisingID = [NSUUID UUID];
-    fakeUDID = [[NSUUID UUID] UUIDString]; // توليد UDID وهمي جديد كلياً
+    fakeUDID = [[NSUUID UUID] UUIDString];
 }
 
 void fetchRealIP() {
@@ -76,37 +76,17 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح الكاش وتوليد هوية جديدة بالكامل (IP, الموقع, UDID, IDFA)
+// MARK: - تجديد الهوية والبيانات فقط (دون حذف أي ملفات أو كاش)
 // ============================================================
 
-void clearAppCacheOnly() {
-    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
-        [cookieStorage deleteCookie:cookie];
-    }
-    [[NSURLCache sharedURLCache] removeAllCachedResponses];
-    
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
-    NSString *libPath = [paths firstObject];
-    if (libPath) {
-        NSString *cachePath = [libPath stringByAppendingPathComponent:@"Caches"];
-        for (NSString *item in [fm contentsOfDirectoryAtPath:cachePath error:nil]) {
-            [fm removeItemAtPath:[cachePath stringByAppendingPathComponent:item] error:nil];
-        }
-    }
-    
-    NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes
-                                               modifiedSince:[NSDate distantPast]
-                                           completionHandler:^{}];
-    
-    // تجديد كافة بيانات الهوية والشبكة
+void renewFakeIdentityOnly() {
+    // تحديث الموقع، الـ IP الوهمي، المعرفات الوهمية (UDID & IDFA)، والـ IP الحقيقي
     updateAtlantaLocation();
     generateSessionIP();
     generateFakeIdentifiers();
     fetchRealIP();
     
+    // مسح سجل الطلبات القديم فقط لتبدأ الجلسة الجديدة بنظافة في السجل
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
@@ -133,7 +113,7 @@ void clearAppCacheOnly() {
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (نطاق 172.56/57/59):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات الوهمية:\nUDID (وهمي جديد): %@\nIDFA (وهمي جديد): %@", udidStr, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات الوهمية الجديدة:\nUDID: %@\nIDFA: %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -232,7 +212,7 @@ void clearAppCacheOnly() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
         
-        [self.floatingBtn addTarget:self action:@selector(handleCacheReset) forControlEvents:UIControlEventTouchUpInside];
+        [self.floatingBtn addTarget:self action:@selector(handleIdentityRenewal) forControlEvents:UIControlEventTouchUpInside];
         [vc.view addSubview:self.floatingBtn];
     });
 }
@@ -249,8 +229,8 @@ void clearAppCacheOnly() {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 
-- (void)handleCacheReset {
-    clearAppCacheOnly();
+- (void)handleIdentityRenewal {
+    renewFakeIdentityOnly();
     
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = keyWindow.rootViewController;
@@ -259,7 +239,7 @@ void clearAppCacheOnly() {
     }
     
     UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم التجديد بنجاح"
-                                                                  message:[NSString stringWithFormat:@"تم تغيير الهوية (UDID و IDFA) وتوليد IP جديد:\n%@", sessionFakeIP]
+                                                                  message:[NSString stringWithFormat:@"تم توليد هُوية جديدة (IP, UDID, IDFA) دون حذف أي بيانات:\n%@", sessionFakeIP]
                                                            preferredStyle:UIAlertControllerStyleAlert];
     
     [done addAction:[UIAlertAction actionWithTitle:@"عرض التفاصيل" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
@@ -275,7 +255,7 @@ void clearAppCacheOnly() {
 @end
 
 // ============================================================
-// MARK: - Method Swizzling البديل (بدون جلبريك) وتزوير المعرفات
+// MARK: - Method Swizzling البديل (بدون جلبريك)
 // ============================================================
 
 @interface FakeSwizzler : NSObject
@@ -306,7 +286,6 @@ void clearAppCacheOnly() {
     }
     NSString *urlString = request.URL.absoluteString;
     if (urlString) {
-        // تم تصحيح القوس هنا لتجنب خطأ التجميع
         logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
     }
     return [self swizzled_dataTaskWithRequest:mutableReq completionHandler:completionHandler];
@@ -319,7 +298,6 @@ void clearAppCacheOnly() {
     return [self swizzled_advertisingIdentifier];
 }
 
-// تزوير الـ UDID (معرف الجهاز للمورد identifierForVendor) ليتغير في كل مرة
 - (NSUUID *)swizzled_identifierForVendor {
     if (fakeUDID) {
         return [[NSUUID alloc] initWithUUIDString:fakeUDID];
@@ -339,11 +317,12 @@ void clearAppCacheOnly() {
             [[AtlantaInfoManager sharedInstance] setupFloatingButton];
         });
         
+        // عند الخروج للخلفية يتم تحديث الهُوية فقط دون حذف أي ملفات
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
                                                             object:nil
                                                              queue:[NSOperationQueue mainQueue]
                                                         usingBlock:^(NSNotification *note) {
-            clearAppCacheOnly();
+            renewFakeIdentityOnly();
         }];
         
         // Swizzling CLLocationManager
@@ -366,7 +345,7 @@ void clearAppCacheOnly() {
             method_exchangeImplementations(originalTask, swizzledTask);
         }
         
-        // Swizzling ASIdentifierManager (IDFA)
+        // Swizzling ASIdentifierManager
         Class adClass = NSClassFromString(@"ASIdentifierManager");
         if (adClass) {
             Method originalAd = class_getInstanceMethod(adClass, @selector(advertisingIdentifier));
@@ -374,7 +353,7 @@ void clearAppCacheOnly() {
             method_exchangeImplementations(originalAd, swizzledAd);
         }
 
-        // Swizzling UIDevice لجعل الـ UDID (identifierForVendor) يتغير باستمرار
+        // Swizzling UIDevice
         Class deviceClass = NSClassFromString(@"UIDevice");
         if (deviceClass) {
             Method originalVendor = class_getInstanceMethod(deviceClass, @selector(identifierForVendor));
@@ -385,4 +364,3 @@ void clearAppCacheOnly() {
 }
 
 @end
-
