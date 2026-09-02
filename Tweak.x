@@ -68,7 +68,7 @@ BOOL verifyIPQuality(NSString *ip) {
     [task resume];
     dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)));
     
-    if (!responseData) return YES; // إذا لم يستجب، نعتبره جيداً (نتجنب الفشل)
+    if (!responseData) return YES;
     
     NSError *jsonError = nil;
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
@@ -80,14 +80,13 @@ BOOL verifyIPQuality(NSString *ip) {
     NSString *as = json[@"as"] ?: @"";
     NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", org, isp, as];
     
-    // كلمات تشير إلى مراكز بيانات أو استضافة
     NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
     for (NSString *keyword in badKeywords) {
         if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
             return NO;
         }
     }
-    return YES; // إذا لم يحتوي على كلمات استضافة، نعتبره سكنياً
+    return YES;
 }
 
 // ============================================================
@@ -150,7 +149,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح Keychain مع الحفاظ على userIDKey و accessTokenKey
+// MARK: - 🔥 مسح Keychain مع الحفاظ على userIDKey و accessTokenKey
 // ============================================================
 
 void clearKeychainKeepingAccount() {
@@ -212,70 +211,157 @@ void clearKeychainKeepingAccount() {
 }
 
 // ============================================================
-// MARK: - دالة إعادة الضبط الكاملة (معدلة)
+// MARK: - 🔥 مسح كل NSUserDefaults بالكامل (جميع النطاقات والمفاتيح)
 // ============================================================
 
-void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة...");
+void clearAllUserDefaults() {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     
-    // 0. مسح Keychain مع الحفاظ على الحساب
-    clearKeychainKeepingAccount();
+    // 1. مسح النطاق الرئيسي للتطبيق
+    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
+    [defaults removePersistentDomainForName:appDomain];
     
-    // 1. مسح الكوكيز والكاش
+    // 2. مسح كل مفتاح فردي في جميع النطاقات
+    NSDictionary *dict = [defaults dictionaryRepresentation];
+    for (NSString *key in dict) {
+        [defaults removeObjectForKey:key];
+    }
+    
+    // 3. مسح أي نطاقات أخرى مسجلة
+    NSArray *volatileDomains = [defaults volatileDomainNames];
+    for (NSString *domain in volatileDomains) {
+        [defaults removeVolatileDomainForName:domain];
+    }
+    
+    [defaults synchronize];
+    NSLog(@"[Injector] 🗑️ كل NSUserDefaults مسح بالكامل (جميع النطاقات والمفاتيح)");
+}
+
+// ============================================================
+// MARK: - 🔥 مسح جميع الكوكيز (شبكة ومحلية)
+// ============================================================
+
+void clearAllCookies() {
+    // 1. مسح كوكيز NSHTTPCookieStorage (الكوكيز العادية)
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
-    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    NSLog(@"[Injector] 🗑️ جميع كوكيز NSHTTPCookieStorage مسحت");
     
-    // 2. مسح NSUserDefaults
-    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
-    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    
-    // 3. مسح الملفات المحلية (Documents, Library)
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docPath = [paths firstObject];
-    if (docPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:docPath error:nil]) {
-            [fm removeItemAtPath:[docPath stringByAppendingPathComponent:item] error:nil];
-        }
-    }
-    paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
-    NSString *libPath = [paths firstObject];
-    if (libPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:libPath error:nil]) {
-            if (![item isEqualToString:@"Preferences"] && ![item isEqualToString:@"Caches"]) {
-                [fm removeItemAtPath:[libPath stringByAppendingPathComponent:item] error:nil];
-            }
-        }
-        NSString *cachePath = [libPath stringByAppendingPathComponent:@"Caches"];
-        for (NSString *item in [fm contentsOfDirectoryAtPath:cachePath error:nil]) {
-            [fm removeItemAtPath:[cachePath stringByAppendingPathComponent:item] error:nil];
-        }
-    }
-    
-    // 4. مسح بيانات WebKit
-    NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+    // 2. مسح كوكيز WKWebsiteDataStore (WebKit)
+    NSSet *dataTypes = [NSSet setWithObject:WKWebsiteDataTypeCookies];
     [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes
                                                modifiedSince:[NSDate distantPast]
                                            completionHandler:^{
-        NSLog(@"[Injector] 🧹 WebKit مسح.");
+        NSLog(@"[Injector] 🗑️ جميع كوكيز WebKit مسحت");
     }];
     
-    // 5. تجديد الموقع والـ IP (مع التحقق من السكنية) والمعرفات
+    // 3. مسح جميع بيانات WebKit الأخرى (بما في ذلك التخزين المحلي)
+    NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes
+                                               modifiedSince:[NSDate distantPast]
+                                           completionHandler:^{
+        NSLog(@"[Injector] 🗑️ جميع بيانات WebKit مسحت");
+    }];
+}
+
+// ============================================================
+// MARK: - 🔥 مسح كاش الشبكة
+// ============================================================
+
+void clearNetworkCache() {
+    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    [[NSURLCache sharedURLCache] setDiskCapacity:0];
+    [[NSURLCache sharedURLCache] setMemoryCapacity:0];
+    NSLog(@"[Injector] 🗑️ كاش الشبكة مسح بالكامل");
+}
+
+// ============================================================
+// MARK: - 🔥 مسح جميع الملفات المحلية
+// ============================================================
+
+void clearAllLocalFiles() {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *dirs = @[
+        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject,
+        NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject,
+        NSTemporaryDirectory()
+    ];
+    
+    for (NSString *dir in dirs) {
+        if (dir) {
+            NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
+            for (NSString *item in items) {
+                // استثناء مجلد Preferences لأنه قد يحتوي على إعدادات النظام
+                // ولكننا نمسح كل الملفات الخاصة بالتطبيق منه أيضاً
+                if (![item isEqualToString:@"Preferences"]) {
+                    [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
+                } else {
+                    // نمسح ملفات Preferences الخاصة بالتطبيق فقط
+                    NSString *prefPath = [dir stringByAppendingPathComponent:item];
+                    NSArray *prefItems = [fm contentsOfDirectoryAtPath:prefPath error:nil];
+                    for (NSString *prefFile in prefItems) {
+                        if ([prefFile containsString:@"com.codebysms"] ||
+                            [prefFile containsString:@"codebysms"] ||
+                            [prefFile containsString:@"com.supersonic"] ||
+                            [prefFile containsString:@"com.inmobi"] ||
+                            [prefFile containsString:@"com.applovin"] ||
+                            [prefFile containsString:@"com.unity"] ||
+                            [prefFile containsString:@"com.google"] ||
+                            [prefFile containsString:@"com.firebase"] ||
+                            [prefFile containsString:@"com.amplitude"] ||
+                            [prefFile containsString:@"io.appmetrica"] ||
+                            [prefFile containsString:@"vungle"] ||
+                            [prefFile containsString:@"com.crashlytics"] ||
+                            [prefFile containsString:@"APM"] ||
+                            [prefFile containsString:@"IABTCF"] ||
+                            [prefFile containsString:@"GPP"] ||
+                            [prefFile containsString:@"Cmp"]) {
+                            [fm removeItemAtPath:[prefPath stringByAppendingPathComponent:prefFile] error:nil];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية مسحت بالكامل");
+}
+
+// ============================================================
+// MARK: - دالة إعادة الضبط الكاملة (شاملة لكل شيء)
+// ============================================================
+
+void performFullReset() {
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الشاملة (مسح كل شيء)...");
+    
+    // 1. مسح Keychain مع الحفاظ على الحساب
+    clearKeychainKeepingAccount();
+    
+    // 2. مسح كل NSUserDefaults بالكامل
+    clearAllUserDefaults();
+    
+    // 3. مسح جميع الكوكيز (شبكة ومحلية)
+    clearAllCookies();
+    
+    // 4. مسح كاش الشبكة
+    clearNetworkCache();
+    
+    // 5. مسح جميع الملفات المحلية
+    clearAllLocalFiles();
+    
+    // 6. تجديد الموقع والـ IP (مع التحقق من السكنية) والمعرفات
     updateAtlantaLocation();
     generateSessionIP();   // تولد 10 IPs وتختار السكني
     generateFakeAdvertisingID();
     fetchRealIP();
     
-    // 6. مسح سجل الطلبات
+    // 7. مسح سجل الطلبات
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
     
-    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط. IP الحالي: %@", sessionFakeIP);
+    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط الشاملة. IP الحالي: %@", sessionFakeIP);
 }
 
 // ============================================================
@@ -429,7 +515,7 @@ void performFullReset() {
         rootVC = rootVC.presentedViewController;
     }
     UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
-                                                                  message:@"تمت إعادة الضبط بنجاح"
+                                                                  message:@"تم مسح كل البيانات بالكامل (NSUserDefaults، كوكيز، كاش، ملفات) مع بقاء الحساب."
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
     [rootVC presentViewController:done animated:YES completion:nil];
