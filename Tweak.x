@@ -159,85 +159,50 @@ void generateFakeIdentifiers() {
 }
 
 // ============================================================
-// MARK: - 🔥 مسح App Group تلقائياً (الحل السحري)
+// MARK: - مسح App Group تلقائياً
 // ============================================================
 
 void clearAppGroupContainer() {
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *appGroupPath = nil;
-    
-    // 1. محاولة الحصول على المسار عبر API الرسمي (إذا كان المعرف معروفاً)
-    // لكننا لا نعرفه، لذا سنستخدم طريقة البحث اليدوي.
-    
-    // 2. البحث في مجلد Shared/AppGroup عن أي مجلد يحتوي على بيانات التطبيق
     NSString *sharedPath = @"/private/var/mobile/Containers/Shared/AppGroup";
-    if (![fm fileExistsAtPath:sharedPath]) {
-        NSLog(@"[Injector] ⚠️ مجلد App Group غير موجود.");
-        return;
-    }
-    
+    if (![fm fileExistsAtPath:sharedPath]) return;
+
     NSError *error = nil;
     NSArray *groupDirs = [fm contentsOfDirectoryAtPath:sharedPath error:&error];
-    if (error) {
-        NSLog(@"[Injector] ❌ فشل في قراءة App Groups: %@", error);
-        return;
-    }
-    
-    // نبحث عن المجلد الذي يحتوي على ملفات خاصة بـ com.codebysms
+    if (error) return;
+
     for (NSString *dirName in groupDirs) {
         NSString *fullPath = [sharedPath stringByAppendingPathComponent:dirName];
         BOOL isDir = NO;
         if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
-            // نبحث عن ملفات تخص التطبيق
             NSArray *subContents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
             for (NSString *item in subContents) {
-                if ([item containsString:@"com.codebysms"] || 
+                if ([item containsString:@"com.codebysms"] ||
                     [item containsString:@"codebysms"] ||
-                    [item containsString:@"61178"] || // رقم userID قد يكون دليلاً
+                    [item containsString:@"61178"] ||
                     [item containsString:@"UserDefaults"] ||
                     [item isEqualToString:@"Library"] ||
                     [item isEqualToString:@"Documents"]) {
-                    
-                    NSLog(@"[Injector] 🗂️ تم العثور على App Group محتمل: %@", dirName);
-                    appGroupPath = fullPath;
-                    break;
+                    // مسح كل المحتويات
+                    NSArray *files = [fm contentsOfDirectoryAtPath:fullPath error:nil];
+                    for (NSString *file in files) {
+                        [fm removeItemAtPath:[fullPath stringByAppendingPathComponent:file] error:nil];
+                    }
+                    return;
                 }
             }
         }
-        if (appGroupPath) break;
-    }
-    
-    // إذا لم نجد عن طريق البحث، نجرب نطاقاً عاماً (بعض التطبيقات تستخدم group.com.codebysms)
-    if (!appGroupPath) {
-        // نجرب المسار الافتراضي الشائع
-        NSString *commonPath = @"/private/var/mobile/Containers/Shared/AppGroup/group.com.codebysms";
-        if ([fm fileExistsAtPath:commonPath]) {
-            appGroupPath = commonPath;
-        }
-    }
-    
-    if (appGroupPath) {
-        NSLog(@"[Injector] 🗑️ مسح App Group: %@", appGroupPath);
-        // مسح جميع المحتويات داخل المجلد
-        NSArray *contents = [fm contentsOfDirectoryAtPath:appGroupPath error:nil];
-        for (NSString *item in contents) {
-            NSString *itemPath = [appGroupPath stringByAppendingPathComponent:item];
-            [fm removeItemAtPath:itemPath error:nil];
-        }
-        NSLog(@"[Injector] ✅ تم مسح App Group بنجاح.");
-    } else {
-        NSLog(@"[Injector] ⚠️ لم يتم العثور على App Group خاص بالتطبيق.");
     }
 }
 
 // ============================================================
-// MARK: - محاكاة إعادة التوقيع (مع مسح App Group)
+// MARK: - إعادة الضبط الكاملة (تُستدعى فقط عند الضغط على الزر)
 // ============================================================
 
-void simulateResign() {
-    NSLog(@"[Injector] 🔄 بدء محاكاة إعادة التوقيع (Resign) مع مسح App Group...");
-    
-    // 1️⃣ حفظ userIDKey و accessTokenKey
+void performFullReset() {
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة (يدوي)...");
+
+    // 1. حفظ userIDKey و accessTokenKey
     NSString *savedUserID = nil;
     NSString *savedAccessToken = nil;
     NSDictionary *query = @{
@@ -263,15 +228,15 @@ void simulateResign() {
         }
         CFRelease(result);
     }
-    
-    // 2️⃣ مسح كل Keychain
+
+    // 2. مسح كل Keychain (جميع الفئات)
     NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
     for (id secClass in secClasses) {
         NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
-    
-    // 3️⃣ إعادة كتابة userIDKey و accessTokenKey
+
+    // 3. إعادة كتابة userIDKey و accessTokenKey
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -290,16 +255,16 @@ void simulateResign() {
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
     }
-    
-    // 4️⃣ مسح NSUserDefaults
+
+    // 4. مسح NSUserDefaults
     NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
     [[NSUserDefaults standardUserDefaults] synchronize];
-    
-    // 5️⃣ مزامنة iCloud
+
+    // 5. مزامنة iCloud
     [[NSUbiquitousKeyValueStore defaultStore] synchronize];
-    
-    // 6️⃣ حذف جميع ملفات التطبيق (Documents, Library, tmp)
+
+    // 6. حذف جميع ملفات التطبيق (Documents, Library, tmp)
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     NSString *docPath = paths.firstObject;
@@ -321,34 +286,32 @@ void simulateResign() {
             [fm removeItemAtPath:[tmpPath stringByAppendingPathComponent:item] error:nil];
         }
     }
-    
-    // 7️⃣ 🔥 مسح App Group (الحل الجديد)
+
+    // 7. مسح App Group
     clearAppGroupContainer();
-    
-    // 8️⃣ مسح WebKit
+
+    // 8. مسح WebKit و الكوكيز و الكاش
     NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
     [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
-    
-    // 9️⃣ مسح الكوكيز والكاش
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
-    
-    // 🔟 تجديد الموقع، IP، المعرفات
+
+    // 9. تجديد الموقع، IP، المعرفات
     updateAtlantaLocation();
     generateSessionIP();
     generateFakeIdentifiers();
     fetchRealIP();
-    
-    // 1️⃣1️⃣ مسح سجل الطلبات
+
+    // 10. مسح سجل الطلبات
     @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
-    
-    // 1️⃣2️⃣ إعادة تشغيل التطبيق
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تمت المحاكاة"
-                                                                       message:@"تم مسح كل شيء بما في ذلك App Group.\nالآن التطبيق يعتبر مثبتاً حديثاً مع بقاء حسابك."
+
+    // 11. إعادة تشغيل التطبيق فوراً
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تم التجديد"
+                                                                       message:@"تم مسح جميع البيانات وتوليد هوية جديدة.\nسيتم إعادة تشغيل التطبيق لظهور الإعلانات."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             exit(0);
@@ -477,15 +440,16 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 - (void)handleReset {
-    simulateResign();
+    performFullReset(); // عند الضغط على الزر، ننفذ إعادة الضبط الكاملة
 }
 @end
 
+// ============================================================
+// MARK: - الـ Hooks
+// ============================================================
+
 %ctor {
-    generateSessionIP();
-    generateFakeIdentifiers();
-    fetchRealIP();
-    updateAtlantaLocation();
+    // لا نقوم بأي شيء تلقائي – فقط نضيف الزر بعد تأخير
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AtlantaInfoManager sharedInstance] setupFloatingButton];
     });
