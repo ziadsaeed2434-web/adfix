@@ -3,6 +3,8 @@
 #import <AdSupport/ASIdentifierManager.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
+#import <dlfcn.h>
+#import <objc/runtime.h>
 
 // ============================================================
 // MARK: - المتغيرات العامة
@@ -157,14 +159,87 @@ void generateFakeIdentifiers() {
 }
 
 // ============================================================
-// MARK: - مسح Keychain مع الاحتفاظ بـ userIDKey و accessTokenKey معًا
+// MARK: - 🔥 مسح App Group تلقائياً (الحل السحري)
 // ============================================================
 
-void resetKeychainWithNewIdentity() {
-    NSLog(@"[Injector] 🔑 حفظ userIDKey و accessTokenKey، ثم مسح كل Keychain وإعادة كتابة الباقي بهوية جديدة...");
+void clearAppGroupContainer() {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *appGroupPath = nil;
     
-    // 1. قراءة جميع عناصر Keychain
-    NSMutableArray *allItems = [NSMutableArray array];
+    // 1. محاولة الحصول على المسار عبر API الرسمي (إذا كان المعرف معروفاً)
+    // لكننا لا نعرفه، لذا سنستخدم طريقة البحث اليدوي.
+    
+    // 2. البحث في مجلد Shared/AppGroup عن أي مجلد يحتوي على بيانات التطبيق
+    NSString *sharedPath = @"/private/var/mobile/Containers/Shared/AppGroup";
+    if (![fm fileExistsAtPath:sharedPath]) {
+        NSLog(@"[Injector] ⚠️ مجلد App Group غير موجود.");
+        return;
+    }
+    
+    NSError *error = nil;
+    NSArray *groupDirs = [fm contentsOfDirectoryAtPath:sharedPath error:&error];
+    if (error) {
+        NSLog(@"[Injector] ❌ فشل في قراءة App Groups: %@", error);
+        return;
+    }
+    
+    // نبحث عن المجلد الذي يحتوي على ملفات خاصة بـ com.codebysms
+    for (NSString *dirName in groupDirs) {
+        NSString *fullPath = [sharedPath stringByAppendingPathComponent:dirName];
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
+            // نبحث عن ملفات تخص التطبيق
+            NSArray *subContents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
+            for (NSString *item in subContents) {
+                if ([item containsString:@"com.codebysms"] || 
+                    [item containsString:@"codebysms"] ||
+                    [item containsString:@"61178"] || // رقم userID قد يكون دليلاً
+                    [item containsString:@"UserDefaults"] ||
+                    [item isEqualToString:@"Library"] ||
+                    [item isEqualToString:@"Documents"]) {
+                    
+                    NSLog(@"[Injector] 🗂️ تم العثور على App Group محتمل: %@", dirName);
+                    appGroupPath = fullPath;
+                    break;
+                }
+            }
+        }
+        if (appGroupPath) break;
+    }
+    
+    // إذا لم نجد عن طريق البحث، نجرب نطاقاً عاماً (بعض التطبيقات تستخدم group.com.codebysms)
+    if (!appGroupPath) {
+        // نجرب المسار الافتراضي الشائع
+        NSString *commonPath = @"/private/var/mobile/Containers/Shared/AppGroup/group.com.codebysms";
+        if ([fm fileExistsAtPath:commonPath]) {
+            appGroupPath = commonPath;
+        }
+    }
+    
+    if (appGroupPath) {
+        NSLog(@"[Injector] 🗑️ مسح App Group: %@", appGroupPath);
+        // مسح جميع المحتويات داخل المجلد
+        NSArray *contents = [fm contentsOfDirectoryAtPath:appGroupPath error:nil];
+        for (NSString *item in contents) {
+            NSString *itemPath = [appGroupPath stringByAppendingPathComponent:item];
+            [fm removeItemAtPath:itemPath error:nil];
+        }
+        NSLog(@"[Injector] ✅ تم مسح App Group بنجاح.");
+    } else {
+        NSLog(@"[Injector] ⚠️ لم يتم العثور على App Group خاص بالتطبيق.");
+    }
+}
+
+// ============================================================
+// MARK: - محاكاة إعادة التوقيع (مع مسح App Group)
+// ============================================================
+
+void simulateResign() {
+    NSLog(@"[Injector] 🔄 بدء محاكاة إعادة التوقيع (Resign) مع مسح App Group...");
+    
+    // 1️⃣ حفظ userIDKey و accessTokenKey
+    NSString *savedUserID = nil;
+    NSString *savedAccessToken = nil;
     NSDictionary *query = @{
         (id)kSecClass: (id)kSecClassGenericPassword,
         (id)kSecMatchLimit: (id)kSecMatchLimitAll,
@@ -173,11 +248,6 @@ void resetKeychainWithNewIdentity() {
     };
     CFArrayRef result = NULL;
     OSStatus status = SecItemCopyMatching((CFDictionaryRef)query, (CFTypeRef *)&result);
-    
-    // حفظ userIDKey و accessTokenKey
-    NSString *savedUserID = nil;
-    NSString *savedAccessToken = nil;
-    
     if (status == errSecSuccess && result != NULL) {
         NSArray *items = (__bridge NSArray *)result;
         for (NSDictionary *item in items) {
@@ -185,34 +255,23 @@ void resetKeychainWithNewIdentity() {
             NSString *account = item[(id)kSecAttrAccount];
             NSData *valueData = item[(id)kSecValueData];
             NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
-            
-            // حفظ userIDKey و accessTokenKey
             if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"userIDKey"]) {
                 savedUserID = value;
-                NSLog(@"[Injector] 📌 حفظ userIDKey: %@", savedUserID);
             } else if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"accessTokenKey"]) {
                 savedAccessToken = value;
-                NSLog(@"[Injector] 📌 حفظ accessTokenKey: %@", savedAccessToken);
-            } else {
-                // باقي العناصر سنعيد كتابتها بقيم جديدة
-                [allItems addObject:@{
-                    @"service": service ?: @"",
-                    @"account": account ?: @"",
-                    @"value": value ?: @""
-                }];
             }
         }
         CFRelease(result);
     }
     
-    // 2. مسح كل Keychain (جميع الفئات)
+    // 2️⃣ مسح كل Keychain
     NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
     for (id secClass in secClasses) {
         NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
     
-    // 3. إعادة كتابة userIDKey و accessTokenKey بقيمهما الأصليين
+    // 3️⃣ إعادة كتابة userIDKey و accessTokenKey
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -221,7 +280,6 @@ void resetKeychainWithNewIdentity() {
             (id)kSecValueData: [savedUserID dataUsingEncoding:NSUTF8StringEncoding]
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
-        NSLog(@"[Injector] ✅ إعادة كتابة userIDKey: %@", savedUserID);
     }
     if (savedAccessToken) {
         NSDictionary *addQuery = @{
@@ -231,58 +289,17 @@ void resetKeychainWithNewIdentity() {
             (id)kSecValueData: [savedAccessToken dataUsingEncoding:NSUTF8StringEncoding]
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
-        NSLog(@"[Injector] ✅ إعادة كتابة accessTokenKey: %@", savedAccessToken);
     }
     
-    // 4. إعادة كتابة جميع العناصر الأخرى بقيم جديدة
-    for (NSDictionary *itemDict in allItems) {
-        NSString *service = itemDict[@"service"];
-        NSString *account = itemDict[@"account"];
-        NSString *oldValue = itemDict[@"value"];
-        
-        NSString *newValue = nil;
-        if ([service isEqualToString:@"com.firebase.FIRInstallations.installations"]) {
-            newValue = generateFirebaseValue(oldValue);
-        } else {
-            newValue = generateRandomValue(oldValue);
-        }
-        
-        if (newValue) {
-            NSDictionary *addQuery = @{
-                (id)kSecClass: (id)kSecClassGenericPassword,
-                (id)kSecAttrService: service,
-                (id)kSecAttrAccount: account,
-                (id)kSecValueData: [newValue dataUsingEncoding:NSUTF8StringEncoding]
-            };
-            SecItemAdd((CFDictionaryRef)addQuery, NULL);
-            NSLog(@"[Injector] 🔄 تحديث Keychain: %@/%@ = %@ (جديد: %@)", service, account, oldValue, newValue);
-        }
-    }
-    
-    NSLog(@"[Injector] ✅ تم تحديث جميع عناصر Keychain بهوية جديدة مع بقاء userIDKey و accessTokenKey.");
-}
-
-// ============================================================
-// MARK: - إعادة الضبط الكاملة (مع إغلاق التطبيق)
-// ============================================================
-
-void performFullReset() {
-    // 1. مسح الكوكيز
-    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
-        [cookieStorage deleteCookie:cookie];
-    }
-    [[NSURLCache sharedURLCache] removeAllCachedResponses];
-
-    // 2. مسح NSUserDefaults
+    // 4️⃣ مسح NSUserDefaults
     NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
     [[NSUserDefaults standardUserDefaults] synchronize];
-
-    // 3. مزامنة iCloud (لا نمسحها، فقط نزامن)
+    
+    // 5️⃣ مزامنة iCloud
     [[NSUbiquitousKeyValueStore defaultStore] synchronize];
-
-    // 4. مسح الملفات
+    
+    // 6️⃣ حذف جميع ملفات التطبيق (Documents, Library, tmp)
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     NSString *docPath = paths.firstObject;
@@ -295,36 +312,43 @@ void performFullReset() {
     NSString *libPath = paths.firstObject;
     if (libPath) {
         for (NSString *item in [fm contentsOfDirectoryAtPath:libPath error:nil]) {
-            if (![item isEqualToString:@"Preferences"] && ![item isEqualToString:@"Caches"]) {
-                [fm removeItemAtPath:[libPath stringByAppendingPathComponent:item] error:nil];
-            }
-        }
-        NSString *cachePath = [libPath stringByAppendingPathComponent:@"Caches"];
-        for (NSString *item in [fm contentsOfDirectoryAtPath:cachePath error:nil]) {
-            [fm removeItemAtPath:[cachePath stringByAppendingPathComponent:item] error:nil];
+            [fm removeItemAtPath:[libPath stringByAppendingPathComponent:item] error:nil];
         }
     }
-
-    // 5. مسح WebKit
+    NSString *tmpPath = NSTemporaryDirectory();
+    if (tmpPath) {
+        for (NSString *item in [fm contentsOfDirectoryAtPath:tmpPath error:nil]) {
+            [fm removeItemAtPath:[tmpPath stringByAppendingPathComponent:item] error:nil];
+        }
+    }
+    
+    // 7️⃣ 🔥 مسح App Group (الحل الجديد)
+    clearAppGroupContainer();
+    
+    // 8️⃣ مسح WebKit
     NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
     [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
-
-    // 6. مسح Keychain وإعادة كتابته مع الحفاظ على userIDKey و accessTokenKey
-    resetKeychainWithNewIdentity();
-
-    // 7. تجديد IP، الموقع، المعرفات
+    
+    // 9️⃣ مسح الكوكيز والكاش
+    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
+        [cookieStorage deleteCookie:cookie];
+    }
+    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    
+    // 🔟 تجديد الموقع، IP، المعرفات
     updateAtlantaLocation();
     generateSessionIP();
     generateFakeIdentifiers();
     fetchRealIP();
-
-    // 8. مسح سجل الطلبات
+    
+    // 1️⃣1️⃣ مسح سجل الطلبات
     @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
-
-    // 9. إغلاق التطبيق بعد ثانية واحدة
+    
+    // 1️⃣2️⃣ إعادة تشغيل التطبيق
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تم إعادة الضبط"
-                                                                       message:@"تم تحديث جميع المعرفات بهوية جديدة مع بقاء بيانات الحساب (userID + accessToken).\nسيتم إعادة تشغيل التطبيق الآن."
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تمت المحاكاة"
+                                                                       message:@"تم مسح كل شيء بما في ذلك App Group.\nالآن التطبيق يعتبر مثبتاً حديثاً مع بقاء حسابك."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             exit(0);
@@ -337,7 +361,7 @@ void performFullReset() {
 }
 
 // ============================================================
-// MARK: - تسجيل الطلبات
+// MARK: - باقي الكود (UI, Hooks)
 // ============================================================
 
 void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
@@ -351,10 +375,6 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         if (networkLogs.count > 15) [networkLogs removeLastObject];
     }
 }
-
-// ============================================================
-// MARK: - شاشة التفاصيل
-// ============================================================
 
 @interface AtlantaReportViewController : UIViewController @end
 @implementation AtlantaReportViewController
@@ -393,10 +413,6 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 - (void)dismissPopup { [self dismissViewControllerAnimated:YES completion:nil]; }
 @end
-
-// ============================================================
-// MARK: - النافذة العائمة والزر
-// ============================================================
 
 @interface AtlantaWindow : UIWindow @end
 @implementation AtlantaWindow
@@ -461,13 +477,9 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 - (void)handleReset {
-    performFullReset();
+    simulateResign();
 }
 @end
-
-// ============================================================
-// MARK: - الـ Hooks
-// ============================================================
 
 %ctor {
     generateSessionIP();
