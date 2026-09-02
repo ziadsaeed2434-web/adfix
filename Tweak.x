@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/ASIdentifierManager.h>
 #import <WebKit/WebKit.h>
-#import <Security/Security.h>
+#import <Security/Security.h>  // إضافة لمسح Keychain
 
 // ============================================================
 // MARK: - المتغيرات العامة
@@ -14,9 +14,9 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
-// المعرفات الوهمية (UDID و IDFA)
-static NSUUID *fakeVendorID = nil;
+// المعرفات الوهمية (IDFA و UDID)
 static NSUUID *fakeAdvertisingID = nil;
+static NSUUID *fakeVendorID = nil;   // إضافة لتغيير UDID
 
 // ============================================================
 // MARK: - دوال مساعدة
@@ -31,93 +31,63 @@ void updateAtlantaLocation() {
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
+// ============================================================
+// MARK: - توليد IP من النطاقات: 172.56.x.x و 172.57.x.x و 172.59.x.x
+// ============================================================
+
+void generateSessionIP() {
+    int allowedSecondOctets[] = {56, 57, 59};
+    int index = arc4random_uniform(3);
+    int second = allowedSecondOctets[index];
+    int third = arc4random_uniform(256);
+    int fourth = arc4random_uniform(256);
+    
+    sessionFakeIP = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
+    NSLog(@"[Injector] 🌐 تم توليد IP من نطاق 172.%d.x.x: %@", second, sessionFakeIP);
+}
+
+// توليد معرفات وهمية (IDFA و UDID)
+void generateFakeIdentifiers() {
+    fakeAdvertisingID = [NSUUID UUID];
+    fakeVendorID = [NSUUID UUID];
+}
+
 void fetchRealIP() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
         NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
-        currentRealIP = (ip && ip.length > 0) ? ip : @"غير قادر على الجلب";
+        if (ip && ip.length > 0) {
+            currentRealIP = ip;
+        } else {
+            currentRealIP = @"غير قادر على الجلب";
+        }
     });
 }
 
-// ============================================================
-// MARK: - توليد IP (نطاقات 172.56/57/59)
-// ============================================================
-
-NSArray *generate10IPs() {
-    NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
-    int allowedSecondOctets[] = {56, 57, 59};
-    for (int i = 0; i < 10; i++) {
-        int second = allowedSecondOctets[arc4random_uniform(3)];
-        int third = arc4random_uniform(256);
-        int fourth = arc4random_uniform(256);
-        NSString *ip = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
-        [tempList addObject:ip];
+void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
+    if (!networkLogs) {
+        networkLogs = [[NSMutableArray alloc] init];
     }
-    return [tempList copy];
-}
-
-BOOL verifyIPQuality(NSString *ip) {
-    if (!ip || ip.length == 0) return NO;
-    NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,isp,org,as", ip];
-    NSURL *url = [NSURL URLWithString:urlString];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    [request setTimeoutInterval:3.0];
-    __block NSData *responseData = nil;
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        responseData = data;
-        dispatch_semaphore_signal(semaphore);
-    }];
-    [task resume];
-    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)));
-    if (!responseData) return YES;
-    NSError *jsonError = nil;
-    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
-    if (jsonError || !json) return YES;
-    if (![json[@"status"] isEqualToString:@"success"]) return YES;
-    NSString *org = json[@"org"] ?: @"";
-    NSString *isp = json[@"isp"] ?: @"";
-    NSString *as = json[@"as"] ?: @"";
-    NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", org, isp, as];
-    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
-    for (NSString *keyword in badKeywords) {
-        if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            return NO;
+    NSURL *url = [NSURL URLWithString:urlStr];
+    NSString *path = url.path ? url.path : urlStr;
+    if (path.length > 30) {
+        path = [[path substringToIndex:30] stringByAppendingString:@"..."];
+    }
+    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
+    @synchronized(networkLogs) {
+        [networkLogs insertObject:logEntry atIndex:0];
+        if (networkLogs.count > 15) {
+            [networkLogs removeLastObject];
         }
     }
-    return YES;
-}
-
-void generateSessionIP() {
-    NSArray *candidates = generate10IPs();
-    NSString *selectedIP = nil;
-    for (NSString *ip in candidates) {
-        if (verifyIPQuality(ip)) {
-            selectedIP = ip;
-            break;
-        }
-    }
-    if (!selectedIP) selectedIP = candidates.lastObject;
-    sessionFakeIP = selectedIP;
 }
 
 // ============================================================
-// MARK: - توليد معرفات وهمية (UDID و IDFA)
+// MARK: - مسح Keychain مع الحفاظ على userIDKey و accessTokenKey
 // ============================================================
 
-void generateFakeIdentifiers() {
-    fakeVendorID = [NSUUID UUID];
-    fakeAdvertisingID = [NSUUID UUID];
-}
-
-// ============================================================
-// MARK: - مسح شامل لكل شيء (Keychain, App Group, الملفات, NSUserDefaults, iCloud, WebKit, الكوكيز)
-// ============================================================
-
-void clearEverything() {
-    NSFileManager *fm = [NSFileManager defaultManager];
-
-    // 1. حفظ userIDKey و accessTokenKey من Keychain (لإعادتها لاحقاً)
+void clearKeychainKeepAccount() {
+    // 1. حفظ userIDKey و accessTokenKey
     NSString *savedUserID = nil;
     NSString *savedAccessToken = nil;
     NSDictionary *query = @{
@@ -144,13 +114,12 @@ void clearEverything() {
         CFRelease(result);
     }
 
-    // 2. مسح Keychain (جميع الفئات)
+    // 2. مسح كل Keychain (جميع الفئات)
     NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
     for (id secClass in secClasses) {
         NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
-    NSLog(@"[Injector] 🗑️ Keychain مسح بالكامل");
 
     // 3. إعادة كتابة userIDKey و accessTokenKey
     if (savedUserID) {
@@ -161,7 +130,6 @@ void clearEverything() {
             (id)kSecValueData: [savedUserID dataUsingEncoding:NSUTF8StringEncoding]
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
-        NSLog(@"[Injector] ✅ userIDKey مستعاد");
     }
     if (savedAccessToken) {
         NSDictionary *addQuery = @{
@@ -171,151 +139,153 @@ void clearEverything() {
             (id)kSecValueData: [savedAccessToken dataUsingEncoding:NSUTF8StringEncoding]
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
-        NSLog(@"[Injector] ✅ accessTokenKey مستعاد");
     }
+    NSLog(@"[Injector] 🔑 Keychain مسح مع بقاء الحساب");
+}
 
-    // 4. مسح NSUserDefaults (جميع النطاقات)
-    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
-    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    NSLog(@"[Injector] 🗑️ NSUserDefaults مسح");
+// ============================================================
+// MARK: - مسح App Group
+// ============================================================
 
-    // 5. مسح iCloud Key-Value
-    [[NSUbiquitousKeyValueStore defaultStore] removeAllObjects];
-    [[NSUbiquitousKeyValueStore defaultStore] synchronize];
-    NSLog(@"[Injector] 🗑️ iCloud Key-Value مسح");
-
-    // 6. حذف جميع ملفات التطبيق (Documents, Library, tmp)
-    NSArray *dirs = @[
-        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject,
-        NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject,
-        NSTemporaryDirectory()
-    ];
-    for (NSString *dir in dirs) {
-        if (dir) {
-            NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
-            for (NSString *item in items) {
-                [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
-            }
-        }
-    }
-    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية حذفت");
-
-    // 7. مسح App Group
+void clearAppGroup() {
+    NSFileManager *fm = [NSFileManager defaultManager];
     NSString *sharedPath = @"/private/var/mobile/Containers/Shared/AppGroup";
-    if ([fm fileExistsAtPath:sharedPath]) {
-        NSArray *groups = [fm contentsOfDirectoryAtPath:sharedPath error:nil];
-        for (NSString *group in groups) {
-            NSString *fullPath = [sharedPath stringByAppendingPathComponent:group];
-            BOOL isDir = NO;
-            if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
-                NSArray *contents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
-                for (NSString *item in contents) {
-                    [fm removeItemAtPath:[fullPath stringByAppendingPathComponent:item] error:nil];
-                }
-                if ([fm contentsOfDirectoryAtPath:fullPath error:nil].count == 0) {
-                    [fm removeItemAtPath:fullPath error:nil];
-                }
+    if (![fm fileExistsAtPath:sharedPath]) return;
+
+    NSArray *groups = [fm contentsOfDirectoryAtPath:sharedPath error:nil];
+    for (NSString *group in groups) {
+        NSString *fullPath = [sharedPath stringByAppendingPathComponent:group];
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
+            // نمسح كل المحتويات
+            NSArray *contents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
+            for (NSString *item in contents) {
+                [fm removeItemAtPath:[fullPath stringByAppendingPathComponent:item] error:nil];
+            }
+            // إذا أصبح المجلد فارغاً نمسحه
+            if ([fm contentsOfDirectoryAtPath:fullPath error:nil].count == 0) {
+                [fm removeItemAtPath:fullPath error:nil];
             }
         }
     }
-    NSLog(@"[Injector] 🗑️ App Group مسح بالكامل");
+    NSLog(@"[Injector] 🗑️ App Group مسح");
+}
 
-    // 8. مسح WebKit
-    NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
-    NSLog(@"[Injector] 🗑️ WebKit مسح");
+// ============================================================
+// MARK: - دالة إعادة الضبط الكاملة (معدلة)
+// ============================================================
 
-    // 9. مسح الكوكيز والكاش
+void performFullReset() {
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة...");
+    
+    // 1. مسح Keychain مع الحفاظ على الحساب
+    clearKeychainKeepAccount();
+    
+    // 2. مسح App Group
+    clearAppGroup();
+    
+    // 3. مسح الكوكيز والكاش
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
-    NSLog(@"[Injector] 🗑️ الكوكيز والكاش مسحوا");
-}
-
-// ============================================================
-// MARK: - الإعادة الضبط الكاملة (تُستدعى عند الضغط على الزر)
-// ============================================================
-
-void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة (مسح كل شيء)");
-
-    // 1. مسح كل شيء (بما في ذلك Keychain و App Group)
-    clearEverything();
-
-    // 2. تجديد الموقع، IP، المعرفات (UDID و IDFA)
+    
+    // 4. مسح NSUserDefaults
+    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    
+    // 5. مسح الملفات المحلية (Documents, Library)
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *docPath = [paths firstObject];
+    if (docPath) {
+        for (NSString *item in [fm contentsOfDirectoryAtPath:docPath error:nil]) {
+            [fm removeItemAtPath:[docPath stringByAppendingPathComponent:item] error:nil];
+        }
+    }
+    paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+    NSString *libPath = [paths firstObject];
+    if (libPath) {
+        for (NSString *item in [fm contentsOfDirectoryAtPath:libPath error:nil]) {
+            if (![item isEqualToString:@"Preferences"] && ![item isEqualToString:@"Caches"]) {
+                [fm removeItemAtPath:[libPath stringByAppendingPathComponent:item] error:nil];
+            }
+        }
+        NSString *cachePath = [libPath stringByAppendingPathComponent:@"Caches"];
+        for (NSString *item in [fm contentsOfDirectoryAtPath:cachePath error:nil]) {
+            [fm removeItemAtPath:[cachePath stringByAppendingPathComponent:item] error:nil];
+        }
+    }
+    
+    // 6. مسح بيانات WebKit
+    NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes
+                                               modifiedSince:[NSDate distantPast]
+                                           completionHandler:^{
+        NSLog(@"[Injector] 🧹 WebKit مسح.");
+    }];
+    
+    // 7. تجديد الموقع، IP، المعرفات (IDFA و UDID)
     updateAtlantaLocation();
     generateSessionIP();
-    generateFakeIdentifiers();
+    generateFakeIdentifiers();   // الآن يولد كلاً من IDFA و UDID
     fetchRealIP();
-    NSLog(@"[Injector] 🌐 تم تجديد الموقع، IP، UDID، IDFA");
-
-    // 3. مسح سجل الطلبات
-    @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
-
-    // 4. إعادة تشغيل التطبيق
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تم"
-                                                                       message:@"تم مسح كل بيانات التطبيق بالكامل مع بقاء الحساب.\nسيتم إعادة تشغيل التطبيق الآن."
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            exit(0);
-        }]];
-        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-        UIViewController *rootVC = keyWindow.rootViewController;
-        while (rootVC.presentedViewController) rootVC = rootVC.presentedViewController;
-        [rootVC presentViewController:alert animated:YES completion:nil];
-    });
-}
-
-// ============================================================
-// MARK: - تسجيل الطلبات (للشاشة المساعدة)
-// ============================================================
-
-void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
-    if (!networkLogs) networkLogs = [[NSMutableArray alloc] init];
-    NSURL *url = [NSURL URLWithString:urlStr];
-    NSString *path = url.path ? url.path : urlStr;
-    if (path.length > 30) path = [[path substringToIndex:30] stringByAppendingString:@"..."];
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 %@\n🌐 IP: %@\n📍 (%.4f, %.4f)", path, ip, lat, lon];
+    
+    // 8. مسح سجل الطلبات
     @synchronized(networkLogs) {
-        [networkLogs insertObject:logEntry atIndex:0];
-        if (networkLogs.count > 15) [networkLogs removeLastObject];
+        [networkLogs removeAllObjects];
     }
+    
+    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط. IP الحالي: %@", sessionFakeIP);
 }
 
 // ============================================================
-// MARK: - شاشة التفاصيل
+// MARK: - واجهة عرض التفاصيل
 // ============================================================
 
-@interface AtlantaReportViewController : UIViewController @end
+@interface AtlantaReportViewController : UIViewController
+@end
+
 @implementation AtlantaReportViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.95];
+    
     UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
+    
+    // استخدام UDID الوهمي الجديد (إذا وُجِّد، وإلا الحقيقي)
     NSString *udidStr = fakeVendorID ? [fakeVendorID UUIDString] : [[[UIDevice currentDevice] identifierForVendor] UUIDString];
     NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 أتلانتا:\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP وهمي: %@\n🛡️ IP حقيقي: %@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 UDID (وهمي): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
+    
+    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (نطاق 172.56/57/59):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (وهمي): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
+    
     NSString *logsText = @"";
     @synchronized(networkLogs) {
-        logsText = networkLogs.count ? [networkLogs componentsJoinedByString:@"\n\n---\n\n"] : @"لا توجد طلبات بعد.";
+        if (networkLogs && networkLogs.count > 0) {
+            logsText = [networkLogs componentsJoinedByString:@"\n\n--------------------\n\n"];
+        } else {
+            logsText = @"لا توجد طلبات مسجلة بعد.";
+        }
     }
-    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 الطلبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
+    
+    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 تفاصيل الطلبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
+    
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, self.view.bounds.size.width - 40, 0)];
     label.text = fullReport;
     label.textColor = [UIColor whiteColor];
     label.font = [UIFont systemFontOfSize:13];
     label.numberOfLines = 0;
     [label sizeToFit];
+    
     scrollView.contentSize = CGSizeMake(self.view.bounds.size.width, label.frame.size.height + 160);
     [scrollView addSubview:label];
+    
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     closeBtn.frame = CGRectMake(20, 30, 80, 35);
     closeBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:1.0];
@@ -325,18 +295,26 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     [closeBtn addTarget:self action:@selector(dismissPopup) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:closeBtn];
 }
-- (void)dismissPopup { [self dismissViewControllerAnimated:YES completion:nil]; }
+
+- (void)dismissPopup {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
 @end
 
 // ============================================================
-// MARK: - النافذة العائمة والزر 🔄
+// MARK: - النافذة العائمة والزر (بدون تأكيد)
 // ============================================================
 
-@interface AtlantaWindow : UIWindow @end
+@interface AtlantaWindow : UIWindow
+@end
+
 @implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn = [self viewWithTag:999888];
-    return (btn && CGRectContainsPoint(btn.frame, point));
+    if (btn && CGRectContainsPoint(btn.frame, point)) {
+        return YES;
+    }
+    return NO;
 }
 @end
 
@@ -348,23 +326,30 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 @end
 
 @implementation AtlantaInfoManager
+
 + (instancetype)sharedInstance {
     static AtlantaInfoManager *sharedInstance = nil;
     static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ sharedInstance = [[self alloc] init]; });
+    dispatch_once(&onceToken, ^{
+        sharedInstance = [[self alloc] init];
+    });
     return sharedInstance;
 }
+
 - (void)setupFloatingButton {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.floatingWindow) return;
+        
         CGRect screenBounds = [UIScreen mainScreen].bounds;
         self.floatingWindow = [[AtlantaWindow alloc] initWithFrame:screenBounds];
         self.floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
         self.floatingWindow.hidden = NO;
         self.floatingWindow.backgroundColor = [UIColor clearColor];
+        
         UIViewController *vc = [[UIViewController alloc] init];
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
+        
         self.floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.floatingBtn.tag = 999888;
         self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
@@ -377,12 +362,16 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         self.floatingBtn.layer.shadowOffset = CGSizeMake(0, 2);
         self.floatingBtn.layer.shadowOpacity = 0.5;
         self.floatingBtn.layer.shadowRadius = 5;
+        
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
+        
         [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
+        
         [vc.view addSubview:self.floatingBtn];
     });
 }
+
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIView *btn = gesture.view;
     CGPoint translation = [gesture translationInView:btn.superview];
@@ -394,16 +383,33 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     btn.center = CGPointMake(newX, newY);
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
+
 - (void)handleReset {
     performFullReset();
+    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+    UIViewController *rootVC = keyWindow.rootViewController;
+    while (rootVC.presentedViewController) {
+        rootVC = rootVC.presentedViewController;
+    }
+    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
+                                                                  message:@"تمت إعادة الضبط بنجاح"
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+    [rootVC presentViewController:done animated:YES completion:nil];
 }
+
 @end
 
 // ============================================================
-// MARK: - الـ Hooks (الاعتراضات)
+// MARK: - الـ Hooks باستخدام %hook
 // ============================================================
 
 %ctor {
+    updateAtlantaLocation();
+    generateSessionIP();
+    generateFakeIdentifiers();  // توليد IDFA و UDID
+    fetchRealIP();
+    
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AtlantaInfoManager sharedInstance] setupFloatingButton];
     });
@@ -455,12 +461,14 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 %end
 
+// ===== هوك UIDevice لتغيير UDID =====
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return fakeVendorID ?: %orig;
 }
 %end
 
+// ===== هوك ASIdentifierManager لتغيير IDFA =====
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     return fakeAdvertisingID ?: %orig;
