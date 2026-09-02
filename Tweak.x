@@ -14,7 +14,7 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
-static NSUUID *fakeVendorID = nil;
+// نستخدم فقط IDFA وهمي (بدون تغيير UDID)
 static NSUUID *fakeAdvertisingID = nil;
 
 // ============================================================
@@ -101,98 +101,21 @@ void generateSessionIP() {
 }
 
 // ============================================================
-// MARK: - معرفات وهمية (Vendor & IDFA)
+// MARK: - توليد IDFA وهمي فقط (بدون تغيير UDID)
 // ============================================================
 
-void generateFakeIdentifiers() {
-    fakeVendorID = [NSUUID UUID];
+void generateFakeAdvertisingID() {
     fakeAdvertisingID = [NSUUID UUID];
 }
 
 // ============================================================
-// MARK: - مسح شامل لكل شيء
-// ============================================================
-
-void clearEverything() {
-    NSFileManager *fm = [NSFileManager defaultManager];
-
-    // 1. مسح Keychain (جميع الفئات)
-    NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
-    for (id secClass in secClasses) {
-        NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
-        SecItemDelete((CFDictionaryRef)deleteQuery);
-    }
-    NSLog(@"[Injector] 🗑️ Keychain مسح");
-
-    // 2. مسح NSUserDefaults (كل النطاقات)
-    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    NSLog(@"[Injector] 🗑️ NSUserDefaults مسح");
-
-    // 3. مسح iCloud Key-Value
-    [[NSUbiquitousKeyValueStore defaultStore] synchronize];
-
-    // 4. حذف جميع الملفات: Documents, Library, tmp, وكل ما تحتها
-    NSArray *dirs = @[
-        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject,
-        NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject,
-        NSTemporaryDirectory()
-    ];
-    for (NSString *dir in dirs) {
-        if (dir) {
-            NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
-            for (NSString *item in items) {
-                [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
-            }
-        }
-    }
-    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية (Documents, Library, tmp) حذفت");
-
-    // 5. مسح App Group
-    NSString *sharedPath = @"/private/var/mobile/Containers/Shared/AppGroup";
-    if ([fm fileExistsAtPath:sharedPath]) {
-        NSArray *groups = [fm contentsOfDirectoryAtPath:sharedPath error:nil];
-        for (NSString *group in groups) {
-            NSString *fullPath = [sharedPath stringByAppendingPathComponent:group];
-            BOOL isDir = NO;
-            if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
-                NSArray *contents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
-                for (NSString *file in contents) {
-                    if ([file containsString:@"codebysms"] || [file containsString:@"com.codebysms"]) {
-                        [fm removeItemAtPath:[fullPath stringByAppendingPathComponent:file] error:nil];
-                    }
-                }
-                // نمسح المجلد نفسه إذا أصبح فارغاً
-                if ([fm contentsOfDirectoryAtPath:fullPath error:nil].count == 0) {
-                    [fm removeItemAtPath:fullPath error:nil];
-                }
-            }
-        }
-    }
-    NSLog(@"[Injector] 🗑️ App Group مسح");
-
-    // 6. مسح WebKit
-    NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
-    NSLog(@"[Injector] 🗑️ WebKit مسح");
-
-    // 7. مسح الكوكيز والكاش
-    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
-        [cookieStorage deleteCookie:cookie];
-    }
-    [[NSURLCache sharedURLCache] removeAllCachedResponses];
-    NSLog(@"[Injector] 🗑️ الكوكيز والكاش مسحوا");
-}
-
-// ============================================================
-// MARK: - الإعادة الضبط الكاملة (تُستدعى عند الضغط على الزر)
+// MARK: - الإعادة الضبط الكاملة (مع بقاء UDID كما هو)
 // ============================================================
 
 void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة (محاكاة تثبيت جديد)");
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط (بدون تغيير UDID)");
 
-    // 1. حفظ userIDKey و accessTokenKey
+    // 1. حفظ userIDKey و accessTokenKey من Keychain
     NSString *savedUserID = nil;
     NSString *savedAccessToken = nil;
     NSDictionary *query = @{
@@ -212,17 +135,24 @@ void performFullReset() {
             NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
             if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"userIDKey"]) {
                 savedUserID = value;
+                NSLog(@"[Injector] 📌 حفظ userIDKey: %@", savedUserID);
             } else if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"accessTokenKey"]) {
                 savedAccessToken = value;
+                NSLog(@"[Injector] 📌 حفظ accessTokenKey: %@", savedAccessToken);
             }
         }
         CFRelease(result);
     }
 
-    // 2. مسح كل شيء
-    clearEverything();
+    // 2. مسح كل Keychain (جميع الفئات)
+    NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
+    for (id secClass in secClasses) {
+        NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
+        SecItemDelete((CFDictionaryRef)deleteQuery);
+    }
+    NSLog(@"[Injector] 🗑️ Keychain مسح بالكامل");
 
-    // 3. إعادة كتابة userIDKey و accessTokenKey
+    // 3. إعادة كتابة userIDKey و accessTokenKey فقط
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -244,19 +174,67 @@ void performFullReset() {
         NSLog(@"[Injector] ✅ accessTokenKey مستعاد");
     }
 
-    // 4. تجديد الموقع، IP، المعرفات
+    // 4. مسح NSUserDefaults (النطاق الخاص بالتطبيق)
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    NSLog(@"[Injector] 🗑️ NSUserDefaults مسح");
+
+    // 5. مزامنة iCloud (لا نمسحها)
+    [[NSUbiquitousKeyValueStore defaultStore] synchronize];
+
+    // 6. حذف جميع ملفات التطبيق (Documents, Library, tmp)
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *docPath = paths.firstObject;
+    if (docPath) {
+        for (NSString *item in [fm contentsOfDirectoryAtPath:docPath error:nil]) {
+            [fm removeItemAtPath:[docPath stringByAppendingPathComponent:item] error:nil];
+        }
+    }
+    paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+    NSString *libPath = paths.firstObject;
+    if (libPath) {
+        for (NSString *item in [fm contentsOfDirectoryAtPath:libPath error:nil]) {
+            [fm removeItemAtPath:[libPath stringByAppendingPathComponent:item] error:nil];
+        }
+    }
+    NSString *tmpPath = NSTemporaryDirectory();
+    if (tmpPath) {
+        for (NSString *item in [fm contentsOfDirectoryAtPath:tmpPath error:nil]) {
+            [fm removeItemAtPath:[tmpPath stringByAppendingPathComponent:item] error:nil];
+        }
+    }
+    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية حذفت");
+
+    // 7. ⛔️ لا نمسح App Group (محذوف)
+
+    // 8. مسح WebKit
+    NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+    NSLog(@"[Injector] 🗑️ WebKit مسح");
+
+    // 9. مسح الكوكيز والكاش
+    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
+        [cookieStorage deleteCookie:cookie];
+    }
+    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    NSLog(@"[Injector] 🗑️ الكوكيز والكاش مسحوا");
+
+    // 10. تجديد الموقع، IP، IDFA (بدون تغيير UDID)
     updateAtlantaLocation();
     generateSessionIP();
-    generateFakeIdentifiers();
+    generateFakeAdvertisingID();  // فقط IDFA
     fetchRealIP();
+    NSLog(@"[Injector] 🌐 تم تجديد الموقع، IP، IDFA (UDID لم يتغير)");
 
-    // 5. مسح سجل الطلبات
+    // 11. مسح سجل الطلبات
     @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
 
-    // 6. إعادة تشغيل التطبيق
+    // 12. إعادة تشغيل التطبيق
     dispatch_async(dispatch_get_main_queue(), ^{
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تم"
-                                                                       message:@"تم مسح كل شيء وتجديد الهوية.\nسيتم إعادة تشغيل التطبيق الآن."
+                                                                       message:@"تم مسح كل البيانات (عدا App Group و UDID) مع بقاء الحساب.\nسيتم إعادة تشغيل التطبيق الآن."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             exit(0);
@@ -296,11 +274,12 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
-    NSString *udidStr = fakeVendorID ? [fakeVendorID UUIDString] : [[[UIDevice currentDevice] identifierForVendor] UUIDString];
+    // UDID حقيقي (لأننا لا نغيره)
+    NSString *udidStr = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
     NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     NSString *locationInfo = [NSString stringWithFormat:@"📍 أتلانتا:\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP وهمي: %@\n🛡️ IP حقيقي: %@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 Vendor: %@\nIDFA: %@", udidStr, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 UDID (حقيقي): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
     NSString *logsText = @"";
     @synchronized(networkLogs) {
         logsText = networkLogs.count ? [networkLogs componentsJoinedByString:@"\n\n---\n\n"] : @"لا توجد طلبات بعد.";
@@ -453,12 +432,9 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 %end
 
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return fakeVendorID ?: %orig;
-}
-%end
+// ===== ⛔️ حذف هوك UIDevice بالكامل (يبقى UDID حقيقياً) =====
 
+// ===== هوك ASIdentifierManager فقط لتغيير IDFA =====
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     return fakeAdvertisingID ?: %orig;
