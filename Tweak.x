@@ -101,7 +101,7 @@ void generateSessionIP() {
 }
 
 // ============================================================
-// MARK: - معرفات وهمية (Vendor & IDFA) - تُولَّد عشوائياً
+// MARK: - معرفات وهمية (Vendor & IDFA)
 // ============================================================
 
 void generateFakeIdentifiers() {
@@ -110,38 +110,79 @@ void generateFakeIdentifiers() {
 }
 
 // ============================================================
-// MARK: - مسح App Group
+// MARK: - مسح شامل لكل شيء
 // ============================================================
 
-void clearAppGroupContainer() {
+void clearEverything() {
     NSFileManager *fm = [NSFileManager defaultManager];
+
+    // 1. مسح Keychain (جميع الفئات)
+    NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
+    for (id secClass in secClasses) {
+        NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
+        SecItemDelete((CFDictionaryRef)deleteQuery);
+    }
+    NSLog(@"[Injector] 🗑️ Keychain مسح");
+
+    // 2. مسح NSUserDefaults (كل النطاقات)
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    NSLog(@"[Injector] 🗑️ NSUserDefaults مسح");
+
+    // 3. مسح iCloud Key-Value
+    [[NSUbiquitousKeyValueStore defaultStore] synchronize];
+
+    // 4. حذف جميع الملفات: Documents, Library, tmp, وكل ما تحتها
+    NSArray *dirs = @[
+        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject,
+        NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject,
+        NSTemporaryDirectory()
+    ];
+    for (NSString *dir in dirs) {
+        if (dir) {
+            NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
+            for (NSString *item in items) {
+                [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
+            }
+        }
+    }
+    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية (Documents, Library, tmp) حذفت");
+
+    // 5. مسح App Group
     NSString *sharedPath = @"/private/var/mobile/Containers/Shared/AppGroup";
-    if (![fm fileExistsAtPath:sharedPath]) return;
-
-    NSError *error = nil;
-    NSArray *groupDirs = [fm contentsOfDirectoryAtPath:sharedPath error:&error];
-    if (error) return;
-
-    for (NSString *dirName in groupDirs) {
-        NSString *fullPath = [sharedPath stringByAppendingPathComponent:dirName];
-        BOOL isDir = NO;
-        if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
-            NSArray *subContents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
-            for (NSString *item in subContents) {
-                if ([item containsString:@"com.codebysms"] ||
-                    [item containsString:@"codebysms"] ||
-                    [item containsString:@"UserDefaults"] ||
-                    [item containsString:@"Library"] ||
-                    [item containsString:@"Documents"]) {
-                    NSArray *files = [fm contentsOfDirectoryAtPath:fullPath error:nil];
-                    for (NSString *file in files) {
+    if ([fm fileExistsAtPath:sharedPath]) {
+        NSArray *groups = [fm contentsOfDirectoryAtPath:sharedPath error:nil];
+        for (NSString *group in groups) {
+            NSString *fullPath = [sharedPath stringByAppendingPathComponent:group];
+            BOOL isDir = NO;
+            if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
+                NSArray *contents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
+                for (NSString *file in contents) {
+                    if ([file containsString:@"codebysms"] || [file containsString:@"com.codebysms"]) {
                         [fm removeItemAtPath:[fullPath stringByAppendingPathComponent:file] error:nil];
                     }
-                    return;
+                }
+                // نمسح المجلد نفسه إذا أصبح فارغاً
+                if ([fm contentsOfDirectoryAtPath:fullPath error:nil].count == 0) {
+                    [fm removeItemAtPath:fullPath error:nil];
                 }
             }
         }
     }
+    NSLog(@"[Injector] 🗑️ App Group مسح");
+
+    // 6. مسح WebKit
+    NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+    NSLog(@"[Injector] 🗑️ WebKit مسح");
+
+    // 7. مسح الكوكيز والكاش
+    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
+        [cookieStorage deleteCookie:cookie];
+    }
+    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    NSLog(@"[Injector] 🗑️ الكوكيز والكاش مسحوا");
 }
 
 // ============================================================
@@ -149,9 +190,9 @@ void clearAppGroupContainer() {
 // ============================================================
 
 void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة...");
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة (محاكاة تثبيت جديد)");
 
-    // 1. حفظ userIDKey و accessTokenKey من Keychain
+    // 1. حفظ userIDKey و accessTokenKey
     NSString *savedUserID = nil;
     NSString *savedAccessToken = nil;
     NSDictionary *query = @{
@@ -171,24 +212,17 @@ void performFullReset() {
             NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
             if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"userIDKey"]) {
                 savedUserID = value;
-                NSLog(@"[Injector] 📌 حفظ userIDKey: %@", savedUserID);
             } else if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"accessTokenKey"]) {
                 savedAccessToken = value;
-                NSLog(@"[Injector] 📌 حفظ accessTokenKey: %@", savedAccessToken);
             }
         }
         CFRelease(result);
     }
 
-    // 2. مسح كل Keychain (جميع الفئات)
-    NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
-    for (id secClass in secClasses) {
-        NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
-        SecItemDelete((CFDictionaryRef)deleteQuery);
-    }
-    NSLog(@"[Injector] 🗑️ تم مسح كل Keychain.");
+    // 2. مسح كل شيء
+    clearEverything();
 
-    // 3. إعادة كتابة userIDKey و accessTokenKey فقط (لا نُولِّد أي قيم جديدة)
+    // 3. إعادة كتابة userIDKey و accessTokenKey
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -197,7 +231,7 @@ void performFullReset() {
             (id)kSecValueData: [savedUserID dataUsingEncoding:NSUTF8StringEncoding]
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
-        NSLog(@"[Injector] ✅ إعادة كتابة userIDKey.");
+        NSLog(@"[Injector] ✅ userIDKey مستعاد");
     }
     if (savedAccessToken) {
         NSDictionary *addQuery = @{
@@ -207,69 +241,22 @@ void performFullReset() {
             (id)kSecValueData: [savedAccessToken dataUsingEncoding:NSUTF8StringEncoding]
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
-        NSLog(@"[Injector] ✅ إعادة كتابة accessTokenKey.");
+        NSLog(@"[Injector] ✅ accessTokenKey مستعاد");
     }
 
-    // 4. مسح NSUserDefaults بالكامل
-    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    NSLog(@"[Injector] 🗑️ تم مسح NSUserDefaults.");
-
-    // 5. مزامنة iCloud
-    [[NSUbiquitousKeyValueStore defaultStore] synchronize];
-
-    // 6. حذف جميع ملفات التطبيق (Documents, Library, tmp)
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docPath = paths.firstObject;
-    if (docPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:docPath error:nil]) {
-            [fm removeItemAtPath:[docPath stringByAppendingPathComponent:item] error:nil];
-        }
-    }
-    paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
-    NSString *libPath = paths.firstObject;
-    if (libPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:libPath error:nil]) {
-            [fm removeItemAtPath:[libPath stringByAppendingPathComponent:item] error:nil];
-        }
-    }
-    NSString *tmpPath = NSTemporaryDirectory();
-    if (tmpPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:tmpPath error:nil]) {
-            [fm removeItemAtPath:[tmpPath stringByAppendingPathComponent:item] error:nil];
-        }
-    }
-    NSLog(@"[Injector] 🗑️ تم حذف جميع ملفات التطبيق.");
-
-    // 7. مسح App Group
-    clearAppGroupContainer();
-    NSLog(@"[Injector] 🗑️ تم مسح App Group.");
-
-    // 8. مسح WebKit و الكوكيز و الكاش
-    NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
-    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
-        [cookieStorage deleteCookie:cookie];
-    }
-    [[NSURLCache sharedURLCache] removeAllCachedResponses];
-    NSLog(@"[Injector] 🗑️ تم مسح WebKit، الكوكيز، الكاش.");
-
-    // 9. تجديد الموقع، IP، المعرفات (لا تتعلق بـ Keychain)
+    // 4. تجديد الموقع، IP، المعرفات
     updateAtlantaLocation();
     generateSessionIP();
     generateFakeIdentifiers();
     fetchRealIP();
-    NSLog(@"[Injector] 🌐 تم تجديد الموقع، IP، Vendor ID، IDFA.");
 
-    // 10. مسح سجل الطلبات
+    // 5. مسح سجل الطلبات
     @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
 
-    // 11. إعادة تشغيل التطبيق
+    // 6. إعادة تشغيل التطبيق
     dispatch_async(dispatch_get_main_queue(), ^{
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تم"
-                                                                       message:@"تم مسح جميع البيانات مع بقاء الحساب.\nسيتم إعادة تشغيل التطبيق الآن."
+                                                                       message:@"تم مسح كل شيء وتجديد الهوية.\nسيتم إعادة تشغيل التطبيق الآن."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             exit(0);
@@ -298,7 +285,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - شاشة التفاصيل (للتحقق)
+// MARK: - شاشة التفاصيل
 // ============================================================
 
 @interface AtlantaReportViewController : UIViewController @end
