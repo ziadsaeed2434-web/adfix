@@ -6,7 +6,7 @@
 #import <objc/runtime.h>
 
 // ============================================================
-// MARK: - المتغيرات العامة (تُعرَّف أولاً)
+// MARK: - المتغيرات العامة
 // ============================================================
 
 static double currentLat = 0.0;
@@ -17,7 +17,7 @@ static NSMutableArray *networkLogs = nil;
 static NSUUID *fakeAdvertisingID = nil;
 
 // ============================================================
-// MARK: - الدوال المساعدة (تُعرَّف قبل استخدامها)
+// MARK: - الدوال المساعدة
 // ============================================================
 
 double randomInRange(double min, double max) {
@@ -80,14 +80,13 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         _isAdFound = NO;
         _adWatchTimer = nil;
         _noAdTimer = nil;
-        // تحديث الموقع والـ IP والـ IDFA (بدون مسح)
         [self updateLocationAndIdentifiers];
     }
     return self;
 }
 
 // ============================================================
-// MARK: - تحديث الموقع، IP، المعرفات (بدون مسح)
+// MARK: - تحديث الموقع، IP، المعرفات
 // ============================================================
 
 - (void)updateLocationAndIdentifiers {
@@ -98,7 +97,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - دوال مساعدة (IP، موقع، IDFA)
+// MARK: - دوال IP والموقع
 // ============================================================
 
 - (NSArray *)generate10IPs {
@@ -302,7 +301,6 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     [self clearAllCookies];
     [self clearNetworkCache];
     [self clearAllLocalFiles];
-    // تجديد الموقع و IP و IDFA (للتشغيل القادم)
     updateAtlantaLocation();
     [self generateSessionIP];
     [self generateFakeAdvertisingID];
@@ -319,8 +317,17 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     if (_isAdStarted) return;
     _isAdStarted = YES;
     NSLog(@"[Injector] 🚀 بدء تدفق الإعلان التلقائي...");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self autoAgreeToConsent];
+    // تأخير أطول لضمان استقرار الواجهة
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        @try {
+            [self autoAgreeToConsent];
+        } @catch (NSException *e) {
+            NSLog(@"[Injector] ❌ استثناء في autoAgreeToConsent: %@", e);
+            // محاولة مرة أخرى بعد تأخير
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self startAdSearch];
+            });
+        }
     });
 }
 
@@ -329,17 +336,23 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 // ============================================================
 
 - (void)autoAgreeToConsent {
-    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-    if (!keyWindow) { [self retryConsent]; return; }
-    UIViewController *rootVC = keyWindow.rootViewController;
-    if (!rootVC) { [self retryConsent]; return; }
-    UIViewController *presentedVC = rootVC.presentedViewController;
-    while (presentedVC) {
-        if ([self findAndTapAgreeButtonInViewController:presentedVC]) return;
-        presentedVC = presentedVC.presentedViewController;
+    @try {
+        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+        if (!keyWindow) { [self retryConsent]; return; }
+        UIViewController *rootVC = keyWindow.rootViewController;
+        if (!rootVC) { [self retryConsent]; return; }
+        UIViewController *presentedVC = rootVC.presentedViewController;
+        while (presentedVC) {
+            if ([self findAndTapAgreeButtonInViewController:presentedVC]) return;
+            presentedVC = presentedVC.presentedViewController;
+        }
+        if ([self findAndTapAgreeButtonInViewController:rootVC]) return;
+        // إذا لم نجد زر الموافقة، نبدأ البحث عن الإعلان مباشرة
+        [self startAdSearch];
+    } @catch (NSException *e) {
+        NSLog(@"[Injector] ❌ استثناء في autoAgreeToConsent: %@", e);
+        [self startAdSearch];
     }
-    if ([self findAndTapAgreeButtonInViewController:rootVC]) return;
-    [self startAdSearch];
 }
 
 - (void)retryConsent {
@@ -355,7 +368,8 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         if ([self findButtonWithTitle:title inView:vc.view]) {
             _isConsentHandled = YES;
             NSLog(@"[Injector] ✅ تم الضغط على زر الموافقة");
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            // تأخير أطول قبل البحث عن الإعلان (3 ثوانٍ بدلاً من 2)
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [self startAdSearch];
             });
             return YES;
@@ -366,37 +380,49 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 
 - (BOOL)findButtonWithTitle:(NSString *)title inView:(UIView *)view {
     if (_isConsentHandled) return NO;
-    if ([view isKindOfClass:[UIButton class]]) {
-        UIButton *btn = (UIButton *)view;
-        NSString *btnTitle = [btn titleForState:UIControlStateNormal];
-        if (btnTitle && [btnTitle rangeOfString:title options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
-            return YES;
+    @try {
+        if ([view isKindOfClass:[UIButton class]]) {
+            UIButton *btn = (UIButton *)view;
+            NSString *btnTitle = [btn titleForState:UIControlStateNormal];
+            if (btnTitle && [btnTitle rangeOfString:title options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
+                return YES;
+            }
         }
-    }
-    for (UIView *subview in view.subviews) {
-        if ([self findButtonWithTitle:title inView:subview]) return YES;
+        for (UIView *subview in view.subviews) {
+            if ([self findButtonWithTitle:title inView:subview]) return YES;
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[Injector] ❌ استثناء في findButtonWithTitle: %@", e);
     }
     return NO;
 }
 
 // ============================================================
-// MARK: - 🔥 البحث عن زر الإعلان
+// MARK: - 🔥 البحث عن زر الإعلان (مع حماية من الكراش)
 // ============================================================
 
 - (void)startAdSearch {
     if (_isAdCompleted) return;
-    if (_noAdTimer) [_noAdTimer invalidate];
-    _noAdTimer = [NSTimer scheduledTimerWithTimeInterval:10.0
-                                                  target:self
-                                                selector:@selector(noAdFound)
-                                                userInfo:nil
-                                                 repeats:NO];
-    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-    if (!keyWindow) { [self retryAdSearch]; return; }
-    UIViewController *rootVC = keyWindow.rootViewController;
-    if (!rootVC) { [self retryAdSearch]; return; }
-    [self findAndTapAdButtonInView:rootVC.view];
+    @try {
+        if (_noAdTimer) [_noAdTimer invalidate];
+        _noAdTimer = [NSTimer scheduledTimerWithTimeInterval:10.0
+                                                      target:self
+                                                    selector:@selector(noAdFound)
+                                                    userInfo:nil
+                                                     repeats:NO];
+        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+        if (!keyWindow) { [self retryAdSearch]; return; }
+        UIViewController *rootVC = keyWindow.rootViewController;
+        if (!rootVC) { [self retryAdSearch]; return; }
+        [self findAndTapAdButtonInView:rootVC.view];
+    } @catch (NSException *e) {
+        NSLog(@"[Injector] ❌ استثناء في startAdSearch: %@", e);
+        // محاولة مرة أخرى بعد تأخير
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self startAdSearch];
+        });
+    }
 }
 
 - (void)retryAdSearch {
@@ -407,41 +433,56 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 
 - (void)findAndTapAdButtonInView:(UIView *)view {
     if (_isAdCompleted) return;
-    NSArray *keywords = @[@"watch ad", @"شاهد الإعلان", @"مشاهدة إعلان", @"watch", @"شاهد", @"مشاهدة", @"reward", @"claim", @"إعلان", @"ad", @"view", @"get"];
-    for (NSString *keyword in keywords) {
-        if ([self findButtonWithKeyword:keyword inView:view]) {
-            if (_noAdTimer) { [_noAdTimer invalidate]; _noAdTimer = nil; }
-            _isAdFound = YES;
-            if (_adWatchTimer) [_adWatchTimer invalidate];
-            _adWatchTimer = [NSTimer scheduledTimerWithTimeInterval:65.0
-                                                            target:self
-                                                          selector:@selector(adFinished)
-                                                          userInfo:nil
-                                                           repeats:NO];
-            _isAdCompleted = YES;
-            return;
+    @try {
+        NSArray *keywords = @[@"watch ad", @"شاهد الإعلان", @"مشاهدة إعلان", @"watch", @"شاهد", @"مشاهدة", @"reward", @"claim", @"إعلان", @"ad", @"view", @"get"];
+        for (NSString *keyword in keywords) {
+            if ([self findButtonWithKeyword:keyword inView:view]) {
+                if (_noAdTimer) { [_noAdTimer invalidate]; _noAdTimer = nil; }
+                _isAdFound = YES;
+                if (_adWatchTimer) [_adWatchTimer invalidate];
+                _adWatchTimer = [NSTimer scheduledTimerWithTimeInterval:65.0
+                                                                target:self
+                                                              selector:@selector(adFinished)
+                                                              userInfo:nil
+                                                               repeats:NO];
+                _isAdCompleted = YES;
+                return;
+            }
         }
+        // إعادة المحاولة بعد 2 ثانية إذا لم يتم العثور على زر
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (!_isAdCompleted) {
+                [self findAndTapAdButtonInView:view];
+            }
+        });
+    } @catch (NSException *e) {
+        NSLog(@"[Injector] ❌ استثناء في findAndTapAdButtonInView: %@", e);
+        // إعادة المحاولة بعد تأخير
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (!_isAdCompleted) {
+                [self findAndTapAdButtonInView:view];
+            }
+        });
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!_isAdCompleted) {
-            [self findAndTapAdButtonInView:view];
-        }
-    });
 }
 
 - (BOOL)findButtonWithKeyword:(NSString *)keyword inView:(UIView *)view {
     if (_isAdCompleted) return NO;
-    if ([view isKindOfClass:[UIButton class]]) {
-        UIButton *btn = (UIButton *)view;
-        NSString *btnTitle = [btn titleForState:UIControlStateNormal];
-        if (btnTitle && [btnTitle rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
-            NSLog(@"[Injector] 🎬 تم الضغط على زر الإعلان (يحتوي على: %@)", keyword);
-            return YES;
+    @try {
+        if ([view isKindOfClass:[UIButton class]]) {
+            UIButton *btn = (UIButton *)view;
+            NSString *btnTitle = [btn titleForState:UIControlStateNormal];
+            if (btnTitle && [btnTitle rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
+                NSLog(@"[Injector] 🎬 تم الضغط على زر الإعلان (يحتوي على: %@)", keyword);
+                return YES;
+            }
         }
-    }
-    for (UIView *subview in view.subviews) {
-        if ([self findButtonWithKeyword:keyword inView:subview]) return YES;
+        for (UIView *subview in view.subviews) {
+            if ([self findButtonWithKeyword:keyword inView:subview]) return YES;
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[Injector] ❌ استثناء في findButtonWithKeyword: %@", e);
     }
     return NO;
 }
@@ -451,24 +492,34 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 // ============================================================
 
 - (void)adFinished {
-    if (_adWatchTimer) { [_adWatchTimer invalidate]; _adWatchTimer = nil; }
-    if (_noAdTimer) { [_noAdTimer invalidate]; _noAdTimer = nil; }
-    NSLog(@"[Injector] 🏁 انتهى الإعلان، الخروج...");
-    [self performFullReset];
-    dispatch_async(dispatch_get_main_queue(), ^{
+    @try {
+        if (_adWatchTimer) { [_adWatchTimer invalidate]; _adWatchTimer = nil; }
+        if (_noAdTimer) { [_noAdTimer invalidate]; _noAdTimer = nil; }
+        NSLog(@"[Injector] 🏁 انتهى الإعلان، الخروج...");
+        [self performFullReset];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            exit(0);
+        });
+    } @catch (NSException *e) {
+        NSLog(@"[Injector] ❌ استثناء في adFinished: %@", e);
         exit(0);
-    });
+    }
 }
 
 - (void)noAdFound {
-    if (_isAdFound) return;
-    if (_noAdTimer) { [_noAdTimer invalidate]; _noAdTimer = nil; }
-    if (_adWatchTimer) { [_adWatchTimer invalidate]; _adWatchTimer = nil; }
-    NSLog(@"[Injector] ⚠️ لم يتم العثور على إعلان، الخروج...");
-    [self performFullReset];
-    dispatch_async(dispatch_get_main_queue(), ^{
+    @try {
+        if (_isAdFound) return;
+        if (_noAdTimer) { [_noAdTimer invalidate]; _noAdTimer = nil; }
+        if (_adWatchTimer) { [_adWatchTimer invalidate]; _adWatchTimer = nil; }
+        NSLog(@"[Injector] ⚠️ لم يتم العثور على إعلان، الخروج...");
+        [self performFullReset];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            exit(0);
+        });
+    } @catch (NSException *e) {
+        NSLog(@"[Injector] ❌ استثناء في noAdFound: %@", e);
         exit(0);
-    });
+    }
 }
 
 @end
@@ -482,7 +533,8 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     %orig;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // تأخير أطول قبل بدء التدفق (3 ثوانٍ)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [[Injector sharedInstance] startAutoAdFlow];
         });
     });
@@ -550,5 +602,5 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     sessionFakeIP = @"172.56.0.0";
     fakeAdvertisingID = [NSUUID UUID];
     networkLogs = [[NSMutableArray alloc] init];
-    NSLog(@"[Injector] 🚀 تم تحميل التويك التلقائي");
+    NSLog(@"[Injector] 🚀 تم تحميل التويك التلقائي (مع حماية من الكراش)");
 }
