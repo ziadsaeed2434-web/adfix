@@ -5,7 +5,20 @@
 #import <Security/Security.h>
 
 // ============================================================
-// MARK: - دوال مساعدة (تُعرَّف أولاً لتجنب الأخطاء)
+// MARK: - المتغيرات العامة (تُعرَّف أولاً)
+// ============================================================
+
+static double currentLat = 0.0;
+static double currentLon = 0.0;
+static NSString *sessionFakeIP = nil;
+static NSString *currentRealIP = @"جاري الجلب...";
+static NSMutableArray *networkLogs = nil;
+
+static NSUUID *fakeVendorID = nil;
+static NSUUID *fakeAdvertisingID = nil;
+
+// ============================================================
+// MARK: - دوال مساعدة تعتمد على المتغيرات (تُعرَّف بعدها)
 // ============================================================
 
 double randomInRange(double min, double max) {
@@ -26,20 +39,7 @@ void fetchRealIP() {
 }
 
 // ============================================================
-// MARK: - المتغيرات العامة
-// ============================================================
-
-static double currentLat = 0.0;
-static double currentLon = 0.0;
-static NSString *sessionFakeIP = nil;
-static NSString *currentRealIP = @"جاري الجلب...";
-static NSMutableArray *networkLogs = nil;
-
-static NSUUID *fakeVendorID = nil;
-static NSUUID *fakeAdvertisingID = nil;
-
-// ============================================================
-// MARK: - دوال لتوليد قيم عشوائية (مع إصلاح NSRegularExpression)
+// MARK: - دوال لتوليد قيم عشوائية
 // ============================================================
 
 NSString* generateRandomValue(NSString *oldValue) {
@@ -47,14 +47,12 @@ NSString* generateRandomValue(NSString *oldValue) {
         return [NSUUID UUID].UUIDString;
     }
     
-    // 1. إذا كان UUID
     NSError *error = nil;
     NSRegularExpression *uuidRegex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" options:0 error:&error];
     if ([uuidRegex numberOfMatchesInString:oldValue options:0 range:NSMakeRange(0, oldValue.length)] > 0) {
         return [NSUUID UUID].UUIDString;
     }
     
-    // 2. إذا كان رقمياً صرفاً
     if ([oldValue rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location == NSNotFound) {
         int length = (int)oldValue.length;
         if (length == 0) length = 1;
@@ -65,7 +63,6 @@ NSString* generateRandomValue(NSString *oldValue) {
         return result;
     }
     
-    // 3. أي شيء آخر – نولّد سلسلة عشوائية بنفس الطول
     int length = (int)oldValue.length;
     if (length < 4) length = 16;
     NSMutableString *result = [NSMutableString stringWithCapacity:length];
@@ -89,7 +86,7 @@ NSString* generateFirebaseValue(NSString *oldValue) {
 }
 
 // ============================================================
-// MARK: - IP (توليد 10 واختيار الأفضل)
+// MARK: - توليد IP واختيار الأفضل
 // ============================================================
 
 NSArray *generate10IPs() {
@@ -151,7 +148,7 @@ void generateSessionIP() {
 }
 
 // ============================================================
-// MARK: - المعرفات الوهمية (Vendor & IDFA)
+// MARK: - توليد معرفات وهمية (Vendor & IDFA)
 // ============================================================
 
 void generateFakeIdentifiers() {
@@ -160,7 +157,7 @@ void generateFakeIdentifiers() {
 }
 
 // ============================================================
-// MARK: - مسح Keychain وإعادة كتابة كل شيء بهوية جديدة (عدا userIDKey)
+// MARK: - مسح Keychain وإعادة كتابته بهوية جديدة (مع الحفاظ على userIDKey)
 // ============================================================
 
 void resetKeychainWithNewIdentity() {
@@ -266,7 +263,6 @@ void performFullReset() {
     [[NSUserDefaults standardUserDefaults] synchronize];
 
     // 3. مسح iCloud Key-Value (استخدام synchronize بدلاً من removeAllObjects)
-    // ملاحظة: لا يمكن مسح iCloud بسهولة، لكننا نستدعي synchronize لتحديث التغييرات
     [[NSUbiquitousKeyValueStore defaultStore] synchronize];
 
     // 4. مسح الملفات
