@@ -149,7 +149,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - 🔥 مسح Keychain مع الحفاظ على userIDKey و accessTokenKey
+// MARK: - مسح Keychain مع الحفاظ على userIDKey و accessTokenKey
 // ============================================================
 
 void clearKeychainKeepingAccount() {
@@ -211,34 +211,7 @@ void clearKeychainKeepingAccount() {
 }
 
 // ============================================================
-// MARK: - 🔥 مسح كل NSUserDefaults بالكامل (جميع النطاقات والمفاتيح)
-// ============================================================
-
-void clearAllUserDefaults() {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    
-    // 1. مسح النطاق الرئيسي للتطبيق
-    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
-    [defaults removePersistentDomainForName:appDomain];
-    
-    // 2. مسح كل مفتاح فردي في جميع النطاقات
-    NSDictionary *dict = [defaults dictionaryRepresentation];
-    for (NSString *key in dict) {
-        [defaults removeObjectForKey:key];
-    }
-    
-    // 3. مسح أي نطاقات أخرى مسجلة
-    NSArray *volatileDomains = [defaults volatileDomainNames];
-    for (NSString *domain in volatileDomains) {
-        [defaults removeVolatileDomainForName:domain];
-    }
-    
-    [defaults synchronize];
-    NSLog(@"[Injector] 🗑️ كل NSUserDefaults مسح بالكامل (جميع النطاقات والمفاتيح)");
-}
-
-// ============================================================
-// MARK: - 🔥 مسح جميع الكوكيز (شبكة ومحلية)
+// MARK: - مسح جميع الكوكيز (شبكة ومحلية)
 // ============================================================
 
 void clearAllCookies() {
@@ -267,7 +240,7 @@ void clearAllCookies() {
 }
 
 // ============================================================
-// MARK: - 🔥 مسح كاش الشبكة
+// MARK: - مسح كاش الشبكة
 // ============================================================
 
 void clearNetworkCache() {
@@ -278,7 +251,7 @@ void clearNetworkCache() {
 }
 
 // ============================================================
-// MARK: - 🔥 مسح جميع الملفات المحلية
+// MARK: - مسح جميع الملفات المحلية (مع الإبقاء على Preferences للمحافظة على NSUserDefaults)
 // ============================================================
 
 void clearAllLocalFiles() {
@@ -293,12 +266,9 @@ void clearAllLocalFiles() {
         if (dir) {
             NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
             for (NSString *item in items) {
-                // استثناء مجلد Preferences لأنه قد يحتوي على إعدادات النظام
-                // ولكننا نمسح كل الملفات الخاصة بالتطبيق منه أيضاً
-                if (![item isEqualToString:@"Preferences"]) {
-                    [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
-                } else {
-                    // نمسح ملفات Preferences الخاصة بالتطبيق فقط
+                // لا نمسح مجلد Preferences (لأن NSUserDefaults موجودة فيه، والمستخدم طلب إبقاءها)
+                if ([item isEqualToString:@"Preferences"]) {
+                    // نمسح فقط الملفات الخاصة بالتطبيق داخل Preferences (لأنها قد تحتوي على كاش)
                     NSString *prefPath = [dir stringByAppendingPathComponent:item];
                     NSArray *prefItems = [fm contentsOfDirectoryAtPath:prefPath error:nil];
                     for (NSString *prefFile in prefItems) {
@@ -319,27 +289,30 @@ void clearAllLocalFiles() {
                             [prefFile containsString:@"GPP"] ||
                             [prefFile containsString:@"Cmp"]) {
                             [fm removeItemAtPath:[prefPath stringByAppendingPathComponent:prefFile] error:nil];
+                            NSLog(@"[Injector] 🗑️ حذف ملف Preferences: %@", prefFile);
                         }
                     }
+                } else {
+                    // نمسح باقي المجلدات والمحتويات
+                    [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
                 }
             }
         }
     }
-    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية مسحت بالكامل");
+    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية مسحت (عدا مجلد Preferences للحفاظ على NSUserDefaults)");
 }
 
 // ============================================================
-// MARK: - دالة إعادة الضبط الكاملة (شاملة لكل شيء)
+// MARK: - دالة إعادة الضبط الكاملة (مع الحفاظ على NSUserDefaults)
 // ============================================================
 
 void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الشاملة (مسح كل شيء)...");
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط (مع الحفاظ على NSUserDefaults)...");
     
     // 1. مسح Keychain مع الحفاظ على الحساب
     clearKeychainKeepingAccount();
     
-    // 2. مسح كل NSUserDefaults بالكامل
-    clearAllUserDefaults();
+    // 2. ⛔️ لا نمسح NSUserDefaults (تم إزالتها)
     
     // 3. مسح جميع الكوكيز (شبكة ومحلية)
     clearAllCookies();
@@ -347,7 +320,7 @@ void performFullReset() {
     // 4. مسح كاش الشبكة
     clearNetworkCache();
     
-    // 5. مسح جميع الملفات المحلية
+    // 5. مسح جميع الملفات المحلية (مع الإبقاء على Preferences)
     clearAllLocalFiles();
     
     // 6. تجديد الموقع والـ IP (مع التحقق من السكنية) والمعرفات
@@ -361,7 +334,7 @@ void performFullReset() {
         [networkLogs removeAllObjects];
     }
     
-    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط الشاملة. IP الحالي: %@", sessionFakeIP);
+    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط. IP الحالي: %@", sessionFakeIP);
 }
 
 // ============================================================
@@ -515,7 +488,7 @@ void performFullReset() {
         rootVC = rootVC.presentedViewController;
     }
     UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
-                                                                  message:@"تم مسح كل البيانات بالكامل (NSUserDefaults، كوكيز، كاش، ملفات) مع بقاء الحساب."
+                                                                  message:@"تم مسح كل البيانات (عدا NSUserDefaults) مع بقاء الحساب."
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
     [rootVC presentViewController:done animated:YES completion:nil];
