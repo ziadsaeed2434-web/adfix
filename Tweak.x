@@ -3,8 +3,6 @@
 #import <AdSupport/ASIdentifierManager.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
-#import <dlfcn.h>
-#import <objc/runtime.h>
 
 // ============================================================
 // MARK: - المتغيرات العامة
@@ -41,54 +39,7 @@ void fetchRealIP() {
 }
 
 // ============================================================
-// MARK: - دوال توليد قيم عشوائية
-// ============================================================
-
-NSString* generateRandomValue(NSString *oldValue) {
-    if (!oldValue || oldValue.length == 0) {
-        return [NSUUID UUID].UUIDString;
-    }
-    
-    NSError *error = nil;
-    NSRegularExpression *uuidRegex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" options:0 error:&error];
-    if ([uuidRegex numberOfMatchesInString:oldValue options:0 range:NSMakeRange(0, oldValue.length)] > 0) {
-        return [NSUUID UUID].UUIDString;
-    }
-    
-    if ([oldValue rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location == NSNotFound) {
-        int length = (int)oldValue.length;
-        if (length == 0) length = 1;
-        NSMutableString *result = [NSMutableString stringWithCapacity:length];
-        for (int i = 0; i < length; i++) {
-            [result appendFormat:@"%d", arc4random_uniform(10)];
-        }
-        return result;
-    }
-    
-    int length = (int)oldValue.length;
-    if (length < 4) length = 16;
-    NSMutableString *result = [NSMutableString stringWithCapacity:length];
-    NSString *characters = @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    for (int i = 0; i < length; i++) {
-        [result appendFormat:@"%C", [characters characterAtIndex:arc4random_uniform((uint32_t)characters.length)]];
-    }
-    return result;
-}
-
-NSString* generateFirebaseValue(NSString *oldValue) {
-    if (!oldValue) return [NSUUID UUID].UUIDString;
-    NSArray *parts = [oldValue componentsSeparatedByString:@":"];
-    if (parts.count >= 3) {
-        NSString *newID = [NSString stringWithFormat:@"%d", arc4random_uniform(900000000) + 100000000];
-        NSString *newRandom = [NSUUID UUID].UUIDString;
-        newRandom = [[newRandom stringByReplacingOccurrencesOfString:@"-" withString:@""] substringToIndex:16];
-        return [NSString stringWithFormat:@"1:%@:ios:%@__FIRAPP_DEFAULT", newID, newRandom];
-    }
-    return generateRandomValue(oldValue);
-}
-
-// ============================================================
-// MARK: - IP (توليد 10 واختيار الأفضل)
+// MARK: - توليد IP (نطاقات 172.56/57/59)
 // ============================================================
 
 NSArray *generate10IPs() {
@@ -150,7 +101,7 @@ void generateSessionIP() {
 }
 
 // ============================================================
-// MARK: - معرفات وهمية (Vendor & IDFA)
+// MARK: - معرفات وهمية (Vendor & IDFA) - تُولَّد عشوائياً
 // ============================================================
 
 void generateFakeIdentifiers() {
@@ -159,7 +110,7 @@ void generateFakeIdentifiers() {
 }
 
 // ============================================================
-// MARK: - مسح App Group تلقائياً
+// MARK: - مسح App Group
 // ============================================================
 
 void clearAppGroupContainer() {
@@ -179,11 +130,9 @@ void clearAppGroupContainer() {
             for (NSString *item in subContents) {
                 if ([item containsString:@"com.codebysms"] ||
                     [item containsString:@"codebysms"] ||
-                    [item containsString:@"61178"] ||
                     [item containsString:@"UserDefaults"] ||
-                    [item isEqualToString:@"Library"] ||
-                    [item isEqualToString:@"Documents"]) {
-                    // مسح كل المحتويات
+                    [item containsString:@"Library"] ||
+                    [item containsString:@"Documents"]) {
                     NSArray *files = [fm contentsOfDirectoryAtPath:fullPath error:nil];
                     for (NSString *file in files) {
                         [fm removeItemAtPath:[fullPath stringByAppendingPathComponent:file] error:nil];
@@ -196,13 +145,13 @@ void clearAppGroupContainer() {
 }
 
 // ============================================================
-// MARK: - إعادة الضبط الكاملة (تُستدعى فقط عند الضغط على الزر)
+// MARK: - الإعادة الضبط الكاملة (تُستدعى عند الضغط على الزر)
 // ============================================================
 
 void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة (يدوي)...");
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة...");
 
-    // 1. حفظ userIDKey و accessTokenKey
+    // 1. حفظ userIDKey و accessTokenKey من Keychain
     NSString *savedUserID = nil;
     NSString *savedAccessToken = nil;
     NSDictionary *query = @{
@@ -222,8 +171,10 @@ void performFullReset() {
             NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
             if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"userIDKey"]) {
                 savedUserID = value;
+                NSLog(@"[Injector] 📌 حفظ userIDKey: %@", savedUserID);
             } else if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"accessTokenKey"]) {
                 savedAccessToken = value;
+                NSLog(@"[Injector] 📌 حفظ accessTokenKey: %@", savedAccessToken);
             }
         }
         CFRelease(result);
@@ -235,8 +186,9 @@ void performFullReset() {
         NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
+    NSLog(@"[Injector] 🗑️ تم مسح كل Keychain.");
 
-    // 3. إعادة كتابة userIDKey و accessTokenKey
+    // 3. إعادة كتابة userIDKey و accessTokenKey فقط (لا نُولِّد أي قيم جديدة)
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -245,6 +197,7 @@ void performFullReset() {
             (id)kSecValueData: [savedUserID dataUsingEncoding:NSUTF8StringEncoding]
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
+        NSLog(@"[Injector] ✅ إعادة كتابة userIDKey.");
     }
     if (savedAccessToken) {
         NSDictionary *addQuery = @{
@@ -254,12 +207,13 @@ void performFullReset() {
             (id)kSecValueData: [savedAccessToken dataUsingEncoding:NSUTF8StringEncoding]
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
+        NSLog(@"[Injector] ✅ إعادة كتابة accessTokenKey.");
     }
 
-    // 4. مسح NSUserDefaults
-    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
-    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
+    // 4. مسح NSUserDefaults بالكامل
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
     [[NSUserDefaults standardUserDefaults] synchronize];
+    NSLog(@"[Injector] 🗑️ تم مسح NSUserDefaults.");
 
     // 5. مزامنة iCloud
     [[NSUbiquitousKeyValueStore defaultStore] synchronize];
@@ -286,9 +240,11 @@ void performFullReset() {
             [fm removeItemAtPath:[tmpPath stringByAppendingPathComponent:item] error:nil];
         }
     }
+    NSLog(@"[Injector] 🗑️ تم حذف جميع ملفات التطبيق.");
 
     // 7. مسح App Group
     clearAppGroupContainer();
+    NSLog(@"[Injector] 🗑️ تم مسح App Group.");
 
     // 8. مسح WebKit و الكوكيز و الكاش
     NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
@@ -298,20 +254,22 @@ void performFullReset() {
         [cookieStorage deleteCookie:cookie];
     }
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    NSLog(@"[Injector] 🗑️ تم مسح WebKit، الكوكيز، الكاش.");
 
-    // 9. تجديد الموقع، IP، المعرفات
+    // 9. تجديد الموقع، IP، المعرفات (لا تتعلق بـ Keychain)
     updateAtlantaLocation();
     generateSessionIP();
     generateFakeIdentifiers();
     fetchRealIP();
+    NSLog(@"[Injector] 🌐 تم تجديد الموقع، IP، Vendor ID، IDFA.");
 
     // 10. مسح سجل الطلبات
     @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
 
-    // 11. إعادة تشغيل التطبيق فوراً
+    // 11. إعادة تشغيل التطبيق
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تم التجديد"
-                                                                       message:@"تم مسح جميع البيانات وتوليد هوية جديدة.\nسيتم إعادة تشغيل التطبيق لظهور الإعلانات."
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تم"
+                                                                       message:@"تم مسح جميع البيانات مع بقاء الحساب.\nسيتم إعادة تشغيل التطبيق الآن."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             exit(0);
@@ -324,7 +282,7 @@ void performFullReset() {
 }
 
 // ============================================================
-// MARK: - باقي الكود (UI, Hooks)
+// MARK: - تسجيل الطلبات (للشاشة المساعدة)
 // ============================================================
 
 void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
@@ -338,6 +296,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         if (networkLogs.count > 15) [networkLogs removeLastObject];
     }
 }
+
+// ============================================================
+// MARK: - شاشة التفاصيل (للتحقق)
+// ============================================================
 
 @interface AtlantaReportViewController : UIViewController @end
 @implementation AtlantaReportViewController
@@ -376,6 +338,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 - (void)dismissPopup { [self dismissViewControllerAnimated:YES completion:nil]; }
 @end
+
+// ============================================================
+// MARK: - النافذة العائمة والزر 🔄
+// ============================================================
 
 @interface AtlantaWindow : UIWindow @end
 @implementation AtlantaWindow
@@ -440,16 +406,15 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 - (void)handleReset {
-    performFullReset(); // عند الضغط على الزر، ننفذ إعادة الضبط الكاملة
+    performFullReset();
 }
 @end
 
 // ============================================================
-// MARK: - الـ Hooks
+// MARK: - الـ Hooks (الاعتراضات)
 // ============================================================
 
 %ctor {
-    // لا نقوم بأي شيء تلقائي – فقط نضيف الزر بعد تأخير
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AtlantaInfoManager sharedInstance] setupFloatingButton];
     });
