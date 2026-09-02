@@ -5,7 +5,7 @@ ARCHS = arm64
 
 TWEAK_NAME = ProAdManager
 ProAdManager_FILES = Tweak.x
-ProAdManager_FRAMEWORKS = UIKit CoreLocation WebKit Foundation SystemConfiguration AdSupport
+ProAdManager_FRAMEWORKS = UIKit Security CoreLocation WebKit Foundation SystemConfiguration AdSupport
 
 # هذا السطر هو السر لإلغاء الارتباط بـ Cydia Substrate نهائياً
 ProAdManager_LDFLAGS = -Wl,-flat_namespace,-undefined,suppress
