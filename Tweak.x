@@ -457,7 +457,6 @@ void setupAppTerminationObserver() {
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification * _Nonnull note) {
-        // تنفيذ عملية إعادة الضبط تلقائياً فقط عند الخروج النهائي وقت قتل التطبيق
         performFullReset();
     }];
     NSLog(@"[Injector] 👀 تم تفعيل مراقبة الإغلاق النهائي للتطبيق بنجاح");
@@ -473,7 +472,6 @@ void setupAppTerminationObserver() {
     generateFakeAdvertisingID();
     fetchRealIP();
     
-    // تفعيل مراقبة الإنهاء النهائي
     setupAppTerminationObserver();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -512,10 +510,10 @@ void setupAppTerminationObserver() {
 %end
 
 %hook NSURLConnection
-+ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueueQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
++ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     if (sessionFakeIP) {
-        [mutableReq setValue:sessionFakeIP forHTTPHealthHeaderField:@"X-Forwarded-For"];
+        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
     }
