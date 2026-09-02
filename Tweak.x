@@ -5,6 +5,27 @@
 #import <Security/Security.h>
 
 // ============================================================
+// MARK: - دوال مساعدة (تُعرَّف أولاً لتجنب الأخطاء)
+// ============================================================
+
+double randomInRange(double min, double max) {
+    return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
+}
+
+void updateAtlantaLocation() {
+    currentLat = randomInRange(33.7000, 33.8000);
+    currentLon = randomInRange(-84.4500, -84.3500);
+}
+
+void fetchRealIP() {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
+        NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
+        currentRealIP = (ip && ip.length > 0) ? ip : @"غير قادر على الجلب";
+    });
+}
+
+// ============================================================
 // MARK: - المتغيرات العامة
 // ============================================================
 
@@ -18,7 +39,7 @@ static NSUUID *fakeVendorID = nil;
 static NSUUID *fakeAdvertisingID = nil;
 
 // ============================================================
-// MARK: - دوال مساعدة لتوليد قيم جديدة
+// MARK: - دوال لتوليد قيم عشوائية (مع إصلاح NSRegularExpression)
 // ============================================================
 
 NSString* generateRandomValue(NSString *oldValue) {
@@ -26,14 +47,14 @@ NSString* generateRandomValue(NSString *oldValue) {
         return [NSUUID UUID].UUIDString;
     }
     
-    // 1. إذا كان UUID (مثل DCDCEFA2-6B3D-44EB-8402-389C7BFDA8AE)
+    // 1. إذا كان UUID
     NSError *error = nil;
-    NSRegularExpression *uuidRegex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" options:NSCaseInsensitiveSearch error:&error];
+    NSRegularExpression *uuidRegex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" options:0 error:&error];
     if ([uuidRegex numberOfMatchesInString:oldValue options:0 range:NSMakeRange(0, oldValue.length)] > 0) {
         return [NSUUID UUID].UUIDString;
     }
     
-    // 2. إذا كان رقمي صرف (مثل 15, 1, 61178)
+    // 2. إذا كان رقمياً صرفاً
     if ([oldValue rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location == NSNotFound) {
         int length = (int)oldValue.length;
         if (length == 0) length = 1;
@@ -44,7 +65,7 @@ NSString* generateRandomValue(NSString *oldValue) {
         return result;
     }
     
-    // 3. إذا كان سلسلة سداسية عشرية طويلة أو أي شيء آخر
+    // 3. أي شيء آخر – نولّد سلسلة عشوائية بنفس الطول
     int length = (int)oldValue.length;
     if (length < 4) length = 16;
     NSMutableString *result = [NSMutableString stringWithCapacity:length];
@@ -55,14 +76,10 @@ NSString* generateRandomValue(NSString *oldValue) {
     return result;
 }
 
-// معالجة خاصة لمفاتيح Firebase (تحتوي على بنية خاصة)
 NSString* generateFirebaseValue(NSString *oldValue) {
     if (!oldValue) return [NSUUID UUID].UUIDString;
-    // 1:580931174328:ios:bd844db744cd3c48a1194d__FIRAPP_DEFAULT
-    // نستبدل الرقم التسلسلي والجزء العشوائي مع الحفاظ على البنية
     NSArray *parts = [oldValue componentsSeparatedByString:@":"];
     if (parts.count >= 3) {
-        // 1:رقم_عشوائي:ios:جزء_عشوائي__FIRAPP_DEFAULT
         NSString *newID = [NSString stringWithFormat:@"%d", arc4random_uniform(900000000) + 100000000];
         NSString *newRandom = [NSUUID UUID].UUIDString;
         newRandom = [[newRandom stringByReplacingOccurrencesOfString:@"-" withString:@""] substringToIndex:16];
@@ -160,7 +177,6 @@ void resetKeychainWithNewIdentity() {
     CFArrayRef result = NULL;
     OSStatus status = SecItemCopyMatching((CFDictionaryRef)query, (CFTypeRef *)&result);
     
-    // متغير لحفظ userIDKey فقط (الحساب الأساسي)
     NSString *savedUserID = nil;
     
     if (status == errSecSuccess && result != NULL) {
@@ -171,12 +187,10 @@ void resetKeychainWithNewIdentity() {
             NSData *valueData = item[(id)kSecValueData];
             NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
             
-            // حفظ userIDKey فقط (الحساب الأساسي)
             if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"userIDKey"]) {
                 savedUserID = value;
                 NSLog(@"[Injector] 📌 حفظ userIDKey: %@", savedUserID);
             } else {
-                // تخزين باقي العناصر (بما في ذلك accessTokenKey) لتعديلها
                 [allItems addObject:@{
                     @"service": service ?: @"",
                     @"account": account ?: @"",
@@ -194,7 +208,7 @@ void resetKeychainWithNewIdentity() {
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
     
-    // 3. إعادة كتابة userIDKey فقط (بقيمته الأصلية)
+    // 3. إعادة كتابة userIDKey فقط
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -206,14 +220,13 @@ void resetKeychainWithNewIdentity() {
         NSLog(@"[Injector] ✅ إعادة كتابة userIDKey: %@", savedUserID);
     }
     
-    // 4. إعادة كتابة جميع العناصر الأخرى بقيم جديدة (بما في ذلك accessTokenKey)
+    // 4. إعادة كتابة جميع العناصر الأخرى بقيم جديدة
     for (NSDictionary *itemDict in allItems) {
         NSString *service = itemDict[@"service"];
         NSString *account = itemDict[@"account"];
         NSString *oldValue = itemDict[@"value"];
         
         NSString *newValue = nil;
-        // معالجة خاصة لـ Firebase
         if ([service isEqualToString:@"com.firebase.FIRInstallations.installations"]) {
             newValue = generateFirebaseValue(oldValue);
         } else {
@@ -252,8 +265,8 @@ void performFullReset() {
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
     [[NSUserDefaults standardUserDefaults] synchronize];
 
-    // 3. مسح iCloud Key-Value
-    [[NSUbiquitousKeyValueStore defaultStore] removeAllObjects];
+    // 3. مسح iCloud Key-Value (استخدام synchronize بدلاً من removeAllObjects)
+    // ملاحظة: لا يمكن مسح iCloud بسهولة، لكننا نستدعي synchronize لتحديث التغييرات
     [[NSUbiquitousKeyValueStore defaultStore] synchronize];
 
     // 4. مسح الملفات
@@ -311,25 +324,8 @@ void performFullReset() {
 }
 
 // ============================================================
-// MARK: - باقي الكود (شاشة التفاصيل، الزر، الـ Hooks)
+// MARK: - تسجيل الطلبات
 // ============================================================
-
-void fetchRealIP() {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
-        NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
-        currentRealIP = (ip && ip.length > 0) ? ip : @"غير قادر على الجلب";
-    });
-}
-
-void updateAtlantaLocation() {
-    currentLat = randomInRange(33.7000, 33.8000);
-    currentLon = randomInRange(-84.4500, -84.3500);
-}
-
-double randomInRange(double min, double max) {
-    return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
-}
 
 void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     if (!networkLogs) networkLogs = [[NSMutableArray alloc] init];
@@ -342,6 +338,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         if (networkLogs.count > 15) [networkLogs removeLastObject];
     }
 }
+
+// ============================================================
+// MARK: - شاشة التفاصيل
+// ============================================================
 
 @interface AtlantaReportViewController : UIViewController @end
 @implementation AtlantaReportViewController
@@ -380,6 +380,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 - (void)dismissPopup { [self dismissViewControllerAnimated:YES completion:nil]; }
 @end
+
+// ============================================================
+// MARK: - النافذة العائمة والزر
+// ============================================================
 
 @interface AtlantaWindow : UIWindow @end
 @implementation AtlantaWindow
