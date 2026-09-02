@@ -60,7 +60,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     BOOL _isAdFound;
     NSTimer *_adWatchTimer;
     NSTimer *_noAdTimer;
-    NSMutableArray *_stepQueue; // لتسلسل الخطوات
+    int _adRetryCount;
 }
 
 + (instancetype)sharedInstance {
@@ -81,7 +81,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         _isAdFound = NO;
         _adWatchTimer = nil;
         _noAdTimer = nil;
-        _stepQueue = [[NSMutableArray alloc] init];
+        _adRetryCount = 0;
         [self updateLocationAndIdentifiers];
     }
     return self;
@@ -319,7 +319,6 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     if (_isAdStarted) return;
     _isAdStarted = YES;
     NSLog(@"[Injector] 🚀 بدء تدفق الإعلان التلقائي...");
-
     // تأخير أولي 3 ثوانٍ
     [self performSelector:@selector(step1_consent) withObject:nil afterDelay:3.0];
 }
@@ -335,17 +334,15 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
         if (keyWindow) {
             UIViewController *root = keyWindow.rootViewController;
             if (root) {
-                // البحث عن زر الموافقة في جميع الـ view controllers
                 if ([self findAndTapAgreeButtonInViewController:root]) {
                     _isConsentHandled = YES;
                     NSLog(@"[Injector] ✅ تمت الموافقة");
-                    // ننتقل للخطوة 2 بعد 3 ثوانٍ
                     [self performSelector:@selector(step2_store) withObject:nil afterDelay:3.0];
                     return;
                 }
             }
         }
-        // إذا لم نجد زر الموافقة، ننتقل للخطوة 2 مباشرة
+        // إذا لم نجد زر الموافقة، ننتقل للخطوة 2
         NSLog(@"[Injector] ℹ️ لم تظهر نافذة موافقة، ننتقل للخطوة التالية");
         [self performSelector:@selector(step2_store) withObject:nil afterDelay:1.0];
     } @catch (NSException *e) {
@@ -362,7 +359,6 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
             return YES;
         }
     }
-    // البحث في الـ presented view controllers
     if (vc.presentedViewController) {
         return [self findAndTapAgreeButtonInViewController:vc.presentedViewController];
     }
@@ -403,23 +399,20 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
             [self performSelector:@selector(step2_store) withObject:nil afterDelay:1.0];
             return;
         }
-        // البحث عن زر "Store" أو "المتجر"
         NSArray *storeTitles = @[@"Store", @"المتجر", @"store", @"متجر", @"Shop"];
         for (NSString *title in storeTitles) {
             if ([self findButtonWithTitle:title inView:root.view]) {
                 NSLog(@"[Injector] ✅ تم الضغط على زر 'Store'");
-                // ننتقل للخطوة 3 بعد 3 ثوانٍ
                 [self performSelector:@selector(step3_adButton) withObject:nil afterDelay:3.0];
                 return;
             }
         }
-        // إذا لم نجد "Store"، نبحث عن أي زر يحتوي على "store" (للمرونة)
+        // إذا لم نجد "Store"، نبحث عن أي زر يحتوي على "store"
         if ([self findButtonContainingString:@"store" inView:root.view]) {
             NSLog(@"[Injector] ✅ تم الضغط على زر (يحتوي على 'store')");
             [self performSelector:@selector(step3_adButton) withObject:nil afterDelay:3.0];
             return;
         }
-        // إذا لم نجد، نعيد المحاولة بعد 2 ثانية
         NSLog(@"[Injector] ⚠️ لم نجد زر 'Store'، نعيد المحاولة...");
         [self performSelector:@selector(step2_store) withObject:nil afterDelay:2.0];
     } @catch (NSException *e) {
@@ -462,24 +455,19 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
             [self performSelector:@selector(step3_adButton) withObject:nil afterDelay:1.0];
             return;
         }
-        // قائمة الكلمات المفتاحية لزر الإعلان
         NSArray *adKeywords = @[@"watch ad", @"شاهد الإعلان", @"مشاهدة إعلان", @"watch", @"شاهد", @"مشاهدة", @"reward", @"claim", @"إعلان", @"ad", @"view", @"get"];
         for (NSString *keyword in adKeywords) {
             if ([self findButtonWithTitle:keyword inView:root.view]) {
                 NSLog(@"[Injector] ✅ تم الضغط على زر الإعلان (يحتوي على: %@)", keyword);
-                // بدء المؤقت 65 ثانية
                 [self startAdTimer];
                 return;
             }
         }
-        // إذا لم نجد، نعيد المحاولة بعد 2 ثانية (لمدة 5 محاولات)
-        static int retryCount = 0;
-        if (retryCount < 5) {
-            retryCount++;
-            NSLog(@"[Injector] ⚠️ لم نجد زر الإعلان (محاولة %d/5)...", retryCount);
+        _adRetryCount++;
+        if (_adRetryCount < 5) {
+            NSLog(@"[Injector] ⚠️ لم نجد زر الإعلان (محاولة %d/5)...", _adRetryCount);
             [self performSelector:@selector(step3_adButton) withObject:nil afterDelay:2.0];
         } else {
-            // بعد 5 محاولات، نخرج بدون إعلان
             NSLog(@"[Injector] ⚠️ لم نجد زر الإعلان بعد 5 محاولات، الخروج...");
             [self noAdFound];
         }
