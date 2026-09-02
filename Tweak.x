@@ -5,7 +5,7 @@
 #import <Security/Security.h>
 
 // ============================================================
-// MARK: - المتغيرات العامة (تُعرَّف أولاً)
+// MARK: - المتغيرات العامة
 // ============================================================
 
 static double currentLat = 0.0;
@@ -18,7 +18,7 @@ static NSUUID *fakeVendorID = nil;
 static NSUUID *fakeAdvertisingID = nil;
 
 // ============================================================
-// MARK: - دوال مساعدة تعتمد على المتغيرات (تُعرَّف بعدها)
+// MARK: - دوال مساعدة
 // ============================================================
 
 double randomInRange(double min, double max) {
@@ -39,7 +39,7 @@ void fetchRealIP() {
 }
 
 // ============================================================
-// MARK: - دوال لتوليد قيم عشوائية
+// MARK: - دوال توليد قيم عشوائية
 // ============================================================
 
 NSString* generateRandomValue(NSString *oldValue) {
@@ -86,7 +86,7 @@ NSString* generateFirebaseValue(NSString *oldValue) {
 }
 
 // ============================================================
-// MARK: - توليد IP واختيار الأفضل
+// MARK: - IP (توليد 10 واختيار الأفضل)
 // ============================================================
 
 NSArray *generate10IPs() {
@@ -148,7 +148,7 @@ void generateSessionIP() {
 }
 
 // ============================================================
-// MARK: - توليد معرفات وهمية (Vendor & IDFA)
+// MARK: - معرفات وهمية (Vendor & IDFA)
 // ============================================================
 
 void generateFakeIdentifiers() {
@@ -157,11 +157,11 @@ void generateFakeIdentifiers() {
 }
 
 // ============================================================
-// MARK: - مسح Keychain وإعادة كتابته بهوية جديدة (مع الحفاظ على userIDKey)
+// MARK: - مسح Keychain مع الاحتفاظ بـ userIDKey و accessTokenKey معًا
 // ============================================================
 
 void resetKeychainWithNewIdentity() {
-    NSLog(@"[Injector] 🔑 حفظ userIDKey فقط، ثم مسح كل Keychain وإعادة كتابة الباقي بهوية جديدة...");
+    NSLog(@"[Injector] 🔑 حفظ userIDKey و accessTokenKey، ثم مسح كل Keychain وإعادة كتابة الباقي بهوية جديدة...");
     
     // 1. قراءة جميع عناصر Keychain
     NSMutableArray *allItems = [NSMutableArray array];
@@ -174,7 +174,9 @@ void resetKeychainWithNewIdentity() {
     CFArrayRef result = NULL;
     OSStatus status = SecItemCopyMatching((CFDictionaryRef)query, (CFTypeRef *)&result);
     
+    // حفظ userIDKey و accessTokenKey
     NSString *savedUserID = nil;
+    NSString *savedAccessToken = nil;
     
     if (status == errSecSuccess && result != NULL) {
         NSArray *items = (__bridge NSArray *)result;
@@ -184,10 +186,15 @@ void resetKeychainWithNewIdentity() {
             NSData *valueData = item[(id)kSecValueData];
             NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
             
+            // حفظ userIDKey و accessTokenKey
             if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"userIDKey"]) {
                 savedUserID = value;
                 NSLog(@"[Injector] 📌 حفظ userIDKey: %@", savedUserID);
+            } else if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"accessTokenKey"]) {
+                savedAccessToken = value;
+                NSLog(@"[Injector] 📌 حفظ accessTokenKey: %@", savedAccessToken);
             } else {
+                // باقي العناصر سنعيد كتابتها بقيم جديدة
                 [allItems addObject:@{
                     @"service": service ?: @"",
                     @"account": account ?: @"",
@@ -205,7 +212,7 @@ void resetKeychainWithNewIdentity() {
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
     
-    // 3. إعادة كتابة userIDKey فقط
+    // 3. إعادة كتابة userIDKey و accessTokenKey بقيمهما الأصليين
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -215,6 +222,16 @@ void resetKeychainWithNewIdentity() {
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
         NSLog(@"[Injector] ✅ إعادة كتابة userIDKey: %@", savedUserID);
+    }
+    if (savedAccessToken) {
+        NSDictionary *addQuery = @{
+            (id)kSecClass: (id)kSecClassGenericPassword,
+            (id)kSecAttrService: @"com.codebysms",
+            (id)kSecAttrAccount: @"accessTokenKey",
+            (id)kSecValueData: [savedAccessToken dataUsingEncoding:NSUTF8StringEncoding]
+        };
+        SecItemAdd((CFDictionaryRef)addQuery, NULL);
+        NSLog(@"[Injector] ✅ إعادة كتابة accessTokenKey: %@", savedAccessToken);
     }
     
     // 4. إعادة كتابة جميع العناصر الأخرى بقيم جديدة
@@ -242,7 +259,7 @@ void resetKeychainWithNewIdentity() {
         }
     }
     
-    NSLog(@"[Injector] ✅ تم تحديث جميع عناصر Keychain بهوية جديدة (عدا userIDKey).");
+    NSLog(@"[Injector] ✅ تم تحديث جميع عناصر Keychain بهوية جديدة مع بقاء userIDKey و accessTokenKey.");
 }
 
 // ============================================================
@@ -262,7 +279,7 @@ void performFullReset() {
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
     [[NSUserDefaults standardUserDefaults] synchronize];
 
-    // 3. مسح iCloud Key-Value (استخدام synchronize بدلاً من removeAllObjects)
+    // 3. مزامنة iCloud (لا نمسحها، فقط نزامن)
     [[NSUbiquitousKeyValueStore defaultStore] synchronize];
 
     // 4. مسح الملفات
@@ -292,7 +309,7 @@ void performFullReset() {
     NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
     [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
 
-    // 6. مسح Keychain وإعادة كتابته بهوية جديدة (مع الحفاظ على userIDKey فقط)
+    // 6. مسح Keychain وإعادة كتابته مع الحفاظ على userIDKey و accessTokenKey
     resetKeychainWithNewIdentity();
 
     // 7. تجديد IP، الموقع، المعرفات
@@ -307,7 +324,7 @@ void performFullReset() {
     // 9. إغلاق التطبيق بعد ثانية واحدة
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تم إعادة الضبط"
-                                                                       message:@"تم تحديث جميع المعرفات بهوية جديدة مع بقاء معرف المستخدم.\nسيتم إعادة تشغيل التطبيق الآن."
+                                                                       message:@"تم تحديث جميع المعرفات بهوية جديدة مع بقاء بيانات الحساب (userID + accessToken).\nسيتم إعادة تشغيل التطبيق الآن."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             exit(0);
