@@ -153,7 +153,6 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 // ============================================================
 
 void clearKeychainKeepingAccount() {
-    // 1. حفظ userIDKey و accessTokenKey
     NSString *savedUserID = nil;
     NSString *savedAccessToken = nil;
     NSDictionary *query = @{
@@ -180,15 +179,12 @@ void clearKeychainKeepingAccount() {
         CFRelease(result);
     }
 
-    // 2. مسح كل Keychain (جميع الفئات)
     NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
     for (id secClass in secClasses) {
         NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
-    NSLog(@"[Injector] 🗑️ Keychain مسح بالكامل");
-
-    // 3. إعادة كتابة userIDKey و accessTokenKey
+    
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -207,52 +203,28 @@ void clearKeychainKeepingAccount() {
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
     }
-    NSLog(@"[Injector] ✅ تم مسح Keychain مع بقاء الحساب (userIDKey و accessTokenKey)");
 }
 
 // ============================================================
-// MARK: - مسح جميع الكوكيز (شبكة ومحلية)
+// MARK: - مسح الكوكيز والكاش والملفات المحلية
 // ============================================================
 
 void clearAllCookies() {
-    // 1. مسح كوكيز NSHTTPCookieStorage (الكوكيز العادية)
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
-    NSLog(@"[Injector] 🗑️ جميع كوكيز NSHTTPCookieStorage مسحت");
-    
-    // 2. مسح كوكيز WKWebsiteDataStore (WebKit)
     NSSet *dataTypes = [NSSet setWithObject:WKWebsiteDataTypeCookies];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes
-                                               modifiedSince:[NSDate distantPast]
-                                           completionHandler:^{
-        NSLog(@"[Injector] 🗑️ جميع كوكيز WebKit مسحت");
-    }];
-    
-    // 3. مسح جميع بيانات WebKit الأخرى (بما في ذلك التخزين المحلي)
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
     NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes
-                                               modifiedSince:[NSDate distantPast]
-                                           completionHandler:^{
-        NSLog(@"[Injector] 🗑️ جميع بيانات WebKit مسحت");
-    }];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
 }
-
-// ============================================================
-// MARK: - مسح كاش الشبكة
-// ============================================================
 
 void clearNetworkCache() {
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
     [[NSURLCache sharedURLCache] setDiskCapacity:0];
     [[NSURLCache sharedURLCache] setMemoryCapacity:0];
-    NSLog(@"[Injector] 🗑️ كاش الشبكة مسح بالكامل");
 }
-
-// ============================================================
-// MARK: - مسح جميع الملفات المحلية (مع الإبقاء على Preferences للمحافظة على NSUserDefaults)
-// ============================================================
 
 void clearAllLocalFiles() {
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -266,9 +238,7 @@ void clearAllLocalFiles() {
         if (dir) {
             NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
             for (NSString *item in items) {
-                // لا نمسح مجلد Preferences (لأن NSUserDefaults موجودة فيه، والمستخدم طلب إبقاءها)
                 if ([item isEqualToString:@"Preferences"]) {
-                    // نمسح فقط الملفات الخاصة بالتطبيق داخل Preferences (لأنها قد تحتوي على كاش)
                     NSString *prefPath = [dir stringByAppendingPathComponent:item];
                     NSArray *prefItems = [fm contentsOfDirectoryAtPath:prefPath error:nil];
                     for (NSString *prefFile in prefItems) {
@@ -289,56 +259,42 @@ void clearAllLocalFiles() {
                             [prefFile containsString:@"GPP"] ||
                             [prefFile containsString:@"Cmp"]) {
                             [fm removeItemAtPath:[prefPath stringByAppendingPathComponent:prefFile] error:nil];
-                            NSLog(@"[Injector] 🗑️ حذف ملف Preferences: %@", prefFile);
                         }
                     }
                 } else {
-                    // نمسح باقي المجلدات والمحتويات
                     [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
                 }
             }
         }
     }
-    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية مسحت (عدا مجلد Preferences للحفاظ على NSUserDefaults)");
 }
 
 // ============================================================
-// MARK: - دالة إعادة الضبط الكاملة (مع الحفاظ على NSUserDefaults)
+// MARK: - دالة إعادة الضبط الكاملة عند الإنهاء النهائي
 // ============================================================
 
 void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط (مع الحفاظ على NSUserDefaults)...");
+    NSLog(@"[Injector] 🔄 جاري إغلاق التطبيق نهائياً، تنظيف وإعادة ضبط البيانات...");
     
-    // 1. مسح Keychain مع الحفاظ على الحساب
     clearKeychainKeepingAccount();
-    
-    // 2. ⛔️ لا نمسح NSUserDefaults (تم إزالتها)
-    
-    // 3. مسح جميع الكوكيز (شبكة ومحلية)
     clearAllCookies();
-    
-    // 4. مسح كاش الشبكة
     clearNetworkCache();
-    
-    // 5. مسح جميع الملفات المحلية (مع الإبقاء على Preferences)
     clearAllLocalFiles();
     
-    // 6. تجديد الموقع والـ IP (مع التحقق من السكنية) والمعرفات
     updateAtlantaLocation();
-    generateSessionIP();   // تولد 10 IPs وتختار السكني
+    generateSessionIP();
     generateFakeAdvertisingID();
     fetchRealIP();
     
-    // 7. مسح سجل الطلبات
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
     
-    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط. IP الحالي: %@", sessionFakeIP);
+    NSLog(@"[Injector] ✅ تم إتمام التنظيف النهائي بنجاح قبل خروج التطبيق من الذاكرة.");
 }
 
 // ============================================================
-// MARK: - واجهة عرض التفاصيل
+// MARK: - واجهة عرض التفاصيل (Report)
 // ============================================================
 
 @interface AtlantaReportViewController : UIViewController
@@ -353,7 +309,6 @@ void performFullReset() {
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
     
-    // استخدام UDID الحقيقي (بدون تغيير)
     NSString *udidStr = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
     NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     
@@ -398,7 +353,7 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - النافذة العائمة والزر (بدون تأكيد)
+// MARK: - النافذة العائمة (لإظهار التقرير)
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -450,7 +405,7 @@ void performFullReset() {
         self.floatingBtn.tag = 999888;
         self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
         self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.floatingBtn setTitle:@"🔄" forState:UIControlStateNormal];
+        [self.floatingBtn setTitle:@"📊" forState:UIControlStateNormal];
         [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:24];
         self.floatingBtn.layer.cornerRadius = 30;
@@ -462,7 +417,7 @@ void performFullReset() {
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
         
-        [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
+        [self.floatingBtn addTarget:self action:@selector(showReport) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.floatingBtn];
     });
@@ -480,44 +435,46 @@ void performFullReset() {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 
-- (void)handleReset {
-    performFullReset();
+- (void)showReport {
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
     UIViewController *rootVC = keyWindow.rootViewController;
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
-    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
-                                                                  message:@"تم مسح كل البيانات (عدا NSUserDefaults) مع بقاء الحساب."
-                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-    [rootVC presentViewController:done animated:YES completion:nil];
+    AtlantaReportViewController *reportVC = [[AtlantaReportViewController alloc] init];
+    reportVC.modalPresentationStyle = UIModalPresentationFullScreen;
+    [rootVC presentViewController:reportVC animated:YES completion:nil];
 }
 
 @end
 
 // ============================================================
+// MARK: - مراقبة الإنهاء النهائي للتطبيق (App Termination)
+// ============================================================
+
+void setupAppTerminationObserver() {
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification * _Nonnull note) {
+        // تنفيذ عملية إعادة الضبط تلقائياً فقط عند الخروج النهائي وقت قتل التطبيق
+        performFullReset();
+    }];
+    NSLog(@"[Injector] 👀 تم تفعيل مراقبة الإغلاق النهائي للتطبيق بنجاح");
+}
+
+// ============================================================
 // MARK: - الـ Hooks
 // ============================================================
 
-%hook UIViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        // عند أول ظهور للـ view controller: ننفذ إعادة الضبط التلقائية
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            performFullReset();
-        });
-    });
-}
-%end
-
 %ctor {
     updateAtlantaLocation();
-    generateSessionIP();   // توليد IP مع التحقق
+    generateSessionIP();
     generateFakeAdvertisingID();
     fetchRealIP();
+    
+    // تفعيل مراقبة الإنهاء النهائي
+    setupAppTerminationObserver();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AtlantaInfoManager sharedInstance] setupFloatingButton];
@@ -555,10 +512,10 @@ void performFullReset() {
 %end
 
 %hook NSURLConnection
-+ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
++ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueueQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     if (sessionFakeIP) {
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+        [mutableReq setValue:sessionFakeIP forHTTPHealthHeaderField:@"X-Forwarded-For"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
     }
@@ -570,9 +527,6 @@ void performFullReset() {
 }
 %end
 
-// ===== إزالة Hook UIDevice نهائياً (يبقى UDID حقيقياً) =====
-
-// ===== Hook ASIdentifierManager فقط لتغيير IDFA =====
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     if (fakeAdvertisingID) {
