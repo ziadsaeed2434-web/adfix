@@ -9,8 +9,9 @@ static void clickNativeAgreeButton(UIView *view) {
         if ([subview isKindOfClass:[UIButton class]]) {
             UIButton *button = (UIButton *)subview;
             NSString *title = [button titleForState:UIControlStateNormal];
-            if (title && [title rangeOfString:@"AGREE" options:NSCaseInsensitiveSearch].location != namespace_not_found_check]) { // تم ضبطها بدقة
-                // للتأكد من مطابقة النص تماماً أو جزئياً
+            
+            // التصحيح هنا: استخدام NSNotFound بدلاً من المعرف الخاطئ
+            if (title && [title rangeOfString:@"AGREE" options:NSCaseInsensitiveSearch].location != NSNotFound) {
                 if ([title.uppercaseString containsString:@"AGREE"]) {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -23,7 +24,6 @@ static void clickNativeAgreeButton(UIView *view) {
         // التحقق إذا كان العنصر WebView لمحاولة تنفيذ حقن جافاسكريبت للضغط
         if ([subview isKindOfClass:[WKWebView class]]) {
             WKWebView *webView = (WKWebView *)subview;
-            // كود جافاسكريبت يبحث عن الزر الذي يحمل نص AGREE أو يحتوي عليه ويضغط عليه
             NSString *jsCode = @"(function() {"
                                "  var buttons = document.querySelectorAll('button, div, span, a');"
                                "  for (var i = 0; i < buttons.length; i++) {"
@@ -48,7 +48,7 @@ static void clickNativeAgreeButton(UIView *view) {
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     
-    // الانتظار حتى تظهر النافذة تماماً وتستقر العناصر (مع تكرار آمن ومدروس)
+    // الانتظار حتى تظهر النافذة تماماً وتستقر العناصر
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (self.isViewLoaded && self.view) {
             @try {
