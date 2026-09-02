@@ -111,214 +111,154 @@ void generateFakeIdentifiers() {
 }
 
 // ============================================================
-// MARK: - توليد قيم عشوائية بنفس نوع القيمة الأصلية
+// MARK: - مسح شامل لكل شيء (Keychain, App Group, الملفات, NSUserDefaults, iCloud, WebKit, الكوكيز)
 // ============================================================
 
-id generateRandomValueForType(id originalValue) {
-    if (!originalValue) return nil;
-    
-    // NSString
-    if ([originalValue isKindOfClass:[NSString class]]) {
-        NSString *str = (NSString *)originalValue;
-        // إذا كانت القيمة تبدو كـ UUID، نولد UUID جديد
-        NSRegularExpression *uuidRegex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" options:NSRegularExpressionCaseInsensitive error:nil];
-        if ([uuidRegex numberOfMatchesInString:str options:0 range:NSMakeRange(0, str.length)] > 0) {
-            return [NSUUID UUID].UUIDString;
-        }
-        // إذا كانت رقمية (مثل "12345")، نولد أرقاماً بنفس الطول
-        if ([str rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location == NSNotFound) {
-            int len = (int)str.length;
-            if (len == 0) len = 5;
-            NSMutableString *result = [NSMutableString stringWithCapacity:len];
-            for (int i = 0; i < len; i++) {
-                [result appendFormat:@"%d", arc4random_uniform(10)];
-            }
-            return result;
-        }
-        // إذا كانت طويلة (مثل token)، نولد سلسلة عشوائية بنفس الطول
-        int len = (int)str.length;
-        if (len < 4) len = 16;
-        NSMutableString *result = [NSMutableString stringWithCapacity:len];
-        NSString *characters = @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        for (int i = 0; i < len; i++) {
-            [result appendFormat:@"%C", [characters characterAtIndex:arc4random_uniform((uint32_t)characters.length)]];
-        }
-        return result;
-    }
-    
-    // NSNumber
-    if ([originalValue isKindOfClass:[NSNumber class]]) {
-        NSNumber *num = (NSNumber *)originalValue;
-        const char *type = [num objCType];
-        // Bool
-        if (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, @encode(char)) == 0) {
-            return @(arc4random_uniform(2));
-        }
-        // Integer
-        if (strcmp(type, @encode(int)) == 0 || strcmp(type, @encode(long)) == 0 || strcmp(type, @encode(long long)) == 0) {
-            return @(arc4random_uniform(1000000));
-        }
-        // Double / Float
-        if (strcmp(type, @encode(double)) == 0 || strcmp(type, @encode(float)) == 0) {
-            double val = (double)arc4random_uniform(1000000) / 100.0;
-            return @(val);
-        }
-        return @(arc4random_uniform(1000));
-    }
-    
-    // NSArray
-    if ([originalValue isKindOfClass:[NSArray class]]) {
-        NSArray *arr = (NSArray *)originalValue;
-        NSMutableArray *newArr = [NSMutableArray arrayWithCapacity:arr.count];
-        for (id item in arr) {
-            id newItem = generateRandomValueForType(item);
-            if (newItem) [newArr addObject:newItem];
-        }
-        return newArr;
-    }
-    
-    // NSDictionary
-    if ([originalValue isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *dict = (NSDictionary *)originalValue;
-        NSMutableDictionary *newDict = [NSMutableDictionary dictionaryWithCapacity:dict.count];
-        for (NSString *key in dict) {
-            id newVal = generateRandomValueForType(dict[key]);
-            if (newVal) {
-                // بعض المفاتيح الخاصة قد تحتوي على تواريخ أو قيم ثنائية، لكننا نتعامل معها كنصوص
-                newDict[key] = newVal;
-            }
-        }
-        return newDict;
-    }
-    
-    // NSData (نحوله إلى نص عشوائي)
-    if ([originalValue isKindOfClass:[NSData class]]) {
-        NSData *data = (NSData *)originalValue;
-        int len = (int)data.length;
-        if (len == 0) len = 16;
-        NSMutableString *result = [NSMutableString stringWithCapacity:len * 2];
-        for (int i = 0; i < len; i++) {
-            [result appendFormat:@"%02x", arc4random_uniform(256)];
-        }
-        return result;
-    }
-    
-    // أي نوع آخر: نرجعه كما هو (لا نغيره)
-    return originalValue;
-}
-
-// ============================================================
-// MARK: - تغيير جميع قيم NSUserDefaults إلى قيم عشوائية جديدة
-// ============================================================
-
-void randomizeAllUserDefaults() {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSDictionary *currentDict = [defaults dictionaryRepresentation];
-    
-    // قائمة المفاتيح التي نستثنيها من التغيير (مفاتيح النظام أو المفاتيح التي قد تسبب مشاكل)
-    NSArray *excludeKeys = @[
-        @"AppleLocale", @"AppleLanguages", @"NSLanguages", @"AppleKeyboards"
-    ];
-    
-    NSMutableDictionary *newDict = [NSMutableDictionary dictionary];
-    
-    for (NSString *key in currentDict) {
-        // تخطي المفاتيح المستثناة
-        if ([excludeKeys containsObject:key]) {
-            newDict[key] = currentDict[key];
-            continue;
-        }
-        
-        id value = currentDict[key];
-        id newValue = generateRandomValueForType(value);
-        if (newValue) {
-            newDict[key] = newValue;
-            NSLog(@"[Injector] 🔄 تغيير NSUserDefaults: %@ = %@ -> %@", key, value, newValue);
-        } else {
-            newDict[key] = value;
-        }
-    }
-    
-    // مسح جميع القيم الحالية
-    for (NSString *key in currentDict) {
-        [defaults removeObjectForKey:key];
-    }
-    
-    // كتابة القيم الجديدة
-    for (NSString *key in newDict) {
-        [defaults setObject:newDict[key] forKey:key];
-    }
-    
-    [defaults synchronize];
-    NSLog(@"[Injector] ✅ تم تغيير جميع قيم NSUserDefaults إلى قيم عشوائية جديدة");
-}
-
-// ============================================================
-// MARK: - الإعادة الضبط الكاملة (مع تغيير البصمات و NSUserDefaults)
-// ============================================================
-
-void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة (تغيير كل البصمات و NSUserDefaults)");
-
-    // 1. تغيير كل قيم NSUserDefaults إلى قيم عشوائية جديدة
-    randomizeAllUserDefaults();
-
-    // 2. حذف جميع ملفات التطبيق (Documents, Library, tmp) باستثناء Preferences (لأننا غيرناها)
+void clearEverything() {
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *docPath = paths.firstObject;
-    if (docPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:docPath error:nil]) {
-            [fm removeItemAtPath:[docPath stringByAppendingPathComponent:item] error:nil];
+
+    // 1. حفظ userIDKey و accessTokenKey من Keychain (لإعادتها لاحقاً)
+    NSString *savedUserID = nil;
+    NSString *savedAccessToken = nil;
+    NSDictionary *query = @{
+        (id)kSecClass: (id)kSecClassGenericPassword,
+        (id)kSecMatchLimit: (id)kSecMatchLimitAll,
+        (id)kSecReturnAttributes: @YES,
+        (id)kSecReturnData: @YES
+    };
+    CFArrayRef result = NULL;
+    OSStatus status = SecItemCopyMatching((CFDictionaryRef)query, (CFTypeRef *)&result);
+    if (status == errSecSuccess && result != NULL) {
+        NSArray *items = (__bridge NSArray *)result;
+        for (NSDictionary *item in items) {
+            NSString *service = item[(id)kSecAttrService];
+            NSString *account = item[(id)kSecAttrAccount];
+            NSData *valueData = item[(id)kSecValueData];
+            NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
+            if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"userIDKey"]) {
+                savedUserID = value;
+            } else if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"accessTokenKey"]) {
+                savedAccessToken = value;
+            }
         }
+        CFRelease(result);
     }
-    paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
-    NSString *libPath = paths.firstObject;
-    if (libPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:libPath error:nil]) {
-            if (![item isEqualToString:@"Preferences"]) {
-                [fm removeItemAtPath:[libPath stringByAppendingPathComponent:item] error:nil];
+
+    // 2. مسح Keychain (جميع الفئات)
+    NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
+    for (id secClass in secClasses) {
+        NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
+        SecItemDelete((CFDictionaryRef)deleteQuery);
+    }
+    NSLog(@"[Injector] 🗑️ Keychain مسح بالكامل");
+
+    // 3. إعادة كتابة userIDKey و accessTokenKey
+    if (savedUserID) {
+        NSDictionary *addQuery = @{
+            (id)kSecClass: (id)kSecClassGenericPassword,
+            (id)kSecAttrService: @"com.codebysms",
+            (id)kSecAttrAccount: @"userIDKey",
+            (id)kSecValueData: [savedUserID dataUsingEncoding:NSUTF8StringEncoding]
+        };
+        SecItemAdd((CFDictionaryRef)addQuery, NULL);
+        NSLog(@"[Injector] ✅ userIDKey مستعاد");
+    }
+    if (savedAccessToken) {
+        NSDictionary *addQuery = @{
+            (id)kSecClass: (id)kSecClassGenericPassword,
+            (id)kSecAttrService: @"com.codebysms",
+            (id)kSecAttrAccount: @"accessTokenKey",
+            (id)kSecValueData: [savedAccessToken dataUsingEncoding:NSUTF8StringEncoding]
+        };
+        SecItemAdd((CFDictionaryRef)addQuery, NULL);
+        NSLog(@"[Injector] ✅ accessTokenKey مستعاد");
+    }
+
+    // 4. مسح NSUserDefaults (جميع النطاقات)
+    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    NSLog(@"[Injector] 🗑️ NSUserDefaults مسح");
+
+    // 5. مسح iCloud Key-Value
+    [[NSUbiquitousKeyValueStore defaultStore] removeAllObjects];
+    [[NSUbiquitousKeyValueStore defaultStore] synchronize];
+    NSLog(@"[Injector] 🗑️ iCloud Key-Value مسح");
+
+    // 6. حذف جميع ملفات التطبيق (Documents, Library, tmp)
+    NSArray *dirs = @[
+        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject,
+        NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject,
+        NSTemporaryDirectory()
+    ];
+    for (NSString *dir in dirs) {
+        if (dir) {
+            NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
+            for (NSString *item in items) {
+                [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
             }
         }
     }
-    NSString *tmpPath = NSTemporaryDirectory();
-    if (tmpPath) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:tmpPath error:nil]) {
-            [fm removeItemAtPath:[tmpPath stringByAppendingPathComponent:item] error:nil];
+    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية حذفت");
+
+    // 7. مسح App Group
+    NSString *sharedPath = @"/private/var/mobile/Containers/Shared/AppGroup";
+    if ([fm fileExistsAtPath:sharedPath]) {
+        NSArray *groups = [fm contentsOfDirectoryAtPath:sharedPath error:nil];
+        for (NSString *group in groups) {
+            NSString *fullPath = [sharedPath stringByAppendingPathComponent:group];
+            BOOL isDir = NO;
+            if ([fm fileExistsAtPath:fullPath isDirectory:&isDir] && isDir) {
+                NSArray *contents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
+                for (NSString *item in contents) {
+                    [fm removeItemAtPath:[fullPath stringByAppendingPathComponent:item] error:nil];
+                }
+                if ([fm contentsOfDirectoryAtPath:fullPath error:nil].count == 0) {
+                    [fm removeItemAtPath:fullPath error:nil];
+                }
+            }
         }
     }
-    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية حذفت (عدا Preferences)");
+    NSLog(@"[Injector] 🗑️ App Group مسح بالكامل");
 
-    // 3. ⛔️ لا نمسح Keychain
-    // 4. ⛔️ لا نمسح App Group
-
-    // 5. مسح WebKit
+    // 8. مسح WebKit
     NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
     [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
     NSLog(@"[Injector] 🗑️ WebKit مسح");
 
-    // 6. مسح الكوكيز والكاش
+    // 9. مسح الكوكيز والكاش
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
     NSLog(@"[Injector] 🗑️ الكوكيز والكاش مسحوا");
+}
 
-    // 7. تجديد الموقع، IP، المعرفات (UDID و IDFA)
+// ============================================================
+// MARK: - الإعادة الضبط الكاملة (تُستدعى عند الضغط على الزر)
+// ============================================================
+
+void performFullReset() {
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط الكاملة (مسح كل شيء)");
+
+    // 1. مسح كل شيء (بما في ذلك Keychain و App Group)
+    clearEverything();
+
+    // 2. تجديد الموقع، IP، المعرفات (UDID و IDFA)
     updateAtlantaLocation();
     generateSessionIP();
     generateFakeIdentifiers();
     fetchRealIP();
     NSLog(@"[Injector] 🌐 تم تجديد الموقع، IP، UDID، IDFA");
 
-    // 8. مسح سجل الطلبات
+    // 3. مسح سجل الطلبات
     @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
 
-    // 9. إعادة تشغيل التطبيق
+    // 4. إعادة تشغيل التطبيق
     dispatch_async(dispatch_get_main_queue(), ^{
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ تم"
-                                                                       message:@"تم تغيير جميع قيم NSUserDefaults إلى قيم عشوائية جديدة، وتغيير البصمات.\n(تم الحفاظ على Keychain و App Group).\nسيتم إعادة تشغيل التطبيق الآن."
+                                                                       message:@"تم مسح كل بيانات التطبيق بالكامل مع بقاء الحساب.\nسيتم إعادة تشغيل التطبيق الآن."
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             exit(0);
