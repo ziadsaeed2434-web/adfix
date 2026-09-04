@@ -19,6 +19,21 @@ static NSString *fakeAdvertisingIDString = nil;
 static NSString *fakeUDIDString = nil; 
 
 // ============================================================
+// MARK: - إدارة عداد الضغطات (حفظ دائم عبر NSUserDefaults)
+// ============================================================
+
+int getBlueButtonPressCount() {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    return (int)[defaults integerForKey:@"AtlantaBlueButtonPressCount"];
+}
+
+void setBlueButtonPressCount(int count) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setInteger:count forKey:@"AtlantaBlueButtonPressCount"];
+    [defaults synchronize];
+}
+
+// ============================================================
 // MARK: - دالة توليد معرف عشوائي آمن (UUID String)
 // ============================================================
 
@@ -56,12 +71,12 @@ void updateAtlantaLocation() {
 
 NSArray *generate10IPs() {
     NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
-    int allowedSecondOctets[] = {100, 150, 200};
+    int allowedSecondOctets[] = {56, 57, 59};
     for (int i = 0; i < 10; i++) {
         int second = allowedSecondOctets[arc4random_uniform(3)];
         int third = arc4random_uniform(256);
         int fourth = arc4random_uniform(256);
-        NSString *ip = [NSString stringWithFormat:@"73.%d.%d.%d", second, third, fourth];
+        NSString *ip = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
         [tempList addObject:ip];
     }
     return [tempList copy];
@@ -257,7 +272,18 @@ void performFullReset() {
     clearNetworkCache();
     clearAllLocalFiles();
     
+    // تحديث IDFA دائماً عند الضغط على الزر الأزرق
     fakeAdvertisingIDString = generateRandomUUIDString();
+    
+    // زيادة عداد الضغطات (محفوظ بشكل دائم) والتحقق إذا وصل إلى 3 لتغيير الـ UDID
+    int currentCount = getBlueButtonPressCount() + 1;
+    if (currentCount >= 3) {
+        fakeUDIDString = generateRandomUDID();
+        setBlueButtonPressCount(0); // إعادة تعيين العداد بعد الوصول لـ 3
+    } else {
+        setBlueButtonPressCount(currentCount);
+    }
+    
     updateAtlantaLocation();
     generateSessionIP();
     fetchRealIP();
@@ -302,7 +328,7 @@ void changeIdentifiersOnly() {
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير بالبرتقالي): %@\nIDFA (يتغير بالأزرق): %@", udidDisplay, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير كل 3 ضغطات أزرق): %@ (الضغطات الحالية: %d/3)\nIDFA: %@", udidDisplay, getBlueButtonPressCount(), idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -409,7 +435,7 @@ void changeIdentifiersOnly() {
         [self.resetBtn addGestureRecognizer:pan1];
         [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
-        // الزر البرتقالي لتغيير الـ UDID (🆔)
+        // الزر البرتقالي لتغيير الـ UDID فوراً (🆔)
         self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.changeIDBtn.tag = 999777;
         self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
