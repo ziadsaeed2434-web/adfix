@@ -14,8 +14,9 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
-// المعرفات الوهمية (فقط IDFA، وليس UDID)
+// المعرفات الثابتة والوهمية
 static NSUUID *fakeAdvertisingID = nil;
+static NSString *spoofedRealUDID = nil; // UDID مزيف بصيغة حقيقية وثابت
 
 // ============================================================
 // MARK: - دوال مساعدة
@@ -31,28 +32,38 @@ void updateAtlantaLocation() {
 }
 
 // ============================================================
-// MARK: - نظام منع تكرار أو استخدام الـ IPs السابقة (ذاكرة دائمة)
+// MARK: - توليد وحفظ UDID مزيف بصيغة حقيقية وثابتة
 // ============================================================
 
-NSString *getHistoryFilePath() {
-    NSString *tmpDir = NSTemporaryDirectory();
-    return [tmpDir stringByAppendingPathComponent:@"used_ips_history.plist"];
-}
-
-NSMutableSet *getUsedIPsHistory() {
-    NSString *path = getHistoryFilePath();
-    NSArray *savedArray = [NSArray arrayWithContentsOfFile:path];
-    if (savedArray) {
-        return [NSMutableSet setWithArray:savedArray];
+void setupSpoofedRealUDID() {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *savedUDID = [defaults stringForKey:@"SpoofedRealUDID_Key"];
+    
+    if (savedUDID && savedUDID.length > 0) {
+        spoofedRealUDID = savedUDID;
+    } else {
+        // توليد UUID جديد كلياً بصيغة حقيقية متوافقة مع أجهزة آيفون وثباته للأبد
+        spoofedRealUDID = [[NSUUID UUID] UUIDString];
+        [defaults setObject:spoofedRealUDID forKey:@"SpoofedRealUDID_Key"];
+        [defaults synchronize];
     }
-    return [NSMutableSet set];
 }
 
-void markIPAsUsed(NSString *ip) {
-    if (!ip) return;
-    NSMutableSet *history = getUsedIPsHistory();
-    [history addObject:ip];
-    [history.allObjects writeToFile:getHistoryFilePath() atomically:YES];
+// ============================================================
+// MARK: - توليد 10 IPs من النطاقات: 172.56.x.x و 172.57.x.x و 172.59.x.x
+// ============================================================
+
+NSArray *generate10IPs() {
+    NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
+    int allowedSecondOctets[] = {56, 57, 59};
+    for (int i = 0; i < 10; i++) {
+        int second = allowedSecondOctets[arc4random_uniform(3)];
+        int third = arc4random_uniform(256);
+        int fourth = arc4random_uniform(256);
+        NSString *ip = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
+        [tempList addObject:ip];
+    }
+    return [tempList copy];
 }
 
 // ============================================================
@@ -88,7 +99,7 @@ BOOL verifyIPQuality(NSString *ip) {
     NSString *as = json[@"as"] ?: @"";
     NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", org, isp, as];
     
-    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH", @"Proxy", @"VPN"];
+    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
     for (NSString *keyword in badKeywords) {
         if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
             return NO;
@@ -98,54 +109,30 @@ BOOL verifyIPQuality(NSString *ip) {
 }
 
 // ============================================================
-// MARK: - توليد IP سكني فريد 100% (من النطاقات الموثقة وغير مستخدم مسبقاً)
+// MARK: - توليد IP مع التحقق (اختيار أول IP سكني)
 // ============================================================
 
-NSString *generateUniqueResidentialIP() {
-    NSMutableSet *usedIPs = getUsedIPsHistory();
+void generateSessionIP() {
+    NSArray *candidates = generate10IPs();
+    NSString *selectedIP = nil;
     
-    // النطاقات الفرعية المعتمدة (تتضمن 172.56, 172.57, 172.59 ونطاقات إضافية نشطة)
-    NSArray *subnets = @[
-        @{@"prefix": @"172.56.", @"min": @16, @"max": @31},
-        @{@"prefix": @"172.57.", @"min": @0,  @"max": @63},
-        @{@"prefix": @"172.59.", @"min": @128, @"max": @191},
-        @{@"prefix": @"12.144.",  @"min": @0,  @"max": @63},
-        @{@"prefix": @"32.130.",  @"min": @0,  @"max": @127}
-    ];
-    
-    int maxAttempts = 40;
-    for (int attempt = 0; attempt < maxAttempts; attempt++) {
-        NSDictionary *subnet = subnets[arc4random_uniform((uint32_t)subnets.count)];
-        NSString *prefix = subnet[@"prefix"];
-        int minThird = [subnet[@"min"] intValue];
-        int maxThird = [subnet[@"max"] intValue];
-        
-        int third = minThird + arc4random_uniform(maxThird - minThird + 1);
-        int fourth = 1 + arc4random_uniform(254); // تجنب .0 و .255 لتلافي عناوين الشبكة الميتة
-        
-        NSString *candidateIP = [NSString stringWithFormat:@"%@%d.%d", prefix, third, fourth];
-        
-        // التحقق من عدم تكراره ومن جودته السكنية
-        if (![usedIPs containsObject:candidateIP]) {
-            if (verifyIPQuality(candidateIP)) {
-                markIPAsUsed(candidateIP);
-                return candidateIP;
-            }
+    for (NSString *ip in candidates) {
+        if (verifyIPQuality(ip)) {
+            selectedIP = ip;
+            NSLog(@"[Injector] ✅ تم اختيار IP سكني: %@", ip);
+            break;
         }
     }
     
-    // Fallback احتياطي في حال استنفاد المحاولات
-    NSString *fallbackIP = [NSString stringWithFormat:@"172.56.%d.%d", 20 + arc4random_uniform(5), 1 + arc4random_uniform(254)];
-    markIPAsUsed(fallbackIP);
-    return fallbackIP;
+    if (!selectedIP) {
+        selectedIP = candidates.lastObject;
+        NSLog(@"[Injector] ⚠️ لم نجد IP سكنياً، نستخدم الأخير: %@", selectedIP);
+    }
+    
+    sessionFakeIP = selectedIP;
 }
 
-void generateSessionIP() {
-    sessionFakeIP = generateUniqueResidentialIP();
-    NSLog(@"[Injector] ✅ تم اعتماد IP الجلسة السكني والفريد: %@", sessionFakeIP);
-}
-
-// توليد IDFA وهمي فقط (بدون تغيير UDID)
+// توليد IDFA وهمي فقط
 void generateFakeAdvertisingID() {
     fakeAdvertisingID = [NSUUID UUID];
 }
@@ -238,7 +225,7 @@ void clearKeychainKeepingAccount() {
 }
 
 // ============================================================
-// MARK: - مسح جميع الكوكيز (شبكة ومحلية)
+// MARK: - مسح جميع الكوكيز
 // ============================================================
 
 void clearAllCookies() {
@@ -247,10 +234,11 @@ void clearAllCookies() {
         [cookieStorage deleteCookie:cookie];
     }
     
+    NSSet *dataTypes = [NSSet setWithObject:WKWebsiteDataTypeCookies];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+    
     NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes
-                                               modifiedSince:[NSDate distantPast]
-                                           completionHandler:^{}];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
 }
 
 // ============================================================
@@ -264,7 +252,7 @@ void clearNetworkCache() {
 }
 
 // ============================================================
-// MARK: - مسح جميع الملفات المحلية (مع الإبقاء على Preferences للمحافظة على NSUserDefaults وسجل الـ IPs)
+// MARK: - مسح الملفات المحلية
 // ============================================================
 
 void clearAllLocalFiles() {
@@ -283,9 +271,7 @@ void clearAllLocalFiles() {
                     NSString *prefPath = [dir stringByAppendingPathComponent:item];
                     NSArray *prefItems = [fm contentsOfDirectoryAtPath:prefPath error:nil];
                     for (NSString *prefFile in prefItems) {
-                        if ([prefFile containsString:@"com.codebysms"] ||
-                            [prefFile containsString:@"codebysms"] ||
-                            [prefFile containsString:@"com.supersonic"] ||
+                        if ([prefFile containsString:@"com.supersonic"] ||
                             [prefFile containsString:@"com.inmobi"] ||
                             [prefFile containsString:@"com.applovin"] ||
                             [prefFile containsString:@"com.unity"] ||
@@ -294,19 +280,12 @@ void clearAllLocalFiles() {
                             [prefFile containsString:@"com.amplitude"] ||
                             [prefFile containsString:@"io.appmetrica"] ||
                             [prefFile containsString:@"vungle"] ||
-                            [prefFile containsString:@"com.crashlytics"] ||
-                            [prefFile containsString:@"APM"] ||
-                            [prefFile containsString:@"IABTCF"] ||
-                            [prefFile containsString:@"GPP"] ||
-                            [prefFile containsString:@"Cmp"]) {
+                            [prefFile containsString:@"com.crashlytics"]) {
                             [fm removeItemAtPath:[prefPath stringByAppendingPathComponent:prefFile] error:nil];
                         }
                     }
                 } else {
-                    // استثناء ملف سجل الـ IPs لئلا يُفقد سجل منع التكرار
-                    if (![item isEqualToString:@"used_ips_history.plist"]) {
-                        [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
-                    }
+                    [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
                 }
             }
         }
@@ -324,7 +303,7 @@ void performFullReset() {
     clearAllLocalFiles();
     
     updateAtlantaLocation();
-    generateSessionIP();   // توليد IP جديد فريد وغير مستخدم مسبقاً
+    generateSessionIP();
     generateFakeAdvertisingID();
     fetchRealIP();
     
@@ -349,12 +328,12 @@ void performFullReset() {
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
     
-    NSString *udidStr = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
+    NSString *udidStr = spoofedRealUDID ?: @"غير محدد";
     NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (فريد وسكني مُتحقق منه):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (حقيقي): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (سكني مُتحقق منه):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (مزيف بصيغة حقيقية وثابت): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -456,7 +435,6 @@ void performFullReset() {
         
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
-        
         [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.floatingBtn];
@@ -482,8 +460,8 @@ void performFullReset() {
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
-    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم التجديد"
-                                                                  message:[NSString stringWithFormat:@"تم مسح البيانات وتوليد IP سكني جديد فريد:\n%@", sessionFakeIP]
+    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
+                                                                  message:@"تم مسح البيانات بنجاح مع الحفاظ على الحساب وثبات الـ UDID المزيف الحقيقي."
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
     [rootVC presentViewController:done animated:YES completion:nil];
@@ -492,12 +470,13 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - الـ Hooks باستخدام %hook
+// MARK: - الـ Hooks
 // ============================================================
 
 %ctor {
+    setupSpoofedRealUDID(); // تهيئة وتثبيت الـ UDID المزيف بصيغة حقيقية
     updateAtlantaLocation();
-    generateSessionIP();   // توليد IP فريد مع التحقق من السكنية ومنع التكرار
+    generateSessionIP();
     generateFakeAdvertisingID();
     fetchRealIP();
     
@@ -517,6 +496,16 @@ void performFullReset() {
 - (CLLocation *)location {
     updateAtlantaLocation();
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
+}
+%end
+
+// ===== Hook لـ UIDevice لفرض الـ UDID المزيف بصيغة حقيقية وثابتة =====
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
+    if (spoofedRealUDID) {
+        return [[NSUUID alloc] initWithUUIDString:spoofedRealUDID];
+    }
+    return %orig;
 }
 %end
 
@@ -552,7 +541,6 @@ void performFullReset() {
 }
 %end
 
-// ===== Hook ASIdentifierManager فقط لتغيير IDFA =====
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     if (fakeAdvertisingID) {
