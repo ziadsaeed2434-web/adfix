@@ -56,12 +56,12 @@ void updateAtlantaLocation() {
 
 NSArray *generate10IPs() {
     NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
-    int allowedSecondOctets[] = {56, 57, 59};
+    int allowedSecondOctets[] = {100, 150, 200};
     for (int i = 0; i < 10; i++) {
         int second = allowedSecondOctets[arc4random_uniform(3)];
         int third = arc4random_uniform(256);
         int fourth = arc4random_uniform(256);
-        NSString *ip = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
+        NSString *ip = [NSString stringWithFormat:@"73.%d.%d.%d", second, third, fourth];
         [tempList addObject:ip];
     }
     return [tempList copy];
