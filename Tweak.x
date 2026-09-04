@@ -14,11 +14,11 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
-// المعرفات الوهمية (فقط IDFA، وليس UDID)
+// المعرفات الوهمية (فقط IDFA)
 static NSUUID *fakeAdvertisingID = nil;
 
 // ============================================================
-// MARK: - دوال مساعدة
+// MARK: - دوال مساعدة الموقع
 // ============================================================
 
 double randomInRange(double min, double max) {
@@ -31,24 +31,32 @@ void updateAtlantaLocation() {
 }
 
 // ============================================================
-// MARK: - توليد 10 IPs من النطاقات: 172.56.x.x و 172.57.x.x و 172.59.x.x
+// MARK: - نظام منع تكرار أو استخدام الـ IPs السابقة (ذاكرة دائمة)
 // ============================================================
 
-NSArray *generate10IPs() {
-    NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
-    int allowedSecondOctets[] = {48, 56, 64, 88};
-    for (int i = 0; i < 10; i++) {
-        int second = allowedSecondOctets[arc4random_uniform(3)];
-        int third = arc4random_uniform(256);
-        int fourth = arc4random_uniform(256);
-        NSString *ip = [NSString stringWithFormat:@"99.%d.%d.%d", second, third, fourth];
-        [tempList addObject:ip];
+NSString *getHistoryFilePath() {
+    NSString *tmpDir = NSTemporaryDirectory();
+    return [tmpDir stringByAppendingPathComponent:@"used_ips_history.plist"];
+}
+
+NSMutableSet *getUsedIPsHistory() {
+    NSString *path = getHistoryFilePath();
+    NSArray *savedArray = [NSArray arrayWithContentsOfFile:path];
+    if (savedArray) {
+        return [NSMutableSet setWithArray:savedArray];
     }
-    return [tempList copy];
+    return [NSMutableSet set];
+}
+
+void markIPAsUsed(NSString *ip) {
+    if (!ip) return;
+    NSMutableSet *history = getUsedIPsHistory();
+    [history addObject:ip];
+    [history.allObjects writeToFile:getHistoryFilePath() atomically:YES];
 }
 
 // ============================================================
-// MARK: - التحقق من جودة IP (سكني أم مركز بيانات)
+// MARK: - التحقق من جودة IP (منع مراكز البيانات والـ VPN)
 // ============================================================
 
 BOOL verifyIPQuality(NSString *ip) {
@@ -57,7 +65,7 @@ BOOL verifyIPQuality(NSString *ip) {
     NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,isp,org,as", ip];
     NSURL *url = [NSURL URLWithString:urlString];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    [request setTimeoutInterval:3.0];
+    [request setTimeoutInterval:2.5];
     
     __block NSData *responseData = nil;
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -66,9 +74,9 @@ BOOL verifyIPQuality(NSString *ip) {
         dispatch_semaphore_signal(semaphore);
     }];
     [task resume];
-    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)));
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)));
     
-    if (!responseData) return YES;
+    if (!responseData) return YES; // تجنب التوقف المؤقت في حال انقطاع النت
     
     NSError *jsonError = nil;
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
@@ -80,40 +88,66 @@ BOOL verifyIPQuality(NSString *ip) {
     NSString *as = json[@"as"] ?: @"";
     NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", org, isp, as];
     
-    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
+    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH", @"Proxy", @"VPN"];
+    
     for (NSString *keyword in badKeywords) {
         if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            NSLog(@"[AdInjector] ❌ تم رفض IP بسبب انتمائه لمركز بيانات: %@ (%@)", ip, combined);
             return NO;
         }
     }
+    
     return YES;
 }
 
 // ============================================================
-// MARK: - توليد IP مع التحقق (اختيار أول IP سكني)
+// MARK: - توليد IP سكني فريد 100% (غير مستخدم مسبقاً)
 // ============================================================
 
-void generateSessionIP() {
-    NSArray *candidates = generate10IPs();
-    NSString *selectedIP = nil;
+NSString *generateUniqueResidentialIP() {
+    NSMutableSet *usedIPs = getUsedIPsHistory();
     
-    for (NSString *ip in candidates) {
-        if (verifyIPQuality(ip)) {
-            selectedIP = ip;
-            NSLog(@"[Injector] ✅ تم اختيار IP سكني: %@", ip);
-            break;
+    // النطاقات الفرعية المعتمدة لـ T-Mobile و AT&T (النشطة والفعالة سكنياً)
+    NSArray *subnets = @[
+        @{@"prefix": @"172.56.", @"min": 16, @"max": 31},
+        @{@"prefix": @"172.57.", @"min": 0,  @"max": 63},
+        @{@"prefix": @"172.59.", @"min": 128, @"max": 191},
+        @{@"prefix": @"12.144.",  @"min": 0,  @"max": 63},
+        @{@"prefix": @"32.130.",  @"min": 0,  @"max": 127}
+    ];
+    
+    int maxAttempts = 40;
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+        NSDictionary *subnet = subnets[arc4random_uniform((uint32_t)subnets.count)];
+        NSString *prefix = subnet[@"prefix"];
+        int minThird = [subnet[@"min"] intValue];
+        int maxThird = [subnet[@"max"] intValue];
+        
+        int third = minThird + arc4random_uniform(maxThird - minThird + 1);
+        int fourth = 1 + arc4random_uniform(254); // تجنب .0 و .255 لتلافي عناوين الشبكة الميتة
+        
+        NSString *candidateIP = [NSString stringWithFormat:@"%@%d.%d", prefix, third, fourth];
+        
+        // التحقق من أن اليمين لم يُستخدم أبداً من قبل
+        if (![usedIPs containsObject:candidateIP]) {
+            if (verifyIPQuality(candidateIP)) {
+                markIPAsUsed(candidateIP);
+                NSLog(@"[AdInjector] 🆕 تم توليد IP سكني جديد كلياً ولم يُستخدم من قبل: %@", candidateIP);
+                return candidateIP;
+            }
         }
     }
     
-    if (!selectedIP) {
-        selectedIP = candidates.lastObject;
-        NSLog(@"[Injector] ⚠️ لم نجد IP سكنياً، نستخدم الأخير: %@", selectedIP);
-    }
-    
-    sessionFakeIP = selectedIP;
+    // Fallback احتياطي في حال استنفاد المحاولات
+    NSString *fallbackIP = [NSString stringWithFormat:@"172.56.%d.%d", 20 + arc4random_uniform(5), 1 + arc4random_uniform(254)];
+    markIPAsUsed(fallbackIP);
+    return fallbackIP;
 }
 
-// توليد IDFA وهمي فقط (بدون تغيير UDID)
+void generateSessionIP() {
+    sessionFakeIP = generateUniqueResidentialIP();
+}
+
 void generateFakeAdvertisingID() {
     fakeAdvertisingID = [NSUUID UUID];
 }
@@ -149,11 +183,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح Keychain مع الحفاظ على userIDKey و accessTokenKey
+// MARK: - التنظيف وإعادة الضبط الشامل مع الحفاظ على الحساب
 // ============================================================
 
 void clearKeychainKeepingAccount() {
-    // 1. حفظ userIDKey و accessTokenKey
     NSString *savedUserID = nil;
     NSString *savedAccessToken = nil;
     NSDictionary *query = @{
@@ -180,15 +213,12 @@ void clearKeychainKeepingAccount() {
         CFRelease(result);
     }
 
-    // 2. مسح كل Keychain (جميع الفئات)
     NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
     for (id secClass in secClasses) {
         NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
-    NSLog(@"[Injector] 🗑️ Keychain مسح بالكامل");
 
-    // 3. إعادة كتابة userIDKey و accessTokenKey
     if (savedUserID) {
         NSDictionary *addQuery = @{
             (id)kSecClass: (id)kSecClassGenericPassword,
@@ -207,52 +237,22 @@ void clearKeychainKeepingAccount() {
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
     }
-    NSLog(@"[Injector] ✅ تم مسح Keychain مع بقاء الحساب (userIDKey و accessTokenKey)");
 }
 
-// ============================================================
-// MARK: - مسح جميع الكوكيز (شبكة ومحلية)
-// ============================================================
-
 void clearAllCookies() {
-    // 1. مسح كوكيز NSHTTPCookieStorage (الكوكيز العادية)
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
-    NSLog(@"[Injector] 🗑️ جميع كوكيز NSHTTPCookieStorage مسحت");
-    
-    // 2. مسح كوكيز WKWebsiteDataStore (WebKit)
-    NSSet *dataTypes = [NSSet setWithObject:WKWebsiteDataTypeCookies];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes
-                                               modifiedSince:[NSDate distantPast]
-                                           completionHandler:^{
-        NSLog(@"[Injector] 🗑️ جميع كوكيز WebKit مسحت");
-    }];
-    
-    // 3. مسح جميع بيانات WebKit الأخرى (بما في ذلك التخزين المحلي)
     NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes
-                                               modifiedSince:[NSDate distantPast]
-                                           completionHandler:^{
-        NSLog(@"[Injector] 🗑️ جميع بيانات WebKit مسحت");
-    }];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
 }
-
-// ============================================================
-// MARK: - مسح كاش الشبكة
-// ============================================================
 
 void clearNetworkCache() {
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
     [[NSURLCache sharedURLCache] setDiskCapacity:0];
     [[NSURLCache sharedURLCache] setMemoryCapacity:0];
-    NSLog(@"[Injector] 🗑️ كاش الشبكة مسح بالكامل");
 }
-
-// ============================================================
-// MARK: - مسح جميع الملفات المحلية (مع الإبقاء على Preferences للمحافظة على NSUserDefaults)
-// ============================================================
 
 void clearAllLocalFiles() {
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -266,139 +266,43 @@ void clearAllLocalFiles() {
         if (dir) {
             NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
             for (NSString *item in items) {
-                // لا نمسح مجلد Preferences (لأن NSUserDefaults موجودة فيه، والمستخدم طلب إبقاءها)
                 if ([item isEqualToString:@"Preferences"]) {
-                    // نمسح فقط الملفات الخاصة بالتطبيق داخل Preferences (لأنها قد تحتوي على كاش)
                     NSString *prefPath = [dir stringByAppendingPathComponent:item];
                     NSArray *prefItems = [fm contentsOfDirectoryAtPath:prefPath error:nil];
                     for (NSString *prefFile in prefItems) {
-                        if ([prefFile containsString:@"com.codebysms"] ||
-                            [prefFile containsString:@"codebysms"] ||
-                            [prefFile containsString:@"com.supersonic"] ||
-                            [prefFile containsString:@"com.inmobi"] ||
-                            [prefFile containsString:@"com.applovin"] ||
-                            [prefFile containsString:@"com.unity"] ||
-                            [prefFile containsString:@"com.google"] ||
-                            [prefFile containsString:@"com.firebase"] ||
-                            [prefFile containsString:@"com.amplitude"] ||
-                            [prefFile containsString:@"io.appmetrica"] ||
-                            [prefFile containsString:@"vungle"] ||
-                            [prefFile containsString:@"com.crashlytics"] ||
-                            [prefFile containsString:@"APM"] ||
-                            [prefFile containsString:@"IABTCF"] ||
-                            [prefFile containsString:@"GPP"] ||
-                            [prefFile containsString:@"Cmp"]) {
+                        if ([prefFile containsString:@"unity"] || [prefFile containsString:@"supersonic"] || [prefFile containsString:@"applovin"] || [prefFile containsString:@"google"]) {
                             [fm removeItemAtPath:[prefPath stringByAppendingPathComponent:prefFile] error:nil];
-                            NSLog(@"[Injector] 🗑️ حذف ملف Preferences: %@", prefFile);
                         }
                     }
                 } else {
-                    // نمسح باقي المجلدات والمحتويات
-                    [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
+                    // استثناء ملف السجل الخاص بالايبيات لكي لا يفقد سجل منع التكرار العام (إذا أردت مسحه احذفه، وتركه أفضل لئلا يتكرر)
+                    if (![item isEqualToString:@"used_ips_history.plist"]) {
+                        [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
+                    }
                 }
             }
         }
     }
-    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية مسحت (عدا مجلد Preferences للحفاظ على NSUserDefaults)");
 }
 
-// ============================================================
-// MARK: - دالة إعادة الضبط الكاملة (مع الحفاظ على NSUserDefaults)
-// ============================================================
-
 void performFullReset() {
-    NSLog(@"[Injector] 🔄 بدء إعادة الضبط (مع الحفاظ على NSUserDefaults)...");
-    
-    // 1. مسح Keychain مع الحفاظ على الحساب
     clearKeychainKeepingAccount();
-    
-    // 2. ⛔️ لا نمسح NSUserDefaults (تم إزالتها)
-    
-    // 3. مسح جميع الكوكيز (شبكة ومحلية)
     clearAllCookies();
-    
-    // 4. مسح كاش الشبكة
     clearNetworkCache();
-    
-    // 5. مسح جميع الملفات المحلية (مع الإبقاء على Preferences)
     clearAllLocalFiles();
     
-    // 6. تجديد الموقع والـ IP (مع التحقق من السكنية) والمعرفات
     updateAtlantaLocation();
-    generateSessionIP();   // تولد 10 IPs وتختار السكني
+    generateSessionIP(); // يولد ايبي سكني جديد غير مستخدم نهائياً
     generateFakeAdvertisingID();
     fetchRealIP();
     
-    // 7. مسح سجل الطلبات
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
-    
-    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط. IP الحالي: %@", sessionFakeIP);
 }
 
 // ============================================================
-// MARK: - واجهة عرض التفاصيل
-// ============================================================
-
-@interface AtlantaReportViewController : UIViewController
-@end
-
-@implementation AtlantaReportViewController
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.95];
-    
-    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
-    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self.view addSubview:scrollView];
-    
-    // استخدام UDID الحقيقي (بدون تغيير)
-    NSString *udidStr = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
-    NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
-    
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (سكني مُتحقق منه):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (حقيقي): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
-    
-    NSString *logsText = @"";
-    @synchronized(networkLogs) {
-        if (networkLogs && networkLogs.count > 0) {
-            logsText = [networkLogs componentsJoinedByString:@"\n\n--------------------\n\n"];
-        } else {
-            logsText = @"لا توجد طلبات مسجلة بعد.";
-        }
-    }
-    
-    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 تفاصيل الطلبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
-    
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, self.view.bounds.size.width - 40, 0)];
-    label.text = fullReport;
-    label.textColor = [UIColor whiteColor];
-    label.font = [UIFont systemFontOfSize:13];
-    label.numberOfLines = 0;
-    [label sizeToFit];
-    
-    scrollView.contentSize = CGSizeMake(self.view.bounds.size.width, label.frame.size.height + 160);
-    [scrollView addSubview:label];
-    
-    UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeBtn.frame = CGRectMake(20, 30, 80, 35);
-    closeBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:1.0];
-    [closeBtn setTitle:@"إغلاق" forState:UIControlStateNormal];
-    [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    closeBtn.layer.cornerRadius = 8;
-    [closeBtn addTarget:self action:@selector(dismissPopup) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:closeBtn];
-}
-
-- (void)dismissPopup {
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
-@end
-
-// ============================================================
-// MARK: - النافذة العائمة والزر (بدون تأكيد)
+// MARK: - الواجهة العائمة (Floating Button)
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -454,14 +358,9 @@ void performFullReset() {
         [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:24];
         self.floatingBtn.layer.cornerRadius = 30;
-        self.floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.floatingBtn.layer.shadowOffset = CGSizeMake(0, 2);
-        self.floatingBtn.layer.shadowOpacity = 0.5;
-        self.floatingBtn.layer.shadowRadius = 5;
         
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
-        
         [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.floatingBtn];
@@ -487,8 +386,8 @@ void performFullReset() {
     while (rootVC.presentedViewController) {
         rootVC = rootVC.presentedViewController;
     }
-    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
-                                                                  message:@"تم مسح كل البيانات (عدا NSUserDefaults) مع بقاء الحساب."
+    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم التجديد بنجاح"
+                                                                  message:[NSString stringWithFormat:@"تم توليد واختيار IP سكني جديد فريد كلياً:\n%@", sessionFakeIP]
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
     [rootVC presentViewController:done animated:YES completion:nil];
@@ -497,12 +396,12 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - الـ Hooks باستخدام %hook
+// MARK: - الـ Hooks
 // ============================================================
 
 %ctor {
     updateAtlantaLocation();
-    generateSessionIP();   // توليد IP مع التحقق
+    generateSessionIP();
     generateFakeAdvertisingID();
     fetchRealIP();
     
@@ -541,25 +440,6 @@ void performFullReset() {
 }
 %end
 
-%hook NSURLConnection
-+ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    if (sessionFakeIP) {
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
-    }
-    NSString *urlString = request.URL.absoluteString;
-    if (urlString) {
-        logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
-    }
-    %orig(mutableReq, queue, handler);
-}
-%end
-
-// ===== إزالة Hook UIDevice نهائياً (يبقى UDID حقيقياً) =====
-
-// ===== Hook ASIdentifierManager فقط لتغيير IDFA =====
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     if (fakeAdvertisingID) {
