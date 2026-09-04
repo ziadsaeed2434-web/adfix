@@ -14,47 +14,8 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
-// المعرفات المزيفة
-static NSString *fakeAdvertisingIDString = nil;
-static NSString *fakeUDIDString = nil; 
-
-// ============================================================
-// MARK: - إدارة عداد الضغطات (حفظ دائم عبر NSUserDefaults)
-// ============================================================
-
-int getBlueButtonPressCount() {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    return (int)[defaults integerForKey:@"AtlantaBlueButtonPressCount"];
-}
-
-void setBlueButtonPressCount(int count) {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    [defaults setInteger:count forKey:@"AtlantaBlueButtonPressCount"];
-    [defaults synchronize];
-}
-
-// ============================================================
-// MARK: - دالة توليد معرف عشوائي آمن (UUID String)
-// ============================================================
-
-NSString *generateRandomUUIDString() {
-    return [[NSUUID UUID] UUIDString];
-}
-
-NSString *generateRandomUDID() {
-    NSString *letters = @"0123456789abcdef";
-    NSMutableString *randomHex1 = [NSMutableString stringWithCapacity:8];
-    NSMutableString *randomHex2 = [NSMutableString stringWithCapacity:12];
-    
-    for (int i = 0; i < 8; i++) {
-        [randomHex1 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
-    }
-    for (int i = 0; i < 12; i++) {
-        [randomHex2 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
-    }
-    
-    return [NSString stringWithFormat:@"00008130-%@-%@", randomHex1, randomHex2];
-}
+// المعرفات الوهمية (فقط IDFA، وليس UDID)
+static NSUUID *fakeAdvertisingID = nil;
 
 // ============================================================
 // MARK: - دوال مساعدة
@@ -69,6 +30,10 @@ void updateAtlantaLocation() {
     currentLon = randomInRange(-84.4500, -84.3500);
 }
 
+// ============================================================
+// MARK: - توليد 10 IPs من النطاقات: 172.56.x.x و 172.57.x.x و 172.59.x.x
+// ============================================================
+
 NSArray *generate10IPs() {
     NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
     int allowedSecondOctets[] = {56, 57, 59};
@@ -81,6 +46,10 @@ NSArray *generate10IPs() {
     }
     return [tempList copy];
 }
+
+// ============================================================
+// MARK: - التحقق من جودة IP (سكني أم مركز بيانات)
+// ============================================================
 
 BOOL verifyIPQuality(NSString *ip) {
     if (!ip || ip.length == 0) return NO;
@@ -120,6 +89,10 @@ BOOL verifyIPQuality(NSString *ip) {
     return YES;
 }
 
+// ============================================================
+// MARK: - توليد IP مع التحقق (اختيار أول IP سكني)
+// ============================================================
+
 void generateSessionIP() {
     NSArray *candidates = generate10IPs();
     NSString *selectedIP = nil;
@@ -127,15 +100,22 @@ void generateSessionIP() {
     for (NSString *ip in candidates) {
         if (verifyIPQuality(ip)) {
             selectedIP = ip;
+            NSLog(@"[Injector] ✅ تم اختيار IP سكني: %@", ip);
             break;
         }
     }
     
     if (!selectedIP) {
         selectedIP = candidates.lastObject;
+        NSLog(@"[Injector] ⚠️ لم نجد IP سكنياً، نستخدم الأخير: %@", selectedIP);
     }
     
     sessionFakeIP = selectedIP;
+}
+
+// توليد IDFA وهمي فقط (بدون تغيير UDID)
+void generateFakeAdvertisingID() {
+    fakeAdvertisingID = [NSUUID UUID];
 }
 
 void fetchRealIP() {
@@ -169,7 +149,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح Keychain مع الحفاظ على الحساب
+// MARK: - مسح Keychain مع الحفاظ على userIDKey و accessTokenKey
 // ============================================================
 
 void clearKeychainKeepingAccount() {
@@ -204,6 +184,7 @@ void clearKeychainKeepingAccount() {
         NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
         SecItemDelete((CFDictionaryRef)deleteQuery);
     }
+    NSLog(@"[Injector] 🗑️ Keychain مسح بالكامل");
 
     if (savedUserID) {
         NSDictionary *addQuery = @{
@@ -223,26 +204,49 @@ void clearKeychainKeepingAccount() {
         };
         SecItemAdd((CFDictionaryRef)addQuery, NULL);
     }
+    NSLog(@"[Injector] ✅ تم مسح Keychain مع بقاء الحساب (userIDKey و accessTokenKey)");
 }
+
+// ============================================================
+// MARK: - مسح جميع الكوكيز (شبكة ومحلية)
+// ============================================================
 
 void clearAllCookies() {
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
+    NSLog(@"[Injector] 🗑️ جميع كوكيز NSHTTPCookieStorage مسحت");
     
     NSSet *dataTypes = [NSSet setWithObject:WKWebsiteDataTypeCookies];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes
+                                               modifiedSince:[NSDate distantPast]
+                                           completionHandler:^{
+        NSLog(@"[Injector] 🗑️ جميع كوكيز WebKit مسحت");
+    }];
     
     NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes
+                                               modifiedSince:[NSDate distantPast]
+                                           completionHandler:^{
+        NSLog(@"[Injector] 🗑️ جميع بيانات WebKit مسحت");
+    }];
 }
+
+// ============================================================
+// MARK: - مسح كاش الشبكة
+// ============================================================
 
 void clearNetworkCache() {
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
     [[NSURLCache sharedURLCache] setDiskCapacity:0];
     [[NSURLCache sharedURLCache] setMemoryCapacity:0];
+    NSLog(@"[Injector] 🗑️ كاش الشبكة مسح بالكامل");
 }
+
+// ============================================================
+// MARK: - مسح جميع الملفات المحلية
+// ============================================================
 
 void clearAllLocalFiles() {
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -256,59 +260,65 @@ void clearAllLocalFiles() {
         if (dir) {
             NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
             for (NSString *item in items) {
-                [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
+                if ([item isEqualToString:@"Preferences"]) {
+                    NSString *prefPath = [dir stringByAppendingPathComponent:item];
+                    NSArray *prefItems = [fm contentsOfDirectoryAtPath:prefPath error:nil];
+                    for (NSString *prefFile in prefItems) {
+                        if ([prefFile containsString:@"com.codebysms"] ||
+                            [prefFile containsString:@"codebysms"] ||
+                            [prefFile containsString:@"com.supersonic"] ||
+                            [prefFile containsString:@"com.inmobi"] ||
+                            [prefFile containsString:@"com.applovin"] ||
+                            [prefFile containsString:@"com.unity"] ||
+                            [prefFile containsString:@"com.google"] ||
+                            [prefFile containsString:@"com.firebase"] ||
+                            [prefFile containsString:@"com.amplitude"] ||
+                            [prefFile containsString:@"io.appmetrica"] ||
+                            [prefFile containsString:@"vungle"] ||
+                            [prefFile containsString:@"com.crashlytics"] ||
+                            [prefFile containsString:@"APM"] ||
+                            [prefFile containsString:@"IABTCF"] ||
+                            [prefFile containsString:@"GPP"] ||
+                            [prefFile containsString:@"Cmp"]) {
+                            [fm removeItemAtPath:[prefPath stringByAppendingPathComponent:prefFile] error:nil];
+                            NSLog(@"[Injector] 🗑️ حذف ملف Preferences: %@", prefFile);
+                        }
+                    }
+                } else {
+                    [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
+                }
             }
         }
     }
+    NSLog(@"[Injector] 🗑️ جميع الملفات المحلية مسحت (عدا مجلد Preferences للحفاظ على NSUserDefaults)");
 }
 
 // ============================================================
-// MARK: - دوال العمليات (الزر الأزرق والبرتقالي)
+// MARK: - دالة إعادة الضبط الكاملة
 // ============================================================
 
 void performFullReset() {
-    // 1. تنفيذ كافة عمليات الحذف والتنظيف الشاملة
+    NSLog(@"[Injector] 🔄 بدء إعادة الضبط (مع الحفاظ على NSUserDefaults)...");
+    
     clearKeychainKeepingAccount();
     clearAllCookies();
     clearNetworkCache();
     clearAllLocalFiles();
     
-    // 2. تحديث معرف الـ IDFA والموقع والـ IP في كل ضغطة
-    fakeAdvertisingIDString = generateRandomUUIDString();
     updateAtlantaLocation();
     generateSessionIP();
+    generateFakeAdvertisingID();
     fetchRealIP();
-    
-    // 3. تغيير الـ UDID تلقائياً كل ضغطتين (مع الحفاظ على العداد دائماً)
-    int currentCount = getBlueButtonPressCount() + 1;
-    if (currentCount >= 2) {
-        fakeUDIDString = generateRandomUDID();
-        setBlueButtonPressCount(0); // تصفير العداد للبدء من جديد
-    } else {
-        setBlueButtonPressCount(currentCount);
-    }
     
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
     
-    // 4. تأخير 5 ثوانٍ ثم إغلاق التطبيق
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        exit(0);
-    });
-}
-
-void changeIdentifiersOnly() {
-    fakeUDIDString = generateRandomUDID();
-    
-    // تأخير 5 ثوانٍ قبل إغلاق التطبيق
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        exit(0);
-    });
+    NSLog(@"[Injector] ✅ اكتملت إعادة الضبط. IP الحالي: %@", sessionFakeIP);
 }
 
 // ============================================================
-// MARK: - واجهة عرض التقارير
+// MARK: - واجهة عرض التفاصيل (محدثة بأمان لتفادي الـ Crash)
 // ============================================================
 
 @interface AtlantaReportViewController : UIViewController
@@ -323,12 +333,16 @@ void changeIdentifiersOnly() {
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
     
-    NSString *idfaStr = fakeAdvertisingIDString ?: [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
-    NSString *udidDisplay = fakeUDIDString ?: @"غير متوفر (لم يتم التغيير بعد)";
+    // استخدام التحقق الآمن لاستخراج الـ UDID والـ IDFA لمنع الانهيار
+    NSUUID *vendorID = [[UIDevice currentDevice] identifierForVendor];
+    NSString *udidStr = vendorID ? [vendorID UUIDString] : @"غير متوفر";
+    
+    NSUUID *idfaObj = fakeAdvertisingID ?: [[ASIdentifierManager sharedManager] advertisingIdentifier];
+    NSString *idfaStr = idfaObj ? [idfaObj UUIDString] : @"غير متوفر";
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير كل ضغطتين أزرق): %@ (الضغطات الحالية: %d/2)\nIDFA: %@", udidDisplay, getBlueButtonPressCount(), idfaStr];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (سكني مُتحقق منه):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (حقيقي): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -367,7 +381,7 @@ void changeIdentifiersOnly() {
 @end
 
 // ============================================================
-// MARK: - الأزرار العائمة وإدارتها
+// MARK: - النافذة العائمة والزر
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -375,9 +389,8 @@ void changeIdentifiersOnly() {
 
 @implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn1 = [self viewWithTag:999888];
-    UIView *btn2 = [self viewWithTag:999777];
-    if ((btn1 && CGRectContainsPoint(btn1.frame, point)) || (btn2 && CGRectContainsPoint(btn2.frame, point))) {
+    UIView *btn = [self viewWithTag:999888];
+    if (btn && CGRectContainsPoint(btn.frame, point)) {
         return YES;
     }
     return NO;
@@ -386,10 +399,9 @@ void changeIdentifiersOnly() {
 
 @interface AtlantaInfoManager : NSObject
 @property (strong, nonatomic) AtlantaWindow *floatingWindow;
-@property (strong, nonatomic) UIButton *resetBtn;
-@property (strong, nonatomic) UIButton *changeIDBtn;
+@property (strong, nonatomic) UIButton *floatingBtn;
 + (instancetype)sharedInstance;
-- (void)setupFloatingButtons;
+- (void)setupFloatingButton;
 @end
 
 @implementation AtlantaInfoManager
@@ -403,7 +415,7 @@ void changeIdentifiersOnly() {
     return sharedInstance;
 }
 
-- (void)setupFloatingButtons {
+- (void)setupFloatingButton {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.floatingWindow) return;
         
@@ -417,44 +429,25 @@ void changeIdentifiersOnly() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // الزر الأزرق (🔄)
-        self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.resetBtn.tag = 999888;
-        self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
-        self.resetBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.resetBtn setTitle:@"🔄" forState:UIControlStateNormal];
-        [self.resetBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.resetBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.resetBtn.layer.cornerRadius = 27.5;
-        self.resetBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.resetBtn.layer.shadowOffset = CGSizeMake(0, 2);
-        self.resetBtn.layer.shadowOpacity = 0.5;
-        self.resetBtn.layer.shadowRadius = 4;
+        self.floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        self.floatingBtn.tag = 999888;
+        self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
+        self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
+        [self.floatingBtn setTitle:@"🔄" forState:UIControlStateNormal];
+        [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:24];
+        self.floatingBtn.layer.cornerRadius = 30;
+        self.floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.floatingBtn.layer.shadowOffset = CGSizeMake(0, 2);
+        self.floatingBtn.layer.shadowOpacity = 0.5;
+        self.floatingBtn.layer.shadowRadius = 5;
         
-        UIPanGestureRecognizer *pan1 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.resetBtn addGestureRecognizer:pan1];
-        [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.floatingBtn addGestureRecognizer:pan];
         
-        // الزر البرتقالي لتغيير الـ UDID فوراً (🆔)
-        self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.changeIDBtn.tag = 999777;
-        self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
-        self.changeIDBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:0.9];
-        [self.changeIDBtn setTitle:@"🆔" forState:UIControlStateNormal];
-        [self.changeIDBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.changeIDBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.changeIDBtn.layer.cornerRadius = 27.5;
-        self.changeIDBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.changeIDBtn.layer.shadowOffset = CGSizeMake(0, 2);
-        self.changeIDBtn.layer.shadowOpacity = 0.5;
-        self.changeIDBtn.layer.shadowRadius = 4;
+        [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
-        UIPanGestureRecognizer *pan2 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.changeIDBtn addGestureRecognizer:pan2];
-        [self.changeIDBtn addTarget:self action:@selector(handleChangeID) forControlEvents:UIControlEventTouchUpInside];
-        
-        [vc.view addSubview:self.resetBtn];
-        [vc.view addSubview:self.changeIDBtn];
+        [vc.view addSubview:self.floatingBtn];
     });
 }
 
@@ -472,37 +465,34 @@ void changeIdentifiersOnly() {
 
 - (void)handleReset {
     performFullReset();
-}
-
-- (void)handleChangeID {
-    changeIdentifiersOnly();
+    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+    UIViewController *rootVC = keyWindow.rootViewController;
+    while (rootVC.presentedViewController) {
+        rootVC = rootVC.presentedViewController;
+    }
+    UIAlertController *done = [UIAlertController alertControllerWithTitle:@"تم"
+                                                                  message:@"تم مسح كل البيانات (عدا NSUserDefaults) مع بقاء الحساب."
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    [done addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+    [rootVC presentViewController:done animated:YES completion:nil];
 }
 
 @end
 
 // ============================================================
-// MARK: - الـ Hooks الآمنة
+// MARK: - الـ Hooks باستخدام %hook
 // ============================================================
 
 %ctor {
     updateAtlantaLocation();
     generateSessionIP();
-    fakeAdvertisingIDString = generateRandomUUIDString();
+    generateFakeAdvertisingID();
     fetchRealIP();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[AtlantaInfoManager sharedInstance] setupFloatingButtons];
+        [[AtlantaInfoManager sharedInstance] setupFloatingButton];
     });
 }
-
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    if (fakeAdvertisingIDString) {
-        return [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString];
-    }
-    return %orig;
-}
-%end
 
 %hook CLLocationManager
 - (void)startUpdatingLocation {
@@ -547,5 +537,14 @@ void changeIdentifiersOnly() {
         logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
     }
     %orig(mutableReq, queue, handler);
+}
+%end
+
+%hook ASIdentifierManager
+- (NSUUID *)advertisingIdentifier {
+    if (fakeAdvertisingID) {
+        return fakeAdvertisingID;
+    }
+    return %orig;
 }
 %end
