@@ -1,4 +1,4 @@
-// Tweak.x - نسخة مستقرة وآمنة للبدء
+// Tweak.x - نسخة مستقلة وآمنة للبدء (بدون %init)
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -46,7 +46,7 @@ static NSUInteger randomInRange(NSUInteger min, NSUInteger max) {
 }
 
 // =====================================================================
-// 1. هوك بسيط لـ UIDevice (تجنب هوكات NSLocale و NSTimeZone)
+// 1. هوك UIDevice (آمن)
 // =====================================================================
 %hook UIDevice
 - (NSString *)name {
@@ -97,12 +97,22 @@ static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, vo
 }
 
 // =====================================================================
-// 3. هوكات الشبكة (مع تأخير)
+// 3. هوكات الشبكة (NSMutableURLRequest, NSURLRequest, NSURLSession)
 // =====================================================================
-static void setupNetworkHooks(void) {
-    %init(NSMutableURLRequest);
-    %init(NSURLRequest);
-    %init(NSURLSession);
+static NSURL *cleanURL(NSURL *originalURL) {
+    if (!originalURL) return nil;
+    NSURLComponents *components = [NSURLComponents componentsWithURL:originalURL resolvingAgainstBaseURL:NO];
+    if (!components) return originalURL;
+    
+    NSArray *trackingParams = @[@"idfa", @"udid", @"adid", @"aaid", @"openudid", @"gps_adid", @"android_id", @"gaid"];
+    NSMutableArray *newQueryItems = [NSMutableArray array];
+    for (NSURLQueryItem *item in components.queryItems) {
+        if (![trackingParams containsObject:item.name.lowercaseString]) {
+            [newQueryItems addObject:item];
+        }
+    }
+    components.queryItems = newQueryItems;
+    return components.URL;
 }
 
 %hook NSMutableURLRequest
@@ -119,6 +129,31 @@ static void setupNetworkHooks(void) {
         value = acceptLanguages[randomInRange(0, acceptLanguagesCount - 1)];
     }
     %orig(value, field);
+}
+- (void)setURL:(NSURL *)url {
+    NSURL *cleaned = cleanURL(url);
+    %orig(cleaned);
+}
+%end
+
+%hook NSURLRequest
+- (NSURL *)URL {
+    NSURL *origURL = %orig;
+    return cleanURL(origURL) ?: origURL;
+}
+%end
+
+%hook NSURLSession
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
+    NSMutableURLRequest *newRequest = [request mutableCopy];
+    [newRequest setURL:cleanURL(request.URL)];
+    if (![request valueForHTTPHeaderField:@"User-Agent"]) {
+        [newRequest setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+    }
+    if (![request valueForHTTPHeaderField:@"Accept-Language"]) {
+        [newRequest setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+    }
+    return %orig(newRequest, completionHandler);
 }
 %end
 
@@ -182,7 +217,7 @@ static void performCleanup(void) {
 }
 
 // =====================================================================
-// 6. التهيئة المبكرة (آمنة)
+// 6. التهيئة المبكرة (بدون %init)
 // =====================================================================
 %ctor {
     generateSessionSeed();
@@ -196,12 +231,11 @@ static void performCleanup(void) {
         if (orig_sysctlbyname) MSHookFunction((void *)orig_sysctlbyname, (void *)hooked_sysctlbyname, NULL);
     }
     
-    // تأخير تهيئة باقي الهوكسات والتنظيف إلى ما بعد الإطلاق
+    // تأخير التنظيف إلى ما بعد إطلاق التطبيق
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
                                                       performCleanup();
-                                                      setupNetworkHooks(); // هوكات الشبكة بعد التهيئة
                                                   }];
 }
