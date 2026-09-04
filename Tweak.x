@@ -15,12 +15,16 @@ static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
 // المعرفات المزيفة
-static NSUUID *fakeAdvertisingID = nil;
-static NSString *fakeUDIDString = nil; // يبقى ثابتاً حتى يتم الضغط على الزر البرتقالي
+static NSString *fakeAdvertisingIDString = nil;
+static NSString *fakeUDIDString = nil; 
 
 // ============================================================
-// MARK: - دالة توليد UDID عشوائي وجديد
+// MARK: - دالة توليد معرف عشوائي آمن (UUID String)
 // ============================================================
+
+NSString *generateRandomUUIDString() {
+    return [[NSUUID UUID] UUIDString];
+}
 
 NSString *generateRandomUDID() {
     NSString *letters = @"0123456789abcdef";
@@ -248,13 +252,12 @@ void clearAllLocalFiles() {
 // ============================================================
 
 void performFullReset() {
-    // الزر الأزرق: تنظيف كامل، تغيير IDFA، موقع جديد، IP جديد (دون المساس بالـ UDID)
     clearKeychainKeepingAccount();
     clearAllCookies();
     clearNetworkCache();
     clearAllLocalFiles();
     
-    fakeAdvertisingID = [NSUUID UUID];
+    fakeAdvertisingIDString = generateRandomUUIDString();
     updateAtlantaLocation();
     generateSessionIP();
     fetchRealIP();
@@ -263,18 +266,17 @@ void performFullReset() {
         [networkLogs removeAllObjects];
     }
     
-    // تأخير 12 ثانية قبل الخروج
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // تأخير 5 ثوانٍ قبل الخروج
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
 }
 
 void changeIdentifiersOnly() {
-    // الزر البرتقالي: توليد UDID عشوائي جديد تماماً عند الضغط فقط
     fakeUDIDString = generateRandomUDID();
     
-    // تأخير 12 ثانية قبل إغلاق التطبيق
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // تأخير 5 ثوانٍ قبل إغلاق التطبيق
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
 }
@@ -295,7 +297,7 @@ void changeIdentifiersOnly() {
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
     
-    NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
+    NSString *idfaStr = fakeAdvertisingIDString ?: [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     NSString *udidDisplay = fakeUDIDString ?: @"غير متوفر (لم يتم التغيير بعد)";
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
@@ -453,13 +455,13 @@ void changeIdentifiersOnly() {
 @end
 
 // ============================================================
-// MARK: - الـ Hooks
+// MARK: - الـ Hooks الآمنة
 // ============================================================
 
 %ctor {
     updateAtlantaLocation();
     generateSessionIP();
-    fakeAdvertisingID = [NSUUID UUID];
+    fakeAdvertisingIDString = generateRandomUUIDString();
     fetchRealIP();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -469,8 +471,8 @@ void changeIdentifiersOnly() {
 
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    if (fakeAdvertisingID) {
-        return fakeAdvertisingID;
+    if (fakeAdvertisingIDString) {
+        return [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString];
     }
     return %orig;
 }
