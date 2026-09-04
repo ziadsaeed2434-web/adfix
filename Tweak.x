@@ -76,7 +76,7 @@ BOOL verifyIPQuality(NSString *ip) {
     [task resume];
     dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)));
     
-    if (!responseData) return YES; // تجنب التوقف المؤقت في حال انقطاع النت
+    if (!responseData) return YES;
     
     NSError *jsonError = nil;
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
@@ -92,7 +92,6 @@ BOOL verifyIPQuality(NSString *ip) {
     
     for (NSString *keyword in badKeywords) {
         if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            NSLog(@"[AdInjector] ❌ تم رفض IP بسبب انتمائه لمركز بيانات: %@ (%@)", ip, combined);
             return NO;
         }
     }
@@ -107,13 +106,13 @@ BOOL verifyIPQuality(NSString *ip) {
 NSString *generateUniqueResidentialIP() {
     NSMutableSet *usedIPs = getUsedIPsHistory();
     
-    // النطاقات الفرعية المعتمدة لـ T-Mobile و AT&T (النشطة والفعالة سكنياً)
+    // تم تصحيح الأرقام بإضافة علامة @ لتتوافق مع Objective-C dictionaries
     NSArray *subnets = @[
-        @{@"prefix": @"172.56.", @"min": 16, @"max": 31},
-        @{@"prefix": @"172.57.", @"min": 0,  @"max": 63},
-        @{@"prefix": @"172.59.", @"min": 128, @"max": 191},
-        @{@"prefix": @"12.144.",  @"min": 0,  @"max": 63},
-        @{@"prefix": @"32.130.",  @"min": 0,  @"max": 127}
+        @{@"prefix": @"172.56.", @"min": @16, @"max": @31},
+        @{@"prefix": @"172.57.", @"min": @0,  @"max": @63},
+        @{@"prefix": @"172.59.", @"min": @128, @"max": @191},
+        @{@"prefix": @"12.144.",  @"min": @0,  @"max": @63},
+        @{@"prefix": @"32.130.",  @"min": @0,  @"max": @127}
     ];
     
     int maxAttempts = 40;
@@ -124,21 +123,18 @@ NSString *generateUniqueResidentialIP() {
         int maxThird = [subnet[@"max"] intValue];
         
         int third = minThird + arc4random_uniform(maxThird - minThird + 1);
-        int fourth = 1 + arc4random_uniform(254); // تجنب .0 و .255 لتلافي عناوين الشبكة الميتة
+        int fourth = 1 + arc4random_uniform(254);
         
         NSString *candidateIP = [NSString stringWithFormat:@"%@%d.%d", prefix, third, fourth];
         
-        // التحقق من أن اليمين لم يُستخدم أبداً من قبل
         if (![usedIPs containsObject:candidateIP]) {
             if (verifyIPQuality(candidateIP)) {
                 markIPAsUsed(candidateIP);
-                NSLog(@"[AdInjector] 🆕 تم توليد IP سكني جديد كلياً ولم يُستخدم من قبل: %@", candidateIP);
                 return candidateIP;
             }
         }
     }
     
-    // Fallback احتياطي في حال استنفاد المحاولات
     NSString *fallbackIP = [NSString stringWithFormat:@"172.56.%d.%d", 20 + arc4random_uniform(5), 1 + arc4random_uniform(254)];
     markIPAsUsed(fallbackIP);
     return fallbackIP;
@@ -275,7 +271,6 @@ void clearAllLocalFiles() {
                         }
                     }
                 } else {
-                    // استثناء ملف السجل الخاص بالايبيات لكي لا يفقد سجل منع التكرار العام (إذا أردت مسحه احذفه، وتركه أفضل لئلا يتكرر)
                     if (![item isEqualToString:@"used_ips_history.plist"]) {
                         [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
                     }
@@ -292,7 +287,7 @@ void performFullReset() {
     clearAllLocalFiles();
     
     updateAtlantaLocation();
-    generateSessionIP(); // يولد ايبي سكني جديد غير مستخدم نهائياً
+    generateSessionIP();
     generateFakeAdvertisingID();
     fetchRealIP();
     
