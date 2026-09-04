@@ -14,7 +14,7 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
-// المعرفات الثابتة والوهمية
+// المعرفات الوهمية والثابتة
 static NSUUID *fakeAdvertisingID = nil;
 static NSString *spoofedRealUDID = nil; // UDID مزيف بصيغة حقيقية وثابت
 
@@ -42,7 +42,7 @@ void setupSpoofedRealUDID() {
     if (savedUDID && savedUDID.length > 0) {
         spoofedRealUDID = savedUDID;
     } else {
-        // توليد UUID جديد كلياً بصيغة حقيقية متوافقة مع أجهزة آيفون وثباته للأبد
+        // توليد UUID جديد بصيغة حقيقية متوافقة مع الأجهزة وتثبيته للأبد
         spoofedRealUDID = [[NSUUID UUID] UUIDString];
         [defaults setObject:spoofedRealUDID forKey:@"SpoofedRealUDID_Key"];
         [defaults synchronize];
@@ -271,7 +271,9 @@ void clearAllLocalFiles() {
                     NSString *prefPath = [dir stringByAppendingPathComponent:item];
                     NSArray *prefItems = [fm contentsOfDirectoryAtPath:prefPath error:nil];
                     for (NSString *prefFile in prefItems) {
-                        if ([prefFile containsString:@"com.supersonic"] ||
+                        if ([prefFile containsString:@"com.codebysms"] ||
+                            [prefFile containsString:@"codebysms"] ||
+                            [prefFile containsString:@"com.supersonic"] ||
                             [prefFile containsString:@"com.inmobi"] ||
                             [prefFile containsString:@"com.applovin"] ||
                             [prefFile containsString:@"com.unity"] ||
@@ -280,7 +282,11 @@ void clearAllLocalFiles() {
                             [prefFile containsString:@"com.amplitude"] ||
                             [prefFile containsString:@"io.appmetrica"] ||
                             [prefFile containsString:@"vungle"] ||
-                            [prefFile containsString:@"com.crashlytics"]) {
+                            [prefFile containsString:@"com.crashlytics"] ||
+                            [prefFile containsString:@"APM"] ||
+                            [prefFile containsString:@"IABTCF"] ||
+                            [prefFile containsString:@"GPP"] ||
+                            [prefFile containsString:@"Cmp"]) {
                             [fm removeItemAtPath:[prefPath stringByAppendingPathComponent:prefFile] error:nil];
                         }
                     }
@@ -333,7 +339,7 @@ void performFullReset() {
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي (سكني مُتحقق منه):\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (مزيف بصيغة حقيقية وثابت): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (مزيف حقيقي وثابت): %@\nIDFA (وهمي): %@", udidStr, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -435,6 +441,7 @@ void performFullReset() {
         
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
         [self.floatingBtn addGestureRecognizer:pan];
+        
         [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
         [vc.view addSubview:self.floatingBtn];
@@ -470,13 +477,13 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - الـ Hooks
+// MARK: - الـ Hooks باستخدام %hook
 // ============================================================
 
 %ctor {
     setupSpoofedRealUDID(); // تهيئة وتثبيت الـ UDID المزيف بصيغة حقيقية
     updateAtlantaLocation();
-    generateSessionIP();
+    generateSessionIP();   // توليد IP مع التحقق
     generateFakeAdvertisingID();
     fetchRealIP();
     
@@ -541,6 +548,7 @@ void performFullReset() {
 }
 %end
 
+// ===== Hook ASIdentifierManager لتغيير IDFA =====
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     if (fakeAdvertisingID) {
