@@ -267,32 +267,32 @@ void clearAllLocalFiles() {
 // ============================================================
 
 void performFullReset() {
+    // 1. تنفيذ كافة عمليات الحذف والتنظيف الشاملة
     clearKeychainKeepingAccount();
     clearAllCookies();
     clearNetworkCache();
     clearAllLocalFiles();
     
-    // تحديث IDFA دائماً عند الضغط على الزر الأزرق
+    // 2. تحديث معرف الـ IDFA والموقع والـ IP في كل ضغطة
     fakeAdvertisingIDString = generateRandomUUIDString();
-    
-    // زيادة عداد الضغطات (محفوظ بشكل دائم) والتحقق إذا وصل إلى 3 لتغيير الـ UDID
-    int currentCount = getBlueButtonPressCount() + 1;
-    if (currentCount >= 3) {
-        fakeUDIDString = generateRandomUDID();
-        setBlueButtonPressCount(0); // إعادة تعيين العداد بعد الوصول لـ 3
-    } else {
-        setBlueButtonPressCount(currentCount);
-    }
-    
     updateAtlantaLocation();
     generateSessionIP();
     fetchRealIP();
+    
+    // 3. تغيير الـ UDID تلقائياً كل ضغطتين (مع الحفاظ على العداد دائماً)
+    int currentCount = getBlueButtonPressCount() + 1;
+    if (currentCount >= 2) {
+        fakeUDIDString = generateRandomUDID();
+        setBlueButtonPressCount(0); // تصفير العداد للبدء من جديد
+    } else {
+        setBlueButtonPressCount(currentCount);
+    }
     
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
     
-    // تأخير 5 ثوانٍ قبل الخروج
+    // 4. تأخير 5 ثوانٍ ثم إغلاق التطبيق
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
@@ -328,7 +328,7 @@ void changeIdentifiersOnly() {
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير كل 3 ضغطات أزرق): %@ (الضغطات الحالية: %d/3)\nIDFA: %@", udidDisplay, getBlueButtonPressCount(), idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير كل ضغطتين أزرق): %@ (الضغطات الحالية: %d/2)\nIDFA: %@", udidDisplay, getBlueButtonPressCount(), idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
