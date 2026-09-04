@@ -1,5 +1,5 @@
 // Tweak.x
-// Comprehensive iOS tweak for ad fraud prevention – corrected for Theos compilation.
+// Comprehensive iOS tweak for ad fraud prevention – using C arrays for constants.
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -11,12 +11,38 @@
 #import <notify.h>
 
 // -----------------------------------------------------------------------------
-// Global static arrays (allowed at file scope)
+// Global constant C arrays (compile-time constants, avoids @[] literals)
 // -----------------------------------------------------------------------------
-static NSArray *deviceNames = @[@"iPhone 11", @"iPhone 12", @"iPhone 13", @"iPad Pro", @"iPad Air"];
-static NSArray *models = @[@"iPhone13,2", @"iPhone14,3", @"iPad13,4"];
-static NSArray *localeIdentifiers = @[@"en_US", @"en_GB", @"fr_FR", @"de_DE", @"es_ES", @"it_IT", @"ja_JP"];
-static NSArray *timezoneNames = @[@"America/New_York", @"Europe/London", @"Asia/Tokyo", @"Australia/Sydney"];
+static NSString * const deviceNames[] = {
+    @"iPhone 11", @"iPhone 12", @"iPhone 13", @"iPad Pro", @"iPad Air"
+};
+static const NSUInteger deviceNamesCount = sizeof(deviceNames) / sizeof(deviceNames[0]);
+
+static NSString * const models[] = {
+    @"iPhone13,2", @"iPhone14,3", @"iPad13,4"
+};
+static const NSUInteger modelsCount = sizeof(models) / sizeof(models[0]);
+
+static NSString * const localeIdentifiers[] = {
+    @"en_US", @"en_GB", @"fr_FR", @"de_DE", @"es_ES", @"it_IT", @"ja_JP"
+};
+static const NSUInteger localeIdentifiersCount = sizeof(localeIdentifiers) / sizeof(localeIdentifiers[0]);
+
+static NSString * const timezoneNames[] = {
+    @"America/New_York", @"Europe/London", @"Asia/Tokyo", @"Australia/Sydney"
+};
+static const NSUInteger timezoneNamesCount = sizeof(timezoneNames) / sizeof(timezoneNames[0]);
+
+static NSString * const acceptLanguages[] = {
+    @"en-US,en;q=0.9", @"fr-FR,fr;q=0.9", @"de-DE,de;q=0.9", @"ja-JP,ja;q=0.9"
+};
+static const NSUInteger acceptLanguagesCount = sizeof(acceptLanguages) / sizeof(acceptLanguages[0]);
+
+// User-Agent parts (will be combined lazily)
+static NSString * const osVersions[] = { @"15_0", @"15_1", @"15_2", @"16_0", @"16_1" };
+static const NSUInteger osVersionsCount = sizeof(osVersions) / sizeof(osVersions[0]);
+static NSString * const uaModels[] = { @"iPhone", @"iPad" };
+static const NSUInteger uaModelsCount = sizeof(uaModels) / sizeof(uaModels[0]);
 
 // -----------------------------------------------------------------------------
 // Session‑based randomization seed
@@ -39,7 +65,7 @@ static NSUInteger randomInRange(NSUInteger min, NSUInteger max) {
 %hook UIDevice
 
 - (NSString *)name {
-    return deviceNames[randomInRange(0, deviceNames.count - 1)];
+    return deviceNames[randomInRange(0, deviceNamesCount - 1)];
 }
 
 - (NSString *)systemVersion {
@@ -49,7 +75,7 @@ static NSUInteger randomInRange(NSUInteger min, NSUInteger max) {
 }
 
 - (NSString *)model {
-    return models[randomInRange(0, models.count - 1)];
+    return models[randomInRange(0, modelsCount - 1)];
 }
 
 - (NSString *)localizedModel {
@@ -61,7 +87,7 @@ static NSUInteger randomInRange(NSUInteger min, NSUInteger max) {
 %hook NSLocale
 
 + (NSLocale *)currentLocale {
-    NSString *identifier = localeIdentifiers[randomInRange(0, localeIdentifiers.count - 1)];
+    NSString *identifier = localeIdentifiers[randomInRange(0, localeIdentifiersCount - 1)];
     return [[NSLocale alloc] initWithLocaleIdentifier:identifier];
 }
 
@@ -74,7 +100,7 @@ static NSUInteger randomInRange(NSUInteger min, NSUInteger max) {
 %hook NSTimeZone
 
 + (NSTimeZone *)localTimeZone {
-    NSString *name = timezoneNames[randomInRange(0, timezoneNames.count - 1)];
+    NSString *name = timezoneNames[randomInRange(0, timezoneNamesCount - 1)];
     return [NSTimeZone timeZoneWithName:name];
 }
 
@@ -157,16 +183,13 @@ static NSURL *cleanURL(NSURL *originalURL) {
     if ([field caseInsensitiveCompare:@"User-Agent"] == NSOrderedSame) {
         static NSString *customUA = nil;
         if (!customUA) {
-            NSArray *osVersions = @[@"15_0", @"15_1", @"15_2", @"16_0", @"16_1"];
-            NSArray *uaModels = @[@"iPhone", @"iPad"];
-            NSString *model = uaModels[randomInRange(0, uaModels.count-1)];
-            NSString *osVer = osVersions[randomInRange(0, osVersions.count-1)];
+            NSString *model = uaModels[randomInRange(0, uaModelsCount - 1)];
+            NSString *osVer = osVersions[randomInRange(0, osVersionsCount - 1)];
             customUA = [NSString stringWithFormat:@"Mozilla/5.0 (%@; CPU %@ OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1", model, model, osVer];
         }
         value = customUA;
     } else if ([field caseInsensitiveCompare:@"Accept-Language"] == NSOrderedSame) {
-        static NSArray *langs = @[@"en-US,en;q=0.9", @"fr-FR,fr;q=0.9", @"de-DE,de;q=0.9", @"ja-JP,ja;q=0.9"];
-        value = langs[randomInRange(0, langs.count-1)];
+        value = acceptLanguages[randomInRange(0, acceptLanguagesCount - 1)];
     }
     %orig(value, field);
 }
