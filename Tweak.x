@@ -16,28 +16,25 @@ static NSMutableArray *networkLogs = nil;
 
 // المعرفات المزيفة
 static NSUUID *fakeAdvertisingID = nil;
-// UDID و UUID ثابتان افتراضياً، ولا يتغيران إلا حصرياً عبر الزر البرتقالي
-static NSString *fakeUDIDString = @"00008130-001a2b3c4d5e6f78";
-static NSString *fakeUUIDString = @"E621E1F8-C36C-495A-93FC-0C247A3E6E5F";
+static NSString *fakeUDIDString = nil; // يبقى ثابتاً حتى يتم الضغط على الزر البرتقالي
 
 // ============================================================
-// MARK: - دوال توليد معرفات عشوائية بصيغ صحيحة ومطابقة تماماً
+// MARK: - دالة توليد UDID عشوائي وجديد
 // ============================================================
-
-NSString *generateRandomUUID() {
-    return [[NSUUID UUID] UUIDString];
-}
 
 NSString *generateRandomUDID() {
-    // توليد 16 حرفاً عشوائياً بنظام Hex (حروف صغيرة وأرقام) لتطابق تماماً طول وصيغة: 00008130-001a2b3c4d5e6f78
     NSString *letters = @"0123456789abcdef";
-    NSMutableString *randomHex = [NSMutableString stringWithCapacity:16];
-    for (int i = 0; i < 16; i++) {
-        u_int32_t index = arc4random_uniform((uint32_t)[letters length]);
-        unichar c = [letters characterAtIndex:index];
-        [randomHex appendFormat:@"%C", c];
+    NSMutableString *randomHex1 = [NSMutableString stringWithCapacity:8];
+    NSMutableString *randomHex2 = [NSMutableString stringWithCapacity:12];
+    
+    for (int i = 0; i < 8; i++) {
+        [randomHex1 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
     }
-    return [NSString stringWithFormat:@"00008130-%@", randomHex];
+    for (int i = 0; i < 12; i++) {
+        [randomHex2 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
+    }
+    
+    return [NSString stringWithFormat:@"00008130-%@-%@", randomHex1, randomHex2];
 }
 
 // ============================================================
@@ -251,7 +248,7 @@ void clearAllLocalFiles() {
 // ============================================================
 
 void performFullReset() {
-    // الزر الأزرق: يمسح الملفات، الكوكيز، الكاش، يغير الـ IDFA، الـ IP والموقع (بدون تغيير UDID أو UUID)
+    // الزر الأزرق: تنظيف كامل، تغيير IDFA، موقع جديد، IP جديد (دون المساس بالـ UDID)
     clearKeychainKeepingAccount();
     clearAllCookies();
     clearNetworkCache();
@@ -266,17 +263,18 @@ void performFullReset() {
         [networkLogs removeAllObjects];
     }
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // تأخير 5 ثوانٍ قبل الخروج
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
 }
 
 void changeIdentifiersOnly() {
-    // الزر البرتقالي: يغير الـ UDID (بنفس صيغتك تماماً) و الـ UUID فقط (بدون مسح وبدون تغيير IDFA)
+    // الزر البرتقالي: توليد UDID عشوائي جديد تماماً عند الضغط فقط
     fakeUDIDString = generateRandomUDID();
-    fakeUUIDString = generateRandomUUID();
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // تأخير 5 ثوانٍ قبل إغلاق التطبيق
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
 }
@@ -298,10 +296,11 @@ void changeIdentifiersOnly() {
     [self.view addSubview:scrollView];
     
     NSString *idfaStr = fakeAdvertisingID ? [fakeAdvertisingID UUIDString] : [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
+    NSString *udidDisplay = fakeUDIDString ?: @"غير متوفر (لم يتم التغيير بعد)";
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nUUID: %@\nIDFA: %@", fakeUDIDString, fakeUUIDString, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير بالبرتقالي): %@\nIDFA (يتغير بالأزرق): %@", udidDisplay, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -390,7 +389,7 @@ void changeIdentifiersOnly() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // الزر الأزرق: يغير IDFA، يمسح الملفات، الكوكيز، IP وموقع جديد مع كراش (🔄)
+        // الزر الأزرق (🔄)
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
@@ -408,7 +407,7 @@ void changeIdentifiersOnly() {
         [self.resetBtn addGestureRecognizer:pan1];
         [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
-        // الزر البرتقالي: يغير UDID و UUID فقط (بدون مسح وبدون IDFA) مع كراش (🆔)
+        // الزر البرتقالي لتغيير الـ UDID (🆔)
         self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.changeIDBtn.tag = 999777;
         self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
@@ -467,30 +466,6 @@ void changeIdentifiersOnly() {
         [[AtlantaInfoManager sharedInstance] setupFloatingButtons];
     });
 }
-
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    if (fakeUUIDString) {
-        return [[NSUUID alloc] initWithUUIDString:fakeUUIDString];
-    }
-    return %orig;
-}
-%end
-
-%hook NSUUID
-+ (instancetype)UUID {
-    if (fakeUUIDString) {
-        return [[NSUUID alloc] initWithUUIDString:fakeUUIDString];
-    }
-    return %orig;
-}
-- (instancetype)initWithUUIDString:(NSString *)string {
-    if (fakeUUIDString) {
-        return %orig(fakeUUIDString);
-    }
-    return %orig;
-}
-%end
 
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
