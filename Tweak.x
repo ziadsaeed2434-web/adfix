@@ -14,31 +14,30 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
-// المعرفات المزيفة (متغيرة لتتحدث عند كل Reset)
+// المعرفات المزيفة
 static NSUUID *fakeAdvertisingID = nil;
-static NSString *fakeUDIDString = nil;
-static NSString *fakeUUIDString = nil;
+// UDID و UUID ثابتان افتراضياً، ولا يتغيران إلا حصرياً عبر الزر البرتقالي
+static NSString *fakeUDIDString = @"00008130-001a2b3c4d5e6f78";
+static NSString *fakeUUIDString = @"E621E1F8-C36C-495A-93FC-0C247A3E6E5F";
 
 // ============================================================
-// MARK: - دوال توليد معرفات عشوائية بصيغ صحيحة
+// MARK: - دوال توليد معرفات عشوائية بصيغ صحيحة ومطابقة تماماً
 // ============================================================
 
-// توليد UUID بصيغة قياسية صحيحة (36 حرفاً)
 NSString *generateRandomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// توليد UDID بصيغة صحيحة (40 حرفاً سداسياً عشرياً)
 NSString *generateRandomUDID() {
-    NSString *uuidWithoutHyphens = [[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""];
-    // لضمان الحصول على 40 حرفاً تماماً
-    return [NSString stringWithFormat:@"00008130-%@", [uuidWithoutHyphens substringToIndex:32]];
-}
-
-void generateFakeIdentifiers() {
-    fakeAdvertisingID = [NSUUID UUID];
-    fakeUDIDString = generateRandomUDID();
-    fakeUUIDString = generateRandomUUID();
+    // توليد 16 حرفاً عشوائياً بنظام Hex (حروف صغيرة وأرقام) لتطابق تماماً طول وصيغة: 00008130-001a2b3c4d5e6f78
+    NSString *letters = @"0123456789abcdef";
+    NSMutableString *randomHex = [NSMutableString stringWithCapacity:16];
+    for (int i = 0; i < 16; i++) {
+        u_int32_t index = arc4random_uniform((uint32_t)[letters length]);
+        unichar c = [letters characterAtIndex:index];
+        [randomHex appendFormat:@"%C", c];
+    }
+    return [NSString stringWithFormat:@"00008130-%@", randomHex];
 }
 
 // ============================================================
@@ -248,25 +247,35 @@ void clearAllLocalFiles() {
 }
 
 // ============================================================
-// MARK: - دالة إعادة الضبط الكلي مع إحداث كراش متعمد
+// MARK: - دوال العمليات (الزر الأزرق والبرتقالي)
 // ============================================================
 
 void performFullReset() {
+    // الزر الأزرق: يمسح الملفات، الكوكيز، الكاش، يغير الـ IDFA، الـ IP والموقع (بدون تغيير UDID أو UUID)
     clearKeychainKeepingAccount();
     clearAllCookies();
     clearNetworkCache();
     clearAllLocalFiles();
     
+    fakeAdvertisingID = [NSUUID UUID];
     updateAtlantaLocation();
     generateSessionIP();
-    generateFakeIdentifiers(); // توليد UDID و UUID جديدين بالصيغ الصحيحة
     fetchRealIP();
     
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
     
-    // إحداث كراش متعمد وإغلاق التطبيق فوراً بعد إتمام العمليات
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        exit(0);
+    });
+}
+
+void changeIdentifiersOnly() {
+    // الزر البرتقالي: يغير الـ UDID (بنفس صيغتك تماماً) و الـ UUID فقط (بدون مسح وبدون تغيير IDFA)
+    fakeUDIDString = generateRandomUDID();
+    fakeUUIDString = generateRandomUUID();
+    
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
@@ -292,7 +301,7 @@ void performFullReset() {
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (متجدد): %@\nUUID (متجدد): %@\nIDFA (وهمي): %@", fakeUDIDString, fakeUUIDString, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nUUID: %@\nIDFA: %@", fakeUDIDString, fakeUUIDString, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -331,7 +340,7 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - الزر العائم وإدارته
+// MARK: - الأزرار العائمة وإدارتها
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -339,8 +348,9 @@ void performFullReset() {
 
 @implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn = [self viewWithTag:999888];
-    if (btn && CGRectContainsPoint(btn.frame, point)) {
+    UIView *btn1 = [self viewWithTag:999888];
+    UIView *btn2 = [self viewWithTag:999777];
+    if ((btn1 && CGRectContainsPoint(btn1.frame, point)) || (btn2 && CGRectContainsPoint(btn2.frame, point))) {
         return YES;
     }
     return NO;
@@ -349,9 +359,10 @@ void performFullReset() {
 
 @interface AtlantaInfoManager : NSObject
 @property (strong, nonatomic) AtlantaWindow *floatingWindow;
-@property (strong, nonatomic) UIButton *floatingBtn;
+@property (strong, nonatomic) UIButton *resetBtn;
+@property (strong, nonatomic) UIButton *changeIDBtn;
 + (instancetype)sharedInstance;
-- (void)setupFloatingButton;
+- (void)setupFloatingButtons;
 @end
 
 @implementation AtlantaInfoManager
@@ -365,7 +376,7 @@ void performFullReset() {
     return sharedInstance;
 }
 
-- (void)setupFloatingButton {
+- (void)setupFloatingButtons {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.floatingWindow) return;
         
@@ -379,25 +390,44 @@ void performFullReset() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        self.floatingBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.floatingBtn.tag = 999888;
-        self.floatingBtn.frame = CGRectMake(20, 120, 60, 60);
-        self.floatingBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.floatingBtn setTitle:@"🔄" forState:UIControlStateNormal];
-        [self.floatingBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.floatingBtn.titleLabel.font = [UIFont boldSystemFontOfSize:24];
-        self.floatingBtn.layer.cornerRadius = 30;
-        self.floatingBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.floatingBtn.layer.shadowOffset = CGSizeMake(0, 2);
-        self.floatingBtn.layer.shadowOpacity = 0.5;
-        self.floatingBtn.layer.shadowRadius = 5;
+        // الزر الأزرق: يغير IDFA، يمسح الملفات، الكوكيز، IP وموقع جديد مع كراش (🔄)
+        self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        self.resetBtn.tag = 999888;
+        self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
+        self.resetBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
+        [self.resetBtn setTitle:@"🔄" forState:UIControlStateNormal];
+        [self.resetBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.resetBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
+        self.resetBtn.layer.cornerRadius = 27.5;
+        self.resetBtn.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.resetBtn.layer.shadowOffset = CGSizeMake(0, 2);
+        self.resetBtn.layer.shadowOpacity = 0.5;
+        self.resetBtn.layer.shadowRadius = 4;
         
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.floatingBtn addGestureRecognizer:pan];
+        UIPanGestureRecognizer *pan1 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.resetBtn addGestureRecognizer:pan1];
+        [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
-        [self.floatingBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
+        // الزر البرتقالي: يغير UDID و UUID فقط (بدون مسح وبدون IDFA) مع كراش (🆔)
+        self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        self.changeIDBtn.tag = 999777;
+        self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
+        self.changeIDBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:0.9];
+        [self.changeIDBtn setTitle:@"🆔" forState:UIControlStateNormal];
+        [self.changeIDBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.changeIDBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
+        self.changeIDBtn.layer.cornerRadius = 27.5;
+        self.changeIDBtn.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.changeIDBtn.layer.shadowOffset = CGSizeMake(0, 2);
+        self.changeIDBtn.layer.shadowOpacity = 0.5;
+        self.changeIDBtn.layer.shadowRadius = 4;
         
-        [vc.view addSubview:self.floatingBtn];
+        UIPanGestureRecognizer *pan2 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.changeIDBtn addGestureRecognizer:pan2];
+        [self.changeIDBtn addTarget:self action:@selector(handleChangeID) forControlEvents:UIControlEventTouchUpInside];
+        
+        [vc.view addSubview:self.resetBtn];
+        [vc.view addSubview:self.changeIDBtn];
     });
 }
 
@@ -417,20 +447,24 @@ void performFullReset() {
     performFullReset();
 }
 
+- (void)handleChangeID {
+    changeIdentifiersOnly();
+}
+
 @end
 
 // ============================================================
-// MARK: - الـ Hooks لتزيف المعرفات والشبكة
+// MARK: - الـ Hooks
 // ============================================================
 
 %ctor {
     updateAtlantaLocation();
     generateSessionIP();
-    generateFakeIdentifiers();
+    fakeAdvertisingID = [NSUUID UUID];
     fetchRealIP();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[AtlantaInfoManager sharedInstance] setupFloatingButton];
+        [[AtlantaInfoManager sharedInstance] setupFloatingButtons];
     });
 }
 
