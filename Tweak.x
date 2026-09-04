@@ -1,21 +1,13 @@
-// Tweak.x - تزييف متكامل مع الحفاظ على الإعلانات (تغيير القيم لا حذفها)
+// Tweak.x - بدون تزييف UIDevice، فقط تزييف الشبكة و WebView
+// يحافظ على الإعلانات عن طريق تغيير قيم التتبع بدلاً من حذفها
+
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 
 // =====================================================================
-// 1. ثوابت البيانات المزيفة
+// 1. ثوابت البيانات المزيفة (للهوكات المتأخرة فقط)
 // =====================================================================
-static NSString * const deviceNames[] = {
-    @"iPhone 11", @"iPhone 12", @"iPhone 13", @"iPad Pro", @"iPad Air"
-};
-static const NSUInteger deviceNamesCount = sizeof(deviceNames)/sizeof(deviceNames[0]);
-
-static NSString * const models[] = {
-    @"iPhone13,2", @"iPhone14,3", @"iPad13,4"
-};
-static const NSUInteger modelsCount = sizeof(models)/sizeof(models[0]);
-
 static NSString * const acceptLanguages[] = {
     @"en-US,en;q=0.9", @"fr-FR,fr;q=0.9", @"de-DE,de;q=0.9", @"ja-JP,ja;q=0.9"
 };
@@ -52,21 +44,9 @@ static NSString *randomIDFA(void) {
 }
 
 // =====================================================================
-// 3. هوك UIDevice (فعّال فوراً)
+// 3. هوك UIDevice ملغي (لا نقوم بتزويره)
 // =====================================================================
-%hook UIDevice
-- (NSString *)name {
-    return deviceNames[randomInRange(0, deviceNamesCount - 1)];
-}
-- (NSString *)systemVersion {
-    NSUInteger major = randomInRange(14, 16);
-    NSUInteger minor = randomInRange(0, 5);
-    return [NSString stringWithFormat:@"%lu.%lu", major, minor];
-}
-- (NSString *)model {
-    return models[randomInRange(0, modelsCount - 1)];
-}
-%end
+// تم إزالة %hook UIDevice بالكامل
 
 // =====================================================================
 // 4. مجموعة الهوكات المتأخرة (تُفعَّل بعد 3 ثوانٍ)
@@ -97,7 +77,7 @@ static NSURL *spoofURL(NSURL *originalURL) {
     return components.URL;
 }
 
-// 4.2 هوك NSMutableURLRequest
+// 4.2 هوك NSMutableURLRequest (تغيير User-Agent و Accept-Language وتزييف المعلمات)
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field caseInsensitiveCompare:@"User-Agent"] == NSOrderedSame) {
@@ -127,7 +107,7 @@ static NSURL *spoofURL(NSURL *originalURL) {
 }
 %end
 
-// 4.4 هوك WKWebView (حقن JavaScript)
+// 4.4 هوك WKWebView (حقن JavaScript لحماية البصمة)
 %hook WKWebView
 - (instancetype)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
     NSString *js = @"(function(){"
@@ -160,13 +140,13 @@ static NSURL *spoofURL(NSURL *originalURL) {
 %end // DelayedHooks
 
 // =====================================================================
-// 5. التهيئة الرئيسية (بدون حذف، بدون sysctl)
+// 5. التهيئة الرئيسية (بدون أي هوك فوري)
 // =====================================================================
 %ctor {
     generateSessionSeed();
-    %init; // تفعيل UIDevice فوراً
+    // لا نفعّل أي هوك فوراً (UIDevice ملغي)
     
-    // تأجيل الهوكات الحساسة
+    // تأجيل الهوكات الحساسة إلى ما بعد إطلاق التطبيق
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
