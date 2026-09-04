@@ -1,52 +1,38 @@
-// Tweak.x
-// Comprehensive iOS tweak for ad fraud prevention – using C arrays for constants.
+// Tweak.x - نسخة مستقرة وآمنة للبدء
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import <sys/sysctl.h>
-#import <mach/mach.h>
-#import <objc/runtime.h>
 #import <dlfcn.h>
-#import <notify.h>
 
-// -----------------------------------------------------------------------------
-// Global constant C arrays (compile-time constants, avoids @[] literals)
-// -----------------------------------------------------------------------------
+// =====================================================================
+// ثوابت C arrays (آمنة للاستخدام في النطاق العام)
+// =====================================================================
 static NSString * const deviceNames[] = {
     @"iPhone 11", @"iPhone 12", @"iPhone 13", @"iPad Pro", @"iPad Air"
 };
-static const NSUInteger deviceNamesCount = sizeof(deviceNames) / sizeof(deviceNames[0]);
+static const NSUInteger deviceNamesCount = sizeof(deviceNames)/sizeof(deviceNames[0]);
 
 static NSString * const models[] = {
     @"iPhone13,2", @"iPhone14,3", @"iPad13,4"
 };
-static const NSUInteger modelsCount = sizeof(models) / sizeof(models[0]);
-
-static NSString * const localeIdentifiers[] = {
-    @"en_US", @"en_GB", @"fr_FR", @"de_DE", @"es_ES", @"it_IT", @"ja_JP"
-};
-static const NSUInteger localeIdentifiersCount = sizeof(localeIdentifiers) / sizeof(localeIdentifiers[0]);
-
-static NSString * const timezoneNames[] = {
-    @"America/New_York", @"Europe/London", @"Asia/Tokyo", @"Australia/Sydney"
-};
-static const NSUInteger timezoneNamesCount = sizeof(timezoneNames) / sizeof(timezoneNames[0]);
+static const NSUInteger modelsCount = sizeof(models)/sizeof(models[0]);
 
 static NSString * const acceptLanguages[] = {
     @"en-US,en;q=0.9", @"fr-FR,fr;q=0.9", @"de-DE,de;q=0.9", @"ja-JP,ja;q=0.9"
 };
-static const NSUInteger acceptLanguagesCount = sizeof(acceptLanguages) / sizeof(acceptLanguages[0]);
+static const NSUInteger acceptLanguagesCount = sizeof(acceptLanguages)/sizeof(acceptLanguages[0]);
 
-// User-Agent parts (will be combined lazily)
 static NSString * const osVersions[] = { @"15_0", @"15_1", @"15_2", @"16_0", @"16_1" };
-static const NSUInteger osVersionsCount = sizeof(osVersions) / sizeof(osVersions[0]);
-static NSString * const uaModels[] = { @"iPhone", @"iPad" };
-static const NSUInteger uaModelsCount = sizeof(uaModels) / sizeof(uaModels[0]);
+static const NSUInteger osVersionsCount = sizeof(osVersions)/sizeof(osVersions[0]);
 
-// -----------------------------------------------------------------------------
-// Session‑based randomization seed
-// -----------------------------------------------------------------------------
+static NSString * const uaModels[] = { @"iPhone", @"iPad" };
+static const NSUInteger uaModelsCount = sizeof(uaModels)/sizeof(uaModels[0]);
+
+// =====================================================================
+// بذرة العشوائية لكل جلسة
+// =====================================================================
 static NSUInteger sessionSeed = 0;
 
 static void generateSessionSeed(void) {
@@ -59,84 +45,38 @@ static NSUInteger randomInRange(NSUInteger min, NSUInteger max) {
     return min + arc4random_uniform((uint32_t)(max - min + 1));
 }
 
-// -----------------------------------------------------------------------------
-// 1. Device & Environment Spoofing
-// -----------------------------------------------------------------------------
+// =====================================================================
+// 1. هوك بسيط لـ UIDevice (تجنب هوكات NSLocale و NSTimeZone)
+// =====================================================================
 %hook UIDevice
-
 - (NSString *)name {
     return deviceNames[randomInRange(0, deviceNamesCount - 1)];
 }
-
 - (NSString *)systemVersion {
     NSUInteger major = randomInRange(14, 16);
     NSUInteger minor = randomInRange(0, 5);
-    return [NSString stringWithFormat:@"%lu.%lu", (unsigned long)major, (unsigned long)minor];
+    return [NSString stringWithFormat:@"%lu.%lu", major, minor];
 }
-
 - (NSString *)model {
     return models[randomInRange(0, modelsCount - 1)];
 }
-
-- (NSString *)localizedModel {
-    return [self model];
-}
-
 %end
 
-%hook NSLocale
-
-+ (NSLocale *)currentLocale {
-    NSString *identifier = localeIdentifiers[randomInRange(0, localeIdentifiersCount - 1)];
-    return [[NSLocale alloc] initWithLocaleIdentifier:identifier];
-}
-
-+ (NSLocale *)systemLocale {
-    return [self currentLocale];
-}
-
-%end
-
-%hook NSTimeZone
-
-+ (NSTimeZone *)localTimeZone {
-    NSString *name = timezoneNames[randomInRange(0, timezoneNamesCount - 1)];
-    return [NSTimeZone timeZoneWithName:name];
-}
-
-+ (NSTimeZone *)systemTimeZone {
-    return [self localTimeZone];
-}
-
-%end
-
-// -----------------------------------------------------------------------------
-// 2. Low-Level System Functions (sysctl / sysctlbyname)
-// -----------------------------------------------------------------------------
+// =====================================================================
+// 2. هوك sysctl (مع تحقق من صحة البيانات)
+// =====================================================================
 static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 static int (*orig_sysctlbyname)(const char *, void *, size_t *, void *, size_t);
 
 static int hooked_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     int ret = orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
-    if (ret == 0 && oldp && oldlenp) {
+    if (ret == 0 && oldp && oldlenp && *oldlenp > 0) {
         if (namelen >= 2 && name[0] == CTL_HW) {
-            switch (name[1]) {
-                case HW_NCPU:
-                    if (*oldlenp == sizeof(int)) {
-                        int *val = (int *)oldp;
-                        *val = (int)randomInRange(2, 8);
-                    }
-                    break;
-                case HW_MEMSIZE:
-                case HW_PHYSMEM:
-                    if (*oldlenp == sizeof(uint64_t)) {
-                        uint64_t *val = (uint64_t *)oldp;
-                        uint64_t ramGB = randomInRange(2, 8);
-                        *val = ramGB * 1024ULL * 1024ULL * 1024ULL;
-                    }
-                    break;
-                default:
-                    break;
+            if (name[1] == HW_NCPU && *oldlenp == sizeof(int)) {
+                *(int *)oldp = (int)randomInRange(2, 8);
+            } else if ((name[1] == HW_MEMSIZE || name[1] == HW_PHYSMEM) && *oldlenp == sizeof(uint64_t)) {
+                uint64_t ramGB = randomInRange(2, 8);
+                *(uint64_t *)oldp = ramGB * 1024ULL * 1024ULL * 1024ULL;
             }
         }
     }
@@ -145,40 +85,27 @@ static int hooked_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, 
 
 static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     int ret = orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
-    if (ret == 0 && oldp && oldlenp) {
+    if (ret == 0 && oldp && oldlenp && *oldlenp > 0) {
         if (strcmp(name, "hw.ncpu") == 0 && *oldlenp == sizeof(int)) {
-            int *val = (int *)oldp;
-            *val = (int)randomInRange(2, 8);
+            *(int *)oldp = (int)randomInRange(2, 8);
         } else if ((strcmp(name, "hw.memsize") == 0 || strcmp(name, "hw.physmem") == 0) && *oldlenp == sizeof(uint64_t)) {
-            uint64_t *val = (uint64_t *)oldp;
             uint64_t ramGB = randomInRange(2, 8);
-            *val = ramGB * 1024ULL * 1024ULL * 1024ULL;
+            *(uint64_t *)oldp = ramGB * 1024ULL * 1024ULL * 1024ULL;
         }
     }
     return ret;
 }
 
-// -----------------------------------------------------------------------------
-// 3. Network Interception (NSURLSession / NSURLRequest)
-// -----------------------------------------------------------------------------
-static NSURL *cleanURL(NSURL *originalURL) {
-    if (!originalURL) return nil;
-    NSURLComponents *components = [NSURLComponents componentsWithURL:originalURL resolvingAgainstBaseURL:NO];
-    if (!components) return originalURL;
-    
-    NSArray *trackingParams = @[@"idfa", @"udid", @"adid", @"aaid", @"openudid", @"gps_adid", @"android_id", @"gaid"];
-    NSMutableArray *newQueryItems = [NSMutableArray array];
-    for (NSURLQueryItem *item in components.queryItems) {
-        if (![trackingParams containsObject:item.name.lowercaseString]) {
-            [newQueryItems addObject:item];
-        }
-    }
-    components.queryItems = newQueryItems;
-    return components.URL;
+// =====================================================================
+// 3. هوكات الشبكة (مع تأخير)
+// =====================================================================
+static void setupNetworkHooks(void) {
+    %init(NSMutableURLRequest);
+    %init(NSURLRequest);
+    %init(NSURLSession);
 }
 
 %hook NSMutableURLRequest
-
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field caseInsensitiveCompare:@"User-Agent"] == NSOrderedSame) {
         static NSString *customUA = nil;
@@ -193,94 +120,52 @@ static NSURL *cleanURL(NSURL *originalURL) {
     }
     %orig(value, field);
 }
-
-- (void)setURL:(NSURL *)url {
-    NSURL *cleaned = cleanURL(url);
-    %orig(cleaned);
-}
-
 %end
 
-%hook NSURLRequest
-
-- (NSURL *)URL {
-    NSURL *origURL = %orig;
-    return cleanURL(origURL) ?: origURL;
-}
-
-%end
-
-%hook NSURLSession
-
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
-    NSMutableURLRequest *newRequest = [request mutableCopy];
-    [newRequest setURL:cleanURL(request.URL)];
-    if (![request valueForHTTPHeaderField:@"User-Agent"]) {
-        [newRequest setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
-    }
-    if (![request valueForHTTPHeaderField:@"Accept-Language"]) {
-        [newRequest setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
-    }
-    return %orig(newRequest, completionHandler);
-}
-
-%end
-
-// -----------------------------------------------------------------------------
-// 4. WKWebView Fingerprint Protection (JavaScript injection)
-// -----------------------------------------------------------------------------
+// =====================================================================
+// 4. هوك WKWebView (حقن JavaScript)
+// =====================================================================
 %hook WKWebView
-
 - (instancetype)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
-    NSString *js = @"(function() {"
-                   @"    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;"
-                   @"    HTMLCanvasElement.prototype.toDataURL = function(type, quality) {"
-                   @"        if (type === 'image/png' || !type) {"
-                   @"            const context = this.getContext('2d');"
-                   @"            const imageData = context.getImageData(0, 0, this.width, this.height);"
-                   @"            const data = imageData.data;"
-                   @"            for (let i = 0; i < data.length; i += 4) {"
-                   @"                data[i] ^= Math.floor(Math.random() * 2);"
-                   @"            }"
-                   @"            context.putImageData(imageData, 0, 0);"
-                   @"        }"
-                   @"        return originalToDataURL.call(this, type, quality);"
-                   @"    };"
-                   @"    const getParameter = WebGLRenderingContext.prototype.getParameter;"
-                   @"    WebGLRenderingContext.prototype.getParameter = function(pname) {"
-                   @"        if (pname === 0x1F00) return 'WebKit';"
-                   @"        if (pname === 0x1F01) return 'WebKit WebGL';"
-                   @"        return getParameter.call(this, pname);"
-                   @"    };"
-                   @"    const originalCreateOscillator = AudioContext.prototype.createOscillator;"
-                   @"    AudioContext.prototype.createOscillator = function() {"
-                   @"        const oscillator = originalCreateOscillator.call(this);"
-                   @"        const originalConnect = oscillator.connect;"
-                   @"        oscillator.connect = function(destination) {"
-                   @"            this.frequency.value += Math.random() * 0.1;"
-                   @"            return originalConnect.call(this, destination);"
-                   @"        };"
-                   @"        return oscillator;"
-                   @"    };"
-                   @"})();";
-    
+    NSString *js = @"(function(){"
+                   @"const orig=HTMLCanvasElement.prototype.toDataURL;"
+                   @"HTMLCanvasElement.prototype.toDataURL=function(t,q){"
+                   @" if(t==='image/png'||!t){"
+                   @"  const ctx=this.getContext('2d'), img=ctx.getImageData(0,0,this.width,this.height), d=img.data;"
+                   @"  for(let i=0;i<d.length;i+=4)d[i]^=Math.random()*2|0;"
+                   @"  ctx.putImageData(img,0,0);"
+                   @" } return orig.call(this,t,q);"
+                   @"};"
+                   @"const gp=WebGLRenderingContext.prototype.getParameter;"
+                   @"WebGLRenderingContext.prototype.getParameter=function(p){"
+                   @" if(p===0x1F00)return'WebKit';"
+                   @" if(p===0x1F01)return'WebKit WebGL';"
+                   @" return gp.call(this,p);"
+                   @"};"
+                   @"const oc=AudioContext.prototype.createOscillator;"
+                   @"AudioContext.prototype.createOscillator=function(){"
+                   @" const o=oc.call(this), oc2=o.connect;"
+                   @" o.connect=function(d){this.frequency.value+=Math.random()*0.1; return oc2.call(this,d);};"
+                   @" return o;"
+                   @"};})();";
     WKUserScript *script = [[WKUserScript alloc] initWithSource:js injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
     [configuration.userContentController addUserScript:script];
     return %orig(frame, configuration);
 }
-
 %end
 
-// -----------------------------------------------------------------------------
-// 5. Safe Temporary Cleanup (NO KEYCHAIN)
-// -----------------------------------------------------------------------------
+// =====================================================================
+// 5. وظيفة التنظيف الآمنة (بدون Keychain)
+// =====================================================================
 static void performCleanup(void) {
+    // حذف الكوكيز
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
+    for (NSHTTPCookie *cookie in cookieStorage.cookies) {
         [cookieStorage deleteCookie:cookie];
     }
+    // حذف ذاكرة التخزين المؤقت
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
-    
+    // حذف الملفات المؤقتة
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *cacheDir = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
     if (cacheDir) {
@@ -296,13 +181,13 @@ static void performCleanup(void) {
     }
 }
 
-// -----------------------------------------------------------------------------
-// 6. Early Initialization
-// -----------------------------------------------------------------------------
+// =====================================================================
+// 6. التهيئة المبكرة (آمنة)
+// =====================================================================
 %ctor {
     generateSessionSeed();
-    performCleanup();
     
+    // تهيئة هوك sysctl
     void *handle = dlopen("/usr/lib/libsystem_kernel.dylib", RTLD_LAZY);
     if (handle) {
         orig_sysctl = (int (*)(int *, u_int, void *, size_t *, void *, size_t))dlsym(handle, "sysctl");
@@ -311,10 +196,12 @@ static void performCleanup(void) {
         if (orig_sysctlbyname) MSHookFunction((void *)orig_sysctlbyname, (void *)hooked_sysctlbyname, NULL);
     }
     
+    // تأخير تهيئة باقي الهوكسات والتنظيف إلى ما بعد الإطلاق
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
                                                       performCleanup();
+                                                      setupNetworkHooks(); // هوكات الشبكة بعد التهيئة
                                                   }];
 }
