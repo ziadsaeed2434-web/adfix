@@ -263,8 +263,8 @@ void performFullReset() {
         [networkLogs removeAllObjects];
     }
     
-    // تأخير 5 ثوانٍ قبل الخروج
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // تأخير 12 ثانية قبل الخروج
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
 }
@@ -273,8 +273,8 @@ void changeIdentifiersOnly() {
     // الزر البرتقالي: توليد UDID عشوائي جديد تماماً عند الضغط فقط
     fakeUDIDString = generateRandomUDID();
     
-    // تأخير 5 ثوانٍ قبل إغلاق التطبيق
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // تأخير 12 ثانية قبل إغلاق التطبيق
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
 }
