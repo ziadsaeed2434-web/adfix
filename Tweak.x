@@ -20,7 +20,7 @@ static NSString *g_spoofedUserAgent = nil;
 static BOOL g_hasSpoofed = NO;
 
 // ---------------------------------------------------------------------------
-// MARK: - Helper Functions
+// MARK: - Helper Functions (Advanced Generation)
 // ---------------------------------------------------------------------------
 
 static float randomFloatBetween(float min, float max) {
@@ -28,41 +28,38 @@ static float randomFloatBetween(float min, float max) {
 }
 
 static NSString *randomDeviceName(void) {
-    NSArray *names = @[@"iPhone", @"iPhone Pro", @"iPhone Max"];
+    NSArray *names = @[@"iPhone", @"iPhone Pro", @"iPhone Pro Max"];
     NSString *base = names[arc4random_uniform((uint32_t)names.count)];
-    int model = arc4random_uniform(20) + 1;
+    int model = 14 + arc4random_uniform(4);
     return [NSString stringWithFormat:@"%@ %d", base, model];
 }
 
 static NSString *randomSystemVersion(void) {
-    int major = 24 + arc4random_uniform(4);
-    int minor = arc4random_uniform(10);
+    int major = 25 + arc4random_uniform(3);
+    int minor = arc4random_uniform(5);
     int patch = arc4random_uniform(10);
     return [NSString stringWithFormat:@"%d.%d.%d", major, minor, patch];
 }
 
 static NSString *randomProductType(void) {
-    NSArray *products = @[@"iPhone14,2", @"iPhone15,3", @"iPhone16,1", @"iPhone17,2"];
+    NSArray *products = @[@"iPhone14,2", @"iPhone15,3", @"iPhone16,1", @"iPhone17,2", @"iPhone17,3"];
     return products[arc4random_uniform((uint32_t)products.count)];
 }
 
 static NSString *randomUserAgent(NSString *systemVersion) {
     NSArray *components = [systemVersion componentsSeparatedByString:@"."];
-    if (components.count < 2) {
-        components = @[@"26", @"0"];
-    }
-    NSString *major = components[0];
+    NSString *major = components.count > 0 ? components[0] : @"25";
     NSString *minor = components.count > 1 ? components[1] : @"0";
     
     int buildNumber = arc4random_uniform(900) + 100;
     NSString *build = [NSString stringWithFormat:@"%d", buildNumber];
     
-    int webKitMajor = 600 + arc4random_uniform(10);
+    int webKitMajor = 605;
     int webKitMinor = arc4random_uniform(20);
     int webKitPatch = arc4random_uniform(10);
     
-    int safariMajor = 10 + arc4random_uniform(10);
-    int safariMinor = arc4random_uniform(10);
+    int safariMajor = 15 + arc4random_uniform(5);
+    int safariMinor = arc4random_uniform(5);
     
     return [NSString stringWithFormat:
             @"Mozilla/5.0 (iPhone; CPU iPhone OS %@_%@ like Mac OS X) AppleWebKit/%d.%d.%d (KHTML, like Gecko) Version/%d.%d Mobile/15E%@ Safari/%d.%d.%d",
@@ -83,13 +80,13 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        self.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:0.9];
+        self.backgroundColor = [UIColor colorWithRed:0.9 green:0.2 blue:0.2 alpha:0.95]; // لون مميز يدل على التصفير الشامل
         self.layer.cornerRadius = 25.0;
         self.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.layer.shadowOpacity = 0.5;
-        self.layer.shadowOffset = CGSizeMake(0, 2);
-        self.titleLabel.font = [UIFont systemFontOfSize:24.0];
-        [self setTitle:@"⟳" forState:UIControlStateNormal];
+        self.layer.shadowOpacity = 0.6;
+        self.layer.shadowOffset = CGSizeMake(0, 3);
+        self.titleLabel.font = [UIFont systemFontOfSize:26.0 weight:UIFontWeightBold];
+        [self setTitle:@"🛡️" forState:UIControlStateNormal];
         [self setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         [self addTarget:self action:@selector(handleTap:) forControlEvents:UIControlEventTouchUpInside];
 
@@ -101,9 +98,8 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 
 - (void)handleTap:(id)sender {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        [self performReset];
+        [self performTotalAnonymization];
         
-        // الخروج النظيف من التطبيق بدون أي رسائل كراش
         dispatch_async(dispatch_get_main_queue(), ^{
             exit(0);
         });
@@ -137,20 +133,22 @@ static NSString *randomUserAgent(NSString *systemVersion) {
     }
 }
 
-- (void)performReset {
+- (void)performTotalAnonymization {
     @try {
+        // 1. توليد بصمة جديدة بالكامل
         g_spoofedName = randomDeviceName();
         g_spoofedSystemVersion = randomSystemVersion();
         g_spoofedVendorID = [NSUUID UUID];
-        g_spoofedBatteryLevel = randomFloatBetween(0.15, 0.95);
+        g_spoofedBatteryLevel = randomFloatBetween(0.20, 0.90);
         g_spoofedBatteryState = (arc4random_uniform(2) == 0) ? UIDeviceBatteryStateCharging : UIDeviceBatteryStateUnplugged;
-        g_spoofedBacklightLevel = randomFloatBetween(0.1, 1.0);
+        g_spoofedBacklightLevel = randomFloatBetween(0.2, 0.9);
         g_spoofedSupportsPencil = (arc4random_uniform(2) == 0);
-        g_spoofedIsDeveloperMode = (arc4random_uniform(2) == 0);
+        g_spoofedIsDeveloperMode = NO;
         g_spoofedProductType = randomProductType();
         g_spoofedUserAgent = randomUserAgent(g_spoofedSystemVersion);
         g_hasSpoofed = YES;
 
+        // 2. تدمير كوكيز الشبكة بالكامل
         NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         if (cookieStorage) {
             NSArray *cookies = [cookieStorage cookies];
@@ -159,16 +157,19 @@ static NSString *randomUserAgent(NSString *systemVersion) {
             }
         }
 
+        // 3. مسح بيانات الإعدادات المحلية (NSUserDefaults)
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleID) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
             [[NSUserDefaults standardUserDefaults] synchronize];
         }
 
+        NSFileManager *fm = [NSFileManager defaultManager];
+
+        // 4. تدمير مجلد الـ Caches محلياً لمنع أي أثر قديم
         NSArray *cachePaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
         if (cachePaths.count > 0) {
             NSString *cacheDir = cachePaths[0];
-            NSFileManager *fm = [NSFileManager defaultManager];
             NSArray *contents = [fm contentsOfDirectoryAtPath:cacheDir error:nil];
             for (NSString *item in contents) {
                 NSString *fullPath = [cacheDir stringByAppendingPathComponent:item];
@@ -176,12 +177,24 @@ static NSString *randomUserAgent(NSString *systemVersion) {
             }
         }
 
+        // 5. تدمير مجلد الـ Application Support محلياً (مكان تخزين ملفات البصمة الخفية غالباً)
+        NSArray *appSupportPaths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
+        if (appSupportPaths.count > 0) {
+            NSString *appSupportDir = appSupportPaths[0];
+            NSArray *contents = [fm contentsOfDirectoryAtPath:appSupportDir error:nil];
+            for (NSString *item in contents) {
+                NSString *fullPath = [appSupportDir stringByAppendingPathComponent:item];
+                [fm removeItemAtPath:fullPath error:nil];
+            }
+        }
+
+        // 6. تفريغ كاش الـ URL الخاص بالاتصالات الشبكية
         NSURLCache *sharedCache = [NSURLCache sharedURLCache];
         if (sharedCache) {
             [sharedCache removeAllCachedResponses];
         }
     } @catch (NSException *exception) {
-        // يتم تجاهل أي استثناء تماماً لمنع ظهور الخطأ
+        // حماية تامة ضد أي كراش
     }
 }
 
@@ -225,7 +238,7 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 %end
 
 // ---------------------------------------------------------------------------
-// MARK: - Hooking NSURLSession
+// MARK: - Hooking NSURLSession (Network Protection)
 // ---------------------------------------------------------------------------
 
 %hook NSURLSession
@@ -252,7 +265,7 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 %end
 
 // ---------------------------------------------------------------------------
-// MARK: - Adding the Floating Button (iPhone Only - Right Side)
+// MARK: - Floating Button Integration (Right Side)
 // ---------------------------------------------------------------------------
 
 static ResetFloatingButton *g_floatingButton = nil;
