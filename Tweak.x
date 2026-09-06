@@ -70,10 +70,69 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 }
 
 // ---------------------------------------------------------------------------
-// MARK: - Core Reset Logic (Automatic)
+// MARK: - Floating Button Implementation
 // ---------------------------------------------------------------------------
 
-static void performAutomaticSpoofing(void) {
+@interface ResetFloatingButton : UIButton
+@property (nonatomic, assign) CGPoint initialCenter;
+@property (nonatomic, strong) UIPanGestureRecognizer *panGesture;
+@end
+
+@implementation ResetFloatingButton
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:0.9];
+        self.layer.cornerRadius = 25.0;
+        self.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.layer.shadowOpacity = 0.5;
+        self.layer.shadowOffset = CGSizeMake(0, 2);
+        self.titleLabel.font = [UIFont systemFontOfSize:24.0];
+        [self setTitle:@"⟳" forState:UIControlStateNormal];
+        [self setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self addTarget:self action:@selector(handleTap:) forControlEvents:UIControlEventTouchUpInside];
+
+        self.panGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self addGestureRecognizer:self.panGesture];
+    }
+    return self;
+}
+
+- (void)handleTap:(id)sender {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [self performReset];
+    });
+}
+
+- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    UIView *superview = self.superview;
+    if (!superview) return;
+
+    if (gesture.state == UIGestureRecognizerStateBegan) {
+        self.initialCenter = self.center;
+    } else if (gesture.state == UIGestureRecognizerStateChanged) {
+        CGPoint translation = [gesture translationInView:superview];
+        self.center = CGPointMake(self.initialCenter.x + translation.x,
+                                  self.initialCenter.y + translation.y);
+    } else if (gesture.state == UIGestureRecognizerStateEnded ||
+               gesture.state == UIGestureRecognizerStateCancelled) {
+        CGRect bounds = superview.bounds;
+        CGFloat margin = 10.0;
+        CGFloat halfWidth = self.frame.size.width / 2.0;
+        CGFloat halfHeight = self.frame.size.height / 2.0;
+        CGFloat newX = MIN(MAX(self.center.x, margin + halfWidth),
+                           bounds.size.width - margin - halfWidth);
+        CGFloat newY = MIN(MAX(self.center.y, margin + halfHeight),
+                           bounds.size.height - margin - halfHeight);
+        [UIView animateWithDuration:0.2 animations:^{
+            self.center = CGPointMake(newX, newY);
+        }];
+        self.initialCenter = self.center;
+    }
+}
+
+- (void)performReset {
     g_spoofedName = randomDeviceName();
     g_spoofedSystemVersion = randomSystemVersion();
     g_spoofedVendorID = [NSUUID UUID];
@@ -86,7 +145,6 @@ static void performAutomaticSpoofing(void) {
     g_spoofedUserAgent = randomUserAgent(g_spoofedSystemVersion);
     g_hasSpoofed = YES;
 
-    // مسح الكوكيز وتنظيف البيانات بأمان لمنع أي استثناءات
     @try {
         NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         if (cookieStorage) {
@@ -102,16 +160,29 @@ static void performAutomaticSpoofing(void) {
             [[NSUserDefaults standardUserDefaults] synchronize];
         }
 
+        NSArray *cachePaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+        if (cachePaths.count > 0) {
+            NSString *cacheDir = cachePaths[0];
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSArray *contents = [fm contentsOfDirectoryAtPath:cacheDir error:nil];
+            for (NSString *item in contents) {
+                NSString *fullPath = [cacheDir stringByAppendingPathComponent:item];
+                [fm removeItemAtPath:fullPath error:nil];
+            }
+        }
+
         NSURLCache *sharedCache = [NSURLCache sharedURLCache];
         if (sharedCache) {
             [sharedCache removeAllCachedResponses];
         }
     } @catch (NSException *exception) {
-        NSLog(@"[FingerprintReset] Exception during cleanup: %@", exception);
+        NSLog(@"[FingerprintReset] Exception during reset: %@", exception);
     }
 
-    NSLog(@"[FingerprintReset] تم توليد بصمة وهمية جديدة تلقائياً عند فتح التطبيق.");
+    NSLog(@"[FingerprintReset] تم تدوير بصمة الجهاز و User-Agent جديد عبر الزر.");
 }
+
+@end
 
 // ---------------------------------------------------------------------------
 // MARK: - Hooking UIDevice
@@ -174,6 +245,38 @@ static void performAutomaticSpoofing(void) {
 %end
 
 // ---------------------------------------------------------------------------
+// MARK: - Adding the Floating Button (iPhone Only - Right Side)
+// ---------------------------------------------------------------------------
+
+static ResetFloatingButton *g_floatingButton = nil;
+static BOOL g_buttonAdded = NO;
+
+%hook UIWindow
+
+- (void)makeKeyAndVisible {
+    %orig;
+
+    if (!g_buttonAdded && self.isKeyWindow) {
+        if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPhone) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                // حساب إحداثيات الجانب الأيمن (عرض الشاشة ناقص عرض الزر والهامش)
+                CGFloat screenWidth = self.bounds.size.width;
+                CGFloat buttonWidth = 50.0;
+                CGFloat buttonHeight = 50.0;
+                CGFloat rightX = screenWidth - buttonWidth - 20.0; // 20 بكسل هامش من اليمين
+                CGFloat topY = 100.0; // الارتفاع من الأعلى
+
+                g_floatingButton = [[ResetFloatingButton alloc] initWithFrame:CGRectMake(rightX, topY, buttonWidth, buttonHeight)];
+                [self addSubview:g_floatingButton];
+                g_buttonAdded = YES;
+            });
+        }
+    }
+}
+
+%end
+
+// ---------------------------------------------------------------------------
 // MARK: - Private Method Swizzling
 // ---------------------------------------------------------------------------
 
@@ -210,9 +313,6 @@ static NSString * replaced_productType(id self, SEL _cmd) {
     if ([[UIDevice currentDevice] userInterfaceIdiom] != UIUserInterfaceIdiomPhone) {
         return;
     }
-
-    // تشغيل التوليد التلقائي للبصمة فور بدء تشغيل التطبيق
-    performAutomaticSpoofing();
 
     %init;
 
