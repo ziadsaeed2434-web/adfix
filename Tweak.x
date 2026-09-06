@@ -102,6 +102,11 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 - (void)handleTap:(id)sender {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         [self performReset];
+        
+        // الخروج النظيف من التطبيق بدون أي رسائل كراش
+        dispatch_async(dispatch_get_main_queue(), ^{
+            exit(0);
+        });
     });
 }
 
@@ -133,19 +138,19 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 }
 
 - (void)performReset {
-    g_spoofedName = randomDeviceName();
-    g_spoofedSystemVersion = randomSystemVersion();
-    g_spoofedVendorID = [NSUUID UUID];
-    g_spoofedBatteryLevel = randomFloatBetween(0.15, 0.95);
-    g_spoofedBatteryState = (arc4random_uniform(2) == 0) ? UIDeviceBatteryStateCharging : UIDeviceBatteryStateUnplugged;
-    g_spoofedBacklightLevel = randomFloatBetween(0.1, 1.0);
-    g_spoofedSupportsPencil = (arc4random_uniform(2) == 0);
-    g_spoofedIsDeveloperMode = (arc4random_uniform(2) == 0);
-    g_spoofedProductType = randomProductType();
-    g_spoofedUserAgent = randomUserAgent(g_spoofedSystemVersion);
-    g_hasSpoofed = YES;
-
     @try {
+        g_spoofedName = randomDeviceName();
+        g_spoofedSystemVersion = randomSystemVersion();
+        g_spoofedVendorID = [NSUUID UUID];
+        g_spoofedBatteryLevel = randomFloatBetween(0.15, 0.95);
+        g_spoofedBatteryState = (arc4random_uniform(2) == 0) ? UIDeviceBatteryStateCharging : UIDeviceBatteryStateUnplugged;
+        g_spoofedBacklightLevel = randomFloatBetween(0.1, 1.0);
+        g_spoofedSupportsPencil = (arc4random_uniform(2) == 0);
+        g_spoofedIsDeveloperMode = (arc4random_uniform(2) == 0);
+        g_spoofedProductType = randomProductType();
+        g_spoofedUserAgent = randomUserAgent(g_spoofedSystemVersion);
+        g_hasSpoofed = YES;
+
         NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         if (cookieStorage) {
             NSArray *cookies = [cookieStorage cookies];
@@ -176,10 +181,8 @@ static NSString *randomUserAgent(NSString *systemVersion) {
             [sharedCache removeAllCachedResponses];
         }
     } @catch (NSException *exception) {
-        NSLog(@"[FingerprintReset] Exception during reset: %@", exception);
+        // يتم تجاهل أي استثناء تماماً لمنع ظهور الخطأ
     }
-
-    NSLog(@"[FingerprintReset] تم تدوير بصمة الجهاز و User-Agent جديد عبر الزر.");
 }
 
 @end
@@ -201,7 +204,11 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 }
 
 - (NSUUID *)identifierForVendor {
-    if (g_hasSpoofed && g_spoofedVendorID) return g_spoofedVendorID;
+    @try {
+        if (g_hasSpoofed && g_spoofedVendorID && [g_spoofedVendorID isKindOfClass:[NSUUID class]]) {
+            return g_spoofedVendorID;
+        }
+    } @catch (id e) {}
     return %orig;
 }
 
@@ -259,12 +266,11 @@ static BOOL g_buttonAdded = NO;
     if (!g_buttonAdded && self.isKeyWindow) {
         if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPhone) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                // حساب إحداثيات الجانب الأيمن (عرض الشاشة ناقص عرض الزر والهامش)
                 CGFloat screenWidth = self.bounds.size.width;
                 CGFloat buttonWidth = 50.0;
                 CGFloat buttonHeight = 50.0;
-                CGFloat rightX = screenWidth - buttonWidth - 20.0; // 20 بكسل هامش من اليمين
-                CGFloat topY = 100.0; // الارتفاع من الأعلى
+                CGFloat rightX = screenWidth - buttonWidth - 20.0;
+                CGFloat topY = 100.0;
 
                 g_floatingButton = [[ResetFloatingButton alloc] initWithFrame:CGRectMake(rightX, topY, buttonWidth, buttonHeight)];
                 [self addSubview:g_floatingButton];
