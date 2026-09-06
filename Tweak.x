@@ -16,7 +16,7 @@ static float g_spoofedBacklightLevel = 0.0;
 static BOOL g_spoofedSupportsPencil = NO;
 static BOOL g_spoofedIsDeveloperMode = NO;
 static NSString *g_spoofedProductType = nil;
-static NSString *g_spoofedUserAgent = nil;  // <-- جديد
+static NSString *g_spoofedUserAgent = nil;
 static BOOL g_hasSpoofed = NO;
 
 // ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ static BOOL g_hasSpoofed = NO;
 // ---------------------------------------------------------------------------
 
 static float randomFloatBetween(float min, float max) {
-    return ((float)arc4random() / UINT32_MAX) * (max - min) + min;
+    return ((float)arc4random() / (float)UINT32_MAX) * (max - min) + min;
 }
 
 static NSString *randomDeviceName(void) {
@@ -46,29 +46,23 @@ static NSString *randomProductType(void) {
     return products[arc4random_uniform((uint32_t)products.count)];
 }
 
-// توليد User-Agent عشوائي مبني على إصدار النظام المعطى
 static NSString *randomUserAgent(NSString *systemVersion) {
-    // استخراج الأرقام الرئيسية من systemVersion
     NSArray *components = [systemVersion componentsSeparatedByString:@"."];
     if (components.count < 2) {
-        // fallback
         components = @[@"26", @"0"];
     }
     NSString *major = components[0];
     NSString *minor = components.count > 1 ? components[1] : @"0";
     
-    // بناء رقم البناء (build number) بشكل عشوائي
-    int buildNumber = arc4random_uniform(900) + 100; // 100-999
+    int buildNumber = arc4random_uniform(900) + 100;
     NSString *build = [NSString stringWithFormat:@"%d", buildNumber];
     
-    // WebKit version عشوائي
-    int webKitMajor = 600 + arc4random_uniform(10);   // 600-609
-    int webKitMinor = arc4random_uniform(20);          // 0-19
-    int webKitPatch = arc4random_uniform(10);          // 0-9
+    int webKitMajor = 600 + arc4random_uniform(10);
+    int webKitMinor = arc4random_uniform(20);
+    int webKitPatch = arc4random_uniform(10);
     
-    // Safari version عشوائي
-    int safariMajor = 10 + arc4random_uniform(10);     // 10-19
-    int safariMinor = arc4random_uniform(10);          // 0-9
+    int safariMajor = 10 + arc4random_uniform(10);
+    int safariMinor = arc4random_uniform(10);
     
     return [NSString stringWithFormat:
             @"Mozilla/5.0 (iPhone; CPU iPhone OS %@_%@ like Mac OS X) AppleWebKit/%d.%d.%d (KHTML, like Gecko) Version/%d.%d Mobile/15E%@ Safari/%d.%d.%d",
@@ -139,7 +133,6 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 }
 
 - (void)performReset {
-    // توليد قيم جديدة
     g_spoofedName = randomDeviceName();
     g_spoofedSystemVersion = randomSystemVersion();
     g_spoofedVendorID = [NSUUID UUID];
@@ -149,13 +142,9 @@ static NSString *randomUserAgent(NSString *systemVersion) {
     g_spoofedSupportsPencil = (arc4random_uniform(2) == 0);
     g_spoofedIsDeveloperMode = (arc4random_uniform(2) == 0);
     g_spoofedProductType = randomProductType();
-    
-    // توليد User-Agent جديد عشوائي
     g_spoofedUserAgent = randomUserAgent(g_spoofedSystemVersion);
-    
     g_hasSpoofed = YES;
 
-    // مسح الكوكيز
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     if (cookieStorage) {
         NSArray *cookies = [cookieStorage cookies];
@@ -164,14 +153,12 @@ static NSString *randomUserAgent(NSString *systemVersion) {
         }
     }
 
-    // مسح UserDefaults
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleID) {
         [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
         [[NSUserDefaults standardUserDefaults] synchronize];
     }
 
-    // مسح مجلد Caches
     NSArray *cachePaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     if (cachePaths.count > 0) {
         NSString *cacheDir = cachePaths[0];
@@ -183,14 +170,12 @@ static NSString *randomUserAgent(NSString *systemVersion) {
         }
     }
 
-    // obliterate background sessions
     Class nsurlSessionClass = NSClassFromString(@"NSURLSession");
     if (nsurlSessionClass && [nsurlSessionClass respondsToSelector:@selector(obliterateAllBackgroundSessionsWithCompletionHandler:)]) {
         [nsurlSessionClass performSelector:@selector(obliterateAllBackgroundSessionsWithCompletionHandler:)
                                 withObject:^(void){}];
     }
 
-    // تصفير NSURLCache
     NSURLCache *sharedCache = [NSURLCache sharedURLCache];
     if (sharedCache) {
         [sharedCache removeAllCachedResponses];
@@ -206,7 +191,7 @@ static NSString *randomUserAgent(NSString *systemVersion) {
 @end
 
 // ---------------------------------------------------------------------------
-// MARK: - Hooking UIDevice Getters
+// MARK: - Hooking UIDevice (Main Public Methods)
 // ---------------------------------------------------------------------------
 
 %hook UIDevice
@@ -236,34 +221,6 @@ static NSString *randomUserAgent(NSString *systemVersion) {
     return %orig;
 }
 
-%end
-
-// ---------------------------------------------------------------------------
-// MARK: - Private UIDevice Hooks (Conditional Groups)
-// ---------------------------------------------------------------------------
-
-%group BacklightHook
-%hook UIDevice
-- (float)_backlightLevel { if (g_hasSpoofed) return g_spoofedBacklightLevel; return %orig; }
-%end
-%end
-
-%group PencilHook
-%hook UIDevice
-- (BOOL)_supportsPencil { if (g_hasSpoofed) return g_spoofedSupportsPencil; return %orig; }
-%end
-%end
-
-%group DeveloperModeHook
-%hook UIDevice
-- (BOOL)sf_isDeveloperModeEnabled { if (g_hasSpoofed) return g_spoofedIsDeveloperMode; return %orig; }
-%end
-%end
-
-%group ProductTypeHook
-%hook UIDevice
-- (NSString *)sf_productType { if (g_hasSpoofed && g_spoofedProductType) return g_spoofedProductType; return %orig; }
-%end
 %end
 
 // ---------------------------------------------------------------------------
@@ -319,7 +276,38 @@ static BOOL g_buttonAdded = NO;
 %end
 
 // ---------------------------------------------------------------------------
-// MARK: - Constructor with iPhone Check
+// MARK: - Private Method Swizzling (Safe Runtime Hooking)
+// ---------------------------------------------------------------------------
+
+// تعريف مؤشرات الدوال الأصلية للـ private methods
+static float (*orig_backlightLevel)(id self, SEL _cmd) = NULL;
+static BOOL (*orig_supportsPencil)(id self, SEL _cmd) = NULL;
+static BOOL (*orig_developerModeEnabled)(id self, SEL _cmd) = NULL;
+static NSString * (*orig_productType)(id self, SEL _cmd) = NULL;
+
+// الدوال البديلة
+static float replaced_backlightLevel(id self, SEL _cmd) {
+    if (g_hasSpoofed) return g_spoofedBacklightLevel;
+    return orig_backlightLevel(self, _cmd);
+}
+
+static BOOL replaced_supportsPencil(id self, SEL _cmd) {
+    if (g_hasSpoofed) return g_spoofedSupportsPencil;
+    return orig_supportsPencil(self, _cmd);
+}
+
+static BOOL replaced_developerModeEnabled(id self, SEL _cmd) {
+    if (g_hasSpoofed) return g_spoofedIsDeveloperMode;
+    return orig_developerModeEnabled(self, _cmd);
+}
+
+static NSString * replaced_productType(id self, SEL _cmd) {
+    if (g_hasSpoofed && g_spoofedProductType) return g_spoofedProductType;
+    return orig_productType(self, _cmd);
+}
+
+// ---------------------------------------------------------------------------
+// MARK: - Constructor
 // ---------------------------------------------------------------------------
 
 %ctor {
@@ -327,21 +315,37 @@ static BOOL g_buttonAdded = NO;
         return;
     }
 
-    %init;
+    %init; // تهيئة الـ hooks الأساسية
 
+    // Swizzling للـ private methods بشكل آمن
     Class uidClass = NSClassFromString(@"UIDevice");
     if (uidClass) {
-        if (class_getInstanceMethod(uidClass, NSSelectorFromString(@"_backlightLevel"))) {
-            %init(BacklightHook);
+        SEL selBacklight = NSSelectorFromString(@"_backlightLevel");
+        if ([uidClass instancesRespondToSelector:selBacklight]) {
+            Method method = class_getInstanceMethod(uidClass, selBacklight);
+            orig_backlightLevel = (float (*)(id, SEL))method_getImplementation(method);
+            method_setImplementation(method, (IMP)replaced_backlightLevel);
         }
-        if (class_getInstanceMethod(uidClass, NSSelectorFromString(@"_supportsPencil"))) {
-            %init(PencilHook);
+
+        SEL selPencil = NSSelectorFromString(@"_supportsPencil");
+        if ([uidClass instancesRespondToSelector:selPencil]) {
+            Method method = class_getInstanceMethod(uidClass, selPencil);
+            orig_supportsPencil = (BOOL (*)(id, SEL))method_getImplementation(method);
+            method_setImplementation(method, (IMP)replaced_supportsPencil);
         }
-        if (class_getInstanceMethod(uidClass, NSSelectorFromString(@"sf_isDeveloperModeEnabled"))) {
-            %init(DeveloperModeHook);
+
+        SEL selDevMode = NSSelectorFromString(@"sf_isDeveloperModeEnabled");
+        if ([uidClass instancesRespondToSelector:selDevMode]) {
+            Method method = class_getInstanceMethod(uidClass, selDevMode);
+            orig_developerModeEnabled = (BOOL (*)(id, SEL))method_getImplementation(method);
+            method_setImplementation(method, (IMP)replaced_developerModeEnabled);
         }
-        if (class_getInstanceMethod(uidClass, NSSelectorFromString(@"sf_productType"))) {
-            %init(ProductTypeHook);
+
+        SEL selProductType = NSSelectorFromString(@"sf_productType");
+        if ([uidClass instancesRespondToSelector:selProductType]) {
+            Method method = class_getInstanceMethod(uidClass, selProductType);
+            orig_productType = (NSString * (*)(id, SEL))method_getImplementation(method);
+            method_setImplementation(method, (IMP)replaced_productType);
         }
     }
 }
