@@ -56,7 +56,7 @@ void updateAtlantaLocation() {
 
 NSArray *generate10IPs() {
     NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
-    int allowedSecondOctets[] = {56, 57, 59, 58, 60, 61, 62, 63};
+    int allowedSecondOctets[] = {57, 59};
     for (int i = 0; i < 10; i++) {
         int second = allowedSecondOctets[arc4random_uniform(3)];
         int third = arc4random_uniform(256);
