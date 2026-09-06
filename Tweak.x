@@ -62,7 +62,7 @@ static BOOL verifyResidentialIP(NSString *ipString) {
                         g_spoofedLongitude = [json[@"lon"] doubleValue];
                     }
                 }
-            } @catch (Exception *e) {}
+            } @catch (NSException *e) {} // تم تصحيح الخطأ هنا
         }
         dispatch_semaphore_signal(semaphore);
     }];
