@@ -248,7 +248,7 @@ void clearAllLocalFiles() {
 }
 
 // ============================================================
-// MARK: - دوال العمليات (الزر الأزرق والبرتقالي - بدون تاخير)
+// MARK: - دالة العمليات الشاملة (للزر الأزرق)
 // ============================================================
 
 void performFullReset() {
@@ -257,7 +257,10 @@ void performFullReset() {
     clearNetworkCache();
     clearAllLocalFiles();
     
+    // تنفيذ مهام الزر الأزرق والبرتقالي معاً
     fakeAdvertisingIDString = generateRandomUUIDString();
+    fakeUDIDString = generateRandomUDID();
+    
     updateAtlantaLocation();
     generateSessionIP();
     fetchRealIP();
@@ -267,13 +270,6 @@ void performFullReset() {
     }
     
     // خروج فوري بدون تأخير
-    exit(0);
-}
-
-void changeIdentifiersOnly() {
-    fakeUDIDString = generateRandomUDID();
-    
-    // إغلاق فوري بدون تأخير
     exit(0);
 }
 
@@ -298,7 +294,7 @@ void changeIdentifiersOnly() {
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير بالبرتقالي): %@\nIDFA (يتغير بالأزرق): %@", udidDisplay, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidDisplay, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -337,7 +333,7 @@ void changeIdentifiersOnly() {
 @end
 
 // ============================================================
-// MARK: - الأزرار العائمة وإدارتها
+// MARK: - الزر العائم وإدارته
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -346,8 +342,7 @@ void changeIdentifiersOnly() {
 @implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn1 = [self viewWithTag:999888];
-    UIView *btn2 = [self viewWithTag:999777];
-    if ((btn1 && CGRectContainsPoint(btn1.frame, point)) || (btn2 && CGRectContainsPoint(btn2.frame, point))) {
+    if (btn1 && CGRectContainsPoint(btn1.frame, point)) {
         return YES;
     }
     return NO;
@@ -357,7 +352,6 @@ void changeIdentifiersOnly() {
 @interface AtlantaInfoManager : NSObject
 @property (strong, nonatomic) AtlantaWindow *floatingWindow;
 @property (strong, nonatomic) UIButton *resetBtn;
-@property (strong, nonatomic) UIButton *changeIDBtn;
 + (instancetype)sharedInstance;
 - (void)setupFloatingButtons;
 @end
@@ -387,7 +381,7 @@ void changeIdentifiersOnly() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // الزر الأزرق (🔄)
+        // الزر الأزرق الشامل (🔄)
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
@@ -405,26 +399,7 @@ void changeIdentifiersOnly() {
         [self.resetBtn addGestureRecognizer:pan1];
         [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
-        // الزر البرتقالي لتغيير الـ UDID (🆔)
-        self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.changeIDBtn.tag = 999777;
-        self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
-        self.changeIDBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:0.9];
-        [self.changeIDBtn setTitle:@"🆔" forState:UIControlStateNormal];
-        [self.changeIDBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.changeIDBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.changeIDBtn.layer.cornerRadius = 27.5;
-        self.changeIDBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.changeIDBtn.layer.shadowOffset = CGSizeMake(0, 2);
-        self.changeIDBtn.layer.shadowOpacity = 0.5;
-        self.changeIDBtn.layer.shadowRadius = 4;
-        
-        UIPanGestureRecognizer *pan2 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.changeIDBtn addGestureRecognizer:pan2];
-        [self.changeIDBtn addTarget:self action:@selector(handleChangeID) forControlEvents:UIControlEventTouchUpInside];
-        
         [vc.view addSubview:self.resetBtn];
-        [vc.view addSubview:self.changeIDBtn];
     });
 }
 
@@ -442,10 +417,6 @@ void changeIdentifiersOnly() {
 
 - (void)handleReset {
     performFullReset();
-}
-
-- (void)handleChangeID {
-    changeIdentifiersOnly();
 }
 
 @end
