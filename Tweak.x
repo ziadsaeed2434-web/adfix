@@ -7,6 +7,8 @@
 #import <objc/runtime.h>
 #import <AdSupport/ASIdentifierManager.h>
 #import <NetworkExtension/NetworkExtension.h>
+#import <AppTrackingTransparency/AppTrackingTransparency.h>
+#import <Security/Security.h>
 
 // ----------------------------------------------------------------------
 // 1. Configuration & Constants
@@ -16,6 +18,13 @@ static NSArray<NSString *> *vpnInterfaceNameSubstrings;
 static NSArray<NSString *> *ipLookupHosts;
 static NSArray<NSString *> *atlantaZipCodes;
 static NSArray<NSDictionary *> *ispData;
+
+// مفاتيح الإعلانات في NSUserDefaults
+static NSSet<NSString *> *adKeySubstrings;
+
+// قائمة خدمات Keychain التي سنعترضها
+static NSSet<NSString *> *keychainServicesToFake;
+static NSSet<NSString *> *keychainAccountsToFake;
 
 // Keys for associated objects
 static char kFakeTaskKey;
@@ -33,6 +42,9 @@ static double fakeLon = 0;
 static NSString *fakeISPName = nil;
 static NSString *fakeISPOrg = nil;
 static NSString *fakeISPAS = nil;
+
+// UUID ثابت لهذه الجلسة لـ IDFA
+static NSUUID *sessionAdvertisingIdentifier = nil;
 
 // ----------------------------------------------------------------------
 // 2. Helpers
@@ -61,7 +73,6 @@ static NSString *generateRandomIPString(void) {
     return ip;
 }
 
-// توليد هوية وهمية كاملة مرة واحدة لكل جلسة
 static void generateFakeIdentity(void) {
     fakeIP = generateRandomIPString();
     fakeZip = atlantaZipCodes[arc4random_uniform((uint32_t)atlantaZipCodes.count)];
@@ -73,11 +84,8 @@ static void generateFakeIdentity(void) {
     fakeISPAS = isp[@"as"];
 }
 
-// ----------------------------------------------------------------------
-// 3. Fake IP Response Generator (uses stored identity)
-// ----------------------------------------------------------------------
 static NSString *generateFakeIPResponse(void) {
-    if (!fakeIP) generateFakeIdentity(); // safety
+    if (!fakeIP) generateFakeIdentity();
     NSString *json = [NSString stringWithFormat:
         @"{\"status\":\"success\","
         "\"country\":\"United States\","
@@ -102,8 +110,44 @@ static NSString *generateFakeIPResponse(void) {
     return json;
 }
 
+static BOOL isAdKey(NSString *key) {
+    for (NSString *sub in adKeySubstrings) {
+        if ([key rangeOfString:sub options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+// فحص ما إذا كان استعلام Keychain يجب اعتراضه
+static BOOL shouldFakeKeychain(CFDictionaryRef query) {
+    if (!query) return NO;
+    NSDictionary *dict = (__bridge NSDictionary *)query;
+    NSString *service = dict[(__bridge id)kSecAttrService];
+    NSString *account = dict[(__bridge id)kSecAttrAccount];
+
+    if (service && [keychainServicesToFake containsObject:service]) {
+        return YES;
+    }
+    if (account && [keychainAccountsToFake containsObject:account]) {
+        return YES;
+    }
+    // اعتراض أي خدمة تحتوي على كلمات مفتاحية
+    if (service) {
+        for (NSString *sub in @[@"appmetrica", @"firebase", @"installations", @"googlesso", @"generateddeviceidentifier"]) {
+            if ([service.lowercaseString rangeOfString:sub].location != NSNotFound) return YES;
+        }
+    }
+    if (account) {
+        for (NSString *sub in @[@"appmetrica", @"firebase", @"installations", @"generateddeviceidentifier", @"deviceidentifier"]) {
+            if ([account.lowercaseString rangeOfString:sub].location != NSNotFound) return YES;
+        }
+    }
+    return NO;
+}
+
 // ----------------------------------------------------------------------
-// 4. Original C Function Pointers
+// 3. Original C Function Pointers (بما فيها Keychain)
 // ----------------------------------------------------------------------
 
 static int (*original_getifaddrs)(struct ifaddrs **);
@@ -113,8 +157,14 @@ static CFDictionaryRef (*original_SCDynamicStoreCopyProxies)(SCDynamicStoreRef);
 static CFDictionaryRef (*original_CFNetworkCopySystemProxySettings)(void);
 static Boolean (*original_SCNetworkReachabilityGetFlags)(SCNetworkReachabilityRef, SCNetworkReachabilityFlags *);
 
+// Keychain functions
+static OSStatus (*original_SecItemCopyMatching)(CFDictionaryRef query, CFTypeRef *result);
+static OSStatus (*original_SecItemAdd)(CFDictionaryRef attributes, CFTypeRef *result);
+static OSStatus (*original_SecItemUpdate)(CFDictionaryRef query, CFDictionaryRef attributesToUpdate);
+static OSStatus (*original_SecItemDelete)(CFDictionaryRef query);
+
 // ----------------------------------------------------------------------
-// 5. Hooked C Functions (same as before)
+// 4. Hooked C Functions
 // ----------------------------------------------------------------------
 
 static int hooked_getifaddrs(struct ifaddrs **ifap) {
@@ -211,8 +261,37 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
     return result;
 }
 
+// Keychain hooks
+static OSStatus hooked_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
+    if (shouldFakeKeychain(query)) {
+        return errSecItemNotFound;
+    }
+    return original_SecItemCopyMatching(query, result);
+}
+
+static OSStatus hooked_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
+    if (shouldFakeKeychain(attributes)) {
+        return errSecSuccess;
+    }
+    return original_SecItemAdd(attributes, result);
+}
+
+static OSStatus hooked_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesToUpdate) {
+    if (shouldFakeKeychain(query)) {
+        return errSecSuccess;
+    }
+    return original_SecItemUpdate(query, attributesToUpdate);
+}
+
+static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
+    if (shouldFakeKeychain(query)) {
+        return errSecSuccess;
+    }
+    return original_SecItemDelete(query);
+}
+
 // ----------------------------------------------------------------------
-// 6. Hooks for NetworkExtension
+// 5. Hooks for NetworkExtension & ATT
 // ----------------------------------------------------------------------
 
 %hook NEVPNManager
@@ -223,8 +302,14 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
 - (NEVPNStatus)status { return NEVPNStatusDisconnected; }
 %end
 
+%hook ATTrackingManager
++ (ATTrackingManagerAuthorizationStatus)trackingAuthorizationStatus {
+    return ATTrackingManagerAuthorizationStatusAuthorized;
+}
+%end
+
 // ----------------------------------------------------------------------
-// 7. NSURLSession Interception + Header Injection
+// 6. NSURLSession Interception + IP Header Injection
 // ----------------------------------------------------------------------
 
 %hook NSURLSession
@@ -251,7 +336,7 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
         }
         return task;
     } else {
-        // أي طلب آخر: نعدّل الترويسات لإخفاء الـ IP الحقيقي
+        // طلب عادي: نضيف ترويسات IP المزيفة
         NSMutableURLRequest *mutableRequest = [request mutableCopy];
         if (!fakeIP) generateFakeIdentity();
         [mutableRequest setValue:fakeIP forHTTPHeaderField:@"X-Forwarded-For"];
@@ -266,7 +351,7 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
 %end
 
 // ----------------------------------------------------------------------
-// 8. Hook resume on NSURLSessionDataTask
+// 7. Hook resume on NSURLSessionDataTask
 // ----------------------------------------------------------------------
 
 %hook NSURLSessionDataTask
@@ -305,12 +390,94 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
 %end
 
 // ----------------------------------------------------------------------
-// 9. Hide ad tracking
+// 8. إخفاء تتبع الإعلانات (ثابت)
 // ----------------------------------------------------------------------
 
 %hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier { return [NSUUID UUID]; }
-- (BOOL)isAdvertisingTrackingEnabled { return YES; }
+- (NSUUID *)advertisingIdentifier {
+    return sessionAdvertisingIdentifier;
+}
+- (BOOL)isAdvertisingTrackingEnabled {
+    return YES;
+}
+%end
+
+// ----------------------------------------------------------------------
+// 9. إعادة تعيين تتبع الإعلانات في NSUserDefaults
+// ----------------------------------------------------------------------
+
+%hook NSUserDefaults
+
+- (id)objectForKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return nil;
+    }
+    return %orig;
+}
+
+- (NSInteger)integerForKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return 0;
+    }
+    return %orig;
+}
+
+- (BOOL)boolForKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return NO;
+    }
+    return %orig;
+}
+
+- (double)doubleForKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return 0.0;
+    }
+    return %orig;
+}
+
+- (NSDictionary *)dictionaryForKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return nil;
+    }
+    return %orig;
+}
+
+- (NSArray *)arrayForKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return nil;
+    }
+    return %orig;
+}
+
+- (void)setObject:(id)value forKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return;
+    }
+    %orig;
+}
+
+- (void)setInteger:(NSInteger)value forKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return;
+    }
+    %orig;
+}
+
+- (void)setBool:(BOOL)value forKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return;
+    }
+    %orig;
+}
+
+- (void)setDouble:(double)value forKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return;
+    }
+    %orig;
+}
+
 %end
 
 // ----------------------------------------------------------------------
@@ -318,6 +485,7 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
 // ----------------------------------------------------------------------
 
 %ctor {
+    // تهيئة المصفوفات والمجموعات
     vpnInterfaceNameSubstrings = @[@"tun", @"tap", @"ppp", @"ipsec", @"utun", @"pptp", @"l2tp", @"vpn"];
     ipLookupHosts = @[
         @"ip-api.com", @"ipinfo.io", @"ipwho.is", @"ipapi.co", @"ipgeolocation.io",
@@ -342,8 +510,53 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
         @{@"name": @"Verizon Fios", @"org": @"Verizon Business", @"as": @"AS701 Verizon Business"}
     ];
 
+    // أنماط مفاتيح NSUserDefaults الإعلانية
+    adKeySubstrings = [NSSet setWithObjects:
+        @"Capping", @"lastShown", @"lastVisit", @"sessionCount",
+        @"SKANLastUpdatedTime", @"com.supersonic.events", @"vungle.connectivity.wait",
+        @"com.inobi_defaultStore_f", @"com.inobi_defaultStore_skipFields",
+        @"INMOBICMP_LastVisitTimestamp", @"INMOBICMP_GDPR_Visit_Configs",
+        @"firebase-sessions-cache-key", @"ServerAPI.cacheDate",
+        @"ServerAPI.cachedServices", @"triggerEvents", @"maxEventsPerBatch",
+        @"com.supersonic.mediation.cvFirstSessionTimestamp",
+        @"com.supersonic.mediation.networkSkanIds",
+        @"SSV", @"ssaGlobalAppData", @"VungleOIT", @"currentVungleSDKVersion",
+        @"com.unity.ads.lastKnownUserAgent", @"com.unity.ads.lastSystemVersion",
+        @"unityads-idfi", @"com.inobi_defaultStore_SKAN",
+        @"IABTCF_", @"IABGPP_", @"IABUSPrivacy_String", @"optOut",
+        @"mtg_krepanKey", @"MTG_kTransformed", @"MintegralUserDefaultKeys",
+        @"IS_CappingManager", @"BN_CappingManager", @"RV_CappingManager",
+        @"soomlaGeneratedId", @"auid", @"uuidStringFromStore", @"GBCHash",
+        @"com.inobi_defaultStore_kA", @"com.inobi_defaultStore_cip",
+        @"com.inobi_defaultStore_vAK", @"com.inobi_defaultStore_inmobi.sdkversion",
+        @"DeviceOSVersion", @"browserUserAgentTime", @"ua",
+        @"attValue", @"IABUSPrivacy_String", @"optIn",
+        nil
+    ];
+
+    // خدمات وحسابات Keychain للاعتراض
+    keychainServicesToFake = [NSSet setWithObjects:
+        @"io.appmetrica.service.application",
+        @"com.google.sso.GeneratedDeviceIdentifier",
+        @"wiki.qaq.Asspp.DeviceIdentifier",
+        @"com.firebase.FIRInstallations.installations",
+        @"D7CA1CE6DE13787FD151D81C8E2C8C56",
+        nil
+    ];
+    keychainAccountsToFake = [NSSet setWithObjects:
+        @"AMAMetricaPersistentConfigurationDeviceIDStorageKey",
+        @"AMAMetricaPersistentConfigurationDeviceIDHashStorageKey",
+        @"GeneratedDeviceIdentifier",
+        @"DeviceIdentifier",
+        @"1:580931174328:ios:bd844db744cd3c48a1194d__FIRAPP_DEFAULT",
+        @"1:755541669657:ios:4d6d5a5ce71e9d30__FIRAPP_DEFAULT",
+        @"D7CA1CE6DE13787FD151D81C8E2C8C56",
+        nil
+    ];
+
     // توليد الهوية الوهمية لهذه الجلسة
     generateFakeIdentity();
+    sessionAdvertisingIdentifier = [NSUUID UUID];
 
     // Hook C functions
     void *getifaddrs_ptr = dlsym(RTLD_DEFAULT, "getifaddrs");
@@ -375,4 +588,17 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
     if (reach_flags_ptr) {
         MSHookFunction(reach_flags_ptr, (void *)hooked_SCNetworkReachabilityGetFlags, (void **)&original_SCNetworkReachabilityGetFlags);
     }
+
+    // Hook Keychain functions
+    void *secCopy = dlsym(RTLD_DEFAULT, "SecItemCopyMatching");
+    if (secCopy) MSHookFunction(secCopy, (void *)hooked_SecItemCopyMatching, (void **)&original_SecItemCopyMatching);
+
+    void *secAdd = dlsym(RTLD_DEFAULT, "SecItemAdd");
+    if (secAdd) MSHookFunction(secAdd, (void *)hooked_SecItemAdd, (void **)&original_SecItemAdd);
+
+    void *secUpdate = dlsym(RTLD_DEFAULT, "SecItemUpdate");
+    if (secUpdate) MSHookFunction(secUpdate, (void *)hooked_SecItemUpdate, (void **)&original_SecItemUpdate);
+
+    void *secDelete = dlsym(RTLD_DEFAULT, "SecItemDelete");
+    if (secDelete) MSHookFunction(secDelete, (void *)hooked_SecItemDelete, (void **)&original_SecItemDelete);
 }
