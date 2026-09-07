@@ -1,522 +1,412 @@
-#import <CoreLocation/CoreLocation.h>
-#import <UIKit/UIKit.h>
-#import <AdSupport/ASIdentifierManager.h>
-#import <WebKit/WebKit.h>
-#import <Security/Security.h>
+#import <substrate.h>
+#import <Foundation/Foundation.h>
+#import <SystemConfiguration/SystemConfiguration.h>
+#import <CFNetwork/CFNetwork.h>
+#import <Network/Network.h>
+#import <ifaddrs.h>
+#import <dlfcn.h>
 
-// ============================================================
-// MARK: - المتغيرات العامة
-// ============================================================
+// ----------------------------------------------------------------------
+// 1. Configuration & Constants
+// ----------------------------------------------------------------------
 
-static double currentLat = 0.0;
-static double currentLon = 0.0;
-static NSString *sessionFakeIP = nil;
-static NSString *currentRealIP = @"جاري الجلب...";
-static NSMutableArray *networkLogs = nil;
+// Substrings that identify VPN/tunnel interfaces in their names.
+static NSArray<NSString *> *vpnInterfaceNameSubstrings;
 
-// المعرفات المزيفة
-static NSString *fakeAdvertisingIDString = nil;
-static NSString *fakeUDIDString = nil; 
+// Hosts that are known IP geolocation / proxy / ASN lookup endpoints.
+static NSArray<NSString *> *ipLookupHosts;
 
-// ============================================================
-// MARK: - دالة توليد معرف عشوائي آمن (UUID String)
-// ============================================================
+// Atlanta area data
+static NSArray<NSString *> *atlantaZipCodes;
+static NSArray<NSDictionary *> *ispData; // array of dicts with keys: name, org, as
 
-NSString *generateRandomUUIDString() {
-    return [[NSUUID UUID] UUIDString];
+// ----------------------------------------------------------------------
+// 2. Dynamic Fake IP Response Generator (Atlanta, GA)
+// ----------------------------------------------------------------------
+
+/**
+ * Generates a fake JSON response with:
+ * - Random IP from 172.56.x.x, 172.57.x.x, 172.59.x.x
+ * - Random location within Atlanta, Georgia (random zip, lat/lon, ISP)
+ * - All proxy/vpn/datacenter flags false
+ */
+static NSString *generateFakeIPResponse(void) {
+    // Random IP from specified ranges
+    NSArray<NSNumber *> *secondOctets = @[@56, @57, @59];
+    int second = [secondOctets[arc4random_uniform((uint32_t)secondOctets.count)] intValue];
+    int third = 1 + arc4random_uniform(254);
+    int fourth = 1 + arc4random_uniform(254);
+    NSString *ip = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
+
+    // Random Atlanta zip code
+    NSString *zip = atlantaZipCodes[arc4random_uniform((uint32_t)atlantaZipCodes.count)];
+
+    // Random latitude within Atlanta (approx 33.65 - 33.95)
+    double lat = 33.65 + ((double)arc4random_uniform(3000) / 10000.0); // 0.3 range
+    // Random longitude within Atlanta (approx -84.55 to -84.25)
+    double lon = -84.55 + ((double)arc4random_uniform(3000) / 10000.0);
+
+    // Random ISP info from list
+    NSDictionary *isp = ispData[arc4random_uniform((uint32_t)ispData.count)];
+    NSString *ispName = isp[@"name"];
+    NSString *ispOrg = isp[@"org"];
+    NSString *ispAS = isp[@"as"];
+
+    // Build JSON with proper escaping
+    NSString *json = [NSString stringWithFormat:
+        @"{\"status\":\"success\","
+        "\"country\":\"United States\","
+        "\"countryCode\":\"US\","
+        "\"region\":\"GA\","
+        "\"regionName\":\"Georgia\","
+        "\"city\":\"Atlanta\","
+        "\"zip\":\"%@\","
+        "\"lat\":%.4f,"
+        "\"lon\":%.4f,"
+        "\"timezone\":\"America/New_York\","
+        "\"isp\":\"%@\","
+        "\"org\":\"%@\","
+        "\"as\":\"%@\","
+        "\"query\":\"%@\","
+        "\"proxy\":false,"
+        "\"hosting\":false,"
+        "\"vpn\":false,"
+        "\"tor\":false,"
+        "\"datacenter\":false}",
+        zip, lat, lon, ispName, ispOrg, ispAS, ip];
+    return json;
 }
 
-NSString *generateRandomUDID() {
-    NSString *letters = @"0123456789abcdef";
-    NSMutableString *randomHex1 = [NSMutableString stringWithCapacity:8];
-    NSMutableString *randomHex2 = [NSMutableString stringWithCapacity:12];
-    
-    for (int i = 0; i < 8; i++) {
-        [randomHex1 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
-    }
-    for (int i = 0; i < 12; i++) {
-        [randomHex2 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
-    }
-    
-    return [NSString stringWithFormat:@"00008130-%@-%@", randomHex1, randomHex2];
-}
+// ----------------------------------------------------------------------
+// 3. Original C Function Pointers (for MSHookFunction)
+// ----------------------------------------------------------------------
 
-// ============================================================
-// MARK: - دوال مساعدة
-// ============================================================
+static int (*original_getifaddrs)(struct ifaddrs **);
+static CFStringRef (*original_SCNetworkInterfaceGetName)(SCNetworkInterfaceRef);
+static CFStringRef (*original_SCNetworkInterfaceGetInterfaceType)(SCNetworkInterfaceRef);
+static CFDictionaryRef (*original_SCDynamicStoreCopyProxies)(SCDynamicStoreRef);
+static CFDictionaryRef (*original_CFNetworkCopySystemProxySettings)(void);
 
-double randomInRange(double min, double max) {
-    return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
-}
+// ----------------------------------------------------------------------
+// 4. Hooked C Functions
+// ----------------------------------------------------------------------
 
-void updateAtlantaLocation() {
-    currentLat = randomInRange(33.7000, 33.8000);
-    currentLon = randomInRange(-84.4500, -84.3500);
-}
+/**
+ * getifaddrs - hide VPN interfaces from the returned list.
+ */
+static int hooked_getifaddrs(struct ifaddrs **ifap) {
+    int result = original_getifaddrs(ifap);
+    if (result == 0 && ifap != NULL && *ifap != NULL) {
+        struct ifaddrs *current = *ifap;
+        struct ifaddrs *previous = NULL;
 
-NSArray *generate10IPs() {
-    NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
-    int allowedSecondOctets[] = {56, 57, 59};
-    for (int i = 0; i < 10; i++) {
-        int second = allowedSecondOctets[arc4random_uniform(3)];
-        int third = arc4random_uniform(256);
-        int fourth = arc4random_uniform(256);
-        NSString *ip = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
-        [tempList addObject:ip];
-    }
-    return [tempList copy];
-}
+        while (current != NULL) {
+            NSString *name = [NSString stringWithUTF8String:current->ifa_name ?: ""];
+            BOOL isVPN = NO;
+            for (NSString *sub in vpnInterfaceNameSubstrings) {
+                if ([name rangeOfString:sub options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    isVPN = YES;
+                    break;
+                }
+            }
 
-BOOL verifyIPQuality(NSString *ip) {
-    if (!ip || ip.length == 0) return NO;
-    
-    NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,isp,org,as", ip];
-    NSURL *url = [NSURL URLWithString:urlString];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    [request setTimeoutInterval:3.0];
-    
-    __block NSData *responseData = nil;
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        responseData = data;
-        dispatch_semaphore_signal(semaphore);
-    }];
-    [task resume];
-    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)));
-    
-    if (!responseData) return YES;
-    
-    NSError *jsonError = nil;
-    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
-    if (jsonError || !json) return YES;
-    if (![json[@"status"] isEqualToString:@"success"]) return YES;
-    
-    NSString *org = json[@"org"] ?: @"";
-    NSString *isp = json[@"isp"] ?: @"";
-    NSString *as = json[@"as"] ?: @"";
-    NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", org, isp, as];
-    
-    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
-    for (NSString *keyword in badKeywords) {
-        if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            return NO;
+            if (isVPN) {
+                if (previous == NULL) {
+                    *ifap = current->ifa_next;
+                    current = current->ifa_next;
+                } else {
+                    previous->ifa_next = current->ifa_next;
+                    current = current->ifa_next;
+                }
+            } else {
+                previous = current;
+                current = current->ifa_next;
+            }
         }
     }
-    return YES;
+    return result;
 }
 
-void generateSessionIP() {
-    NSArray *candidates = generate10IPs();
-    NSString *selectedIP = nil;
-    
-    for (NSString *ip in candidates) {
-        if (verifyIPQuality(ip)) {
-            selectedIP = ip;
+/**
+ * SCNetworkInterfaceGetName - return a non‑VPN name for VPN interfaces.
+ */
+static CFStringRef hooked_SCNetworkInterfaceGetName(SCNetworkInterfaceRef interface) {
+    CFStringRef originalName = original_SCNetworkInterfaceGetName(interface);
+    if (originalName == NULL) return NULL;
+
+    NSString *name = (__bridge NSString *)originalName;
+    BOOL isVPN = NO;
+    for (NSString *sub in vpnInterfaceNameSubstrings) {
+        if ([name rangeOfString:sub options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            isVPN = YES;
             break;
         }
     }
-    
-    if (!selectedIP) {
-        selectedIP = candidates.lastObject;
+
+    if (isVPN) {
+        return CFSTR("en0");
     }
-    
-    sessionFakeIP = selectedIP;
+    return originalName;
 }
 
-void fetchRealIP() {
+/**
+ * SCNetworkInterfaceGetInterfaceType - return Ethernet for VPN interfaces.
+ */
+static CFStringRef hooked_SCNetworkInterfaceGetInterfaceType(SCNetworkInterfaceRef interface) {
+    CFStringRef originalType = original_SCNetworkInterfaceGetInterfaceType(interface);
+    if (originalType == NULL) return NULL;
+
+    CFStringRef nameRef = original_SCNetworkInterfaceGetName(interface);
+    if (nameRef == NULL) return originalType;
+
+    NSString *name = (__bridge NSString *)nameRef;
+    BOOL isVPN = NO;
+    for (NSString *sub in vpnInterfaceNameSubstrings) {
+        if ([name rangeOfString:sub options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            isVPN = YES;
+            break;
+        }
+    }
+
+    if (isVPN) {
+        return kSCNetworkInterfaceTypeEthernet;
+    }
+    return originalType;
+}
+
+/**
+ * SCDynamicStoreCopyProxies - disable all proxy settings.
+ */
+static CFDictionaryRef hooked_SCDynamicStoreCopyProxies(SCDynamicStoreRef store) {
+    static CFDictionaryRef disabledProxies = NULL;
+    if (disabledProxies == NULL) {
+        const void *keys[] = {
+            kSCPropNetProxiesHTTPEnable,
+            kSCPropNetProxiesHTTPSEnable,
+            kSCPropNetProxiesProxyAutoConfigEnable,
+            kSCPropNetProxiesFTPEnable,
+            kSCPropNetProxiesSOCKSEnable,
+            kSCPropNetProxiesRTSPEnable,
+            kSCPropNetProxiesGopherEnable,
+        };
+        const void *values[] = {
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+        };
+        size_t count = sizeof(keys) / sizeof(keys[0]);
+        disabledProxies = CFDictionaryCreate(kCFAllocatorDefault, keys, values, count,
+                                             &kCFTypeDictionaryKeyCallBacks,
+                                             &kCFTypeDictionaryValueCallBacks);
+    }
+    CFRetain(disabledProxies);
+    return disabledProxies;
+}
+
+/**
+ * CFNetworkCopySystemProxySettings - same as above.
+ */
+static CFDictionaryRef hooked_CFNetworkCopySystemProxySettings(void) {
+    static CFDictionaryRef disabledProxies = NULL;
+    if (disabledProxies == NULL) {
+        const void *keys[] = {
+            kCFNetworkProxiesHTTPEnable,
+            kCFNetworkProxiesHTTPSEnable,
+            kCFNetworkProxiesProxyAutoConfigEnable,
+            kCFNetworkProxiesFTPEnable,
+            kCFNetworkProxiesSOCKSEnable,
+            kCFNetworkProxiesRTSPEnable,
+            kCFNetworkProxiesGopherEnable,
+        };
+        const void *values[] = {
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+            kCFBooleanFalse,
+        };
+        size_t count = sizeof(keys) / sizeof(keys[0]);
+        disabledProxies = CFDictionaryCreate(kCFAllocatorDefault, keys, values, count,
+                                             &kCFTypeDictionaryKeyCallBacks,
+                                             &kCFTypeDictionaryValueCallBacks);
+    }
+    CFRetain(disabledProxies);
+    return disabledProxies;
+}
+
+// ----------------------------------------------------------------------
+// 5. Fake NSURLSessionDataTask for Intercepting IP Lookups
+// ----------------------------------------------------------------------
+
+@interface FakeDataTask : NSURLSessionDataTask
+@property (nonatomic, copy) void (^completionHandler)(NSData *, NSURLResponse *, NSError *);
+@property (nonatomic, strong) NSURLRequest *request;
+@end
+
+@implementation FakeDataTask
+
+- (instancetype)initWithRequest:(NSURLRequest *)request
+             completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
+    self = [super init];
+    if (self) {
+        _request = request;
+        _completionHandler = [handler copy];
+    }
+    return self;
+}
+
+- (void)resume {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
-        NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
-        if (ip && ip.length > 0) {
-            currentRealIP = ip;
-        } else {
-            currentRealIP = @"غير قادر على الجلب";
+        if (self.completionHandler) {
+            NSString *json = generateFakeIPResponse();
+            NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+            NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL
+                                                                      statusCode:200
+                                                                     HTTPVersion:@"HTTP/1.1"
+                                                                    headerFields:@{@"Content-Type": @"application/json"}];
+            self.completionHandler(data, response, nil);
+            self.completionHandler = nil;
         }
     });
 }
 
-void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
-    if (!networkLogs) {
-        networkLogs = [[NSMutableArray alloc] init];
-    }
-    NSURL *url = [NSURL URLWithString:urlStr];
-    NSString *path = url.path ? url.path : urlStr;
-    if (path.length > 30) {
-        path = [[path substringToIndex:30] stringByAppendingString:@"..."];
-    }
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP: %@\n📍 الموقع: (%.4f, %.4f)", path, ip, lat, lon];
-    @synchronized(networkLogs) {
-        [networkLogs insertObject:logEntry atIndex:0];
-        if (networkLogs.count > 15) {
-            [networkLogs removeLastObject];
+- (void)cancel {}
+- (void)suspend {}
+
+- (void)dealloc {
+    self.completionHandler = nil;
+}
+
+@end
+
+// ----------------------------------------------------------------------
+// 6. Hook NSURLSession to Intercept Known IP Lookup Requests
+// ----------------------------------------------------------------------
+
+%hook NSURLSession
+
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
+                           completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    NSString *host = request.URL.host.lowercaseString;
+    BOOL shouldIntercept = NO;
+    for (NSString *h in ipLookupHosts) {
+        if ([host hasSuffix:h] || [host isEqualToString:h]) {
+            shouldIntercept = YES;
+            break;
         }
     }
-}
 
-// ============================================================
-// MARK: - مسح Keychain مع الحفاظ على الحساب
-// ============================================================
-
-void clearKeychainKeepingAccount() {
-    NSString *savedUserID = nil;
-    NSString *savedAccessToken = nil;
-    NSDictionary *query = @{
-        (id)kSecClass: (id)kSecClassGenericPassword,
-        (id)kSecMatchLimit: (id)kSecMatchLimitAll,
-        (id)kSecReturnAttributes: @YES,
-        (id)kSecReturnData: @YES
-    };
-    CFArrayRef result = NULL;
-    OSStatus status = SecItemCopyMatching((CFDictionaryRef)query, (CFTypeRef *)&result);
-    if (status == errSecSuccess && result != NULL) {
-        NSArray *items = (__bridge NSArray *)result;
-        for (NSDictionary *item in items) {
-            NSString *service = item[(id)kSecAttrService];
-            NSString *account = item[(id)kSecAttrAccount];
-            NSData *valueData = item[(id)kSecValueData];
-            NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
-            if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"userIDKey"]) {
-                savedUserID = value;
-            } else if ([service isEqualToString:@"com.codebysms"] && [account isEqualToString:@"accessTokenKey"]) {
-                savedAccessToken = value;
-            }
-        }
-        CFRelease(result);
-    }
-
-    NSArray *secClasses = @[(id)kSecClassGenericPassword, (id)kSecClassInternetPassword, (id)kSecClassCertificate, (id)kSecClassKey, (id)kSecClassIdentity];
-    for (id secClass in secClasses) {
-        NSDictionary *deleteQuery = @{(id)kSecClass: secClass, (id)kSecMatchLimit: (id)kSecMatchLimitAll};
-        SecItemDelete((CFDictionaryRef)deleteQuery);
-    }
-
-    if (savedUserID) {
-        NSDictionary *addQuery = @{
-            (id)kSecClass: (id)kSecClassGenericPassword,
-            (id)kSecAttrService: @"com.codebysms",
-            (id)kSecAttrAccount: @"userIDKey",
-            (id)kSecValueData: [savedUserID dataUsingEncoding:NSUTF8StringEncoding]
-        };
-        SecItemAdd((CFDictionaryRef)addQuery, NULL);
-    }
-    if (savedAccessToken) {
-        NSDictionary *addQuery = @{
-            (id)kSecClass: (id)kSecClassGenericPassword,
-            (id)kSecAttrService: @"com.codebysms",
-            (id)kSecAttrAccount: @"accessTokenKey",
-            (id)kSecValueData: [savedAccessToken dataUsingEncoding:NSUTF8StringEncoding]
-        };
-        SecItemAdd((CFDictionaryRef)addQuery, NULL);
+    if (shouldIntercept) {
+        return [[FakeDataTask alloc] initWithRequest:request
+                                  completionHandler:completionHandler];
+    } else {
+        return %orig;
     }
 }
 
-void clearAllCookies() {
-    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
-        [cookieStorage deleteCookie:cookie];
-    }
-    
-    NSSet *dataTypes = [NSSet setWithObject:WKWebsiteDataTypeCookies];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
-    
-    NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url
+                       completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    NSURLRequest *request = [NSURLRequest requestWithURL:url];
+    return [self dataTaskWithRequest:request completionHandler:completionHandler];
 }
 
-void clearNetworkCache() {
-    [[NSURLCache sharedURLCache] removeAllCachedResponses];
-    [[NSURLCache sharedURLCache] setDiskCapacity:0];
-    [[NSURLCache sharedURLCache] setMemoryCapacity:0];
-}
+%end
 
-void clearAllLocalFiles() {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *dirs = @[
-        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject,
-        NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject,
-        NSTemporaryDirectory()
-    ];
-    
-    for (NSString *dir in dirs) {
-        if (dir) {
-            NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
-            for (NSString *item in items) {
-                [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
-            }
-        }
-    }
-}
+// ----------------------------------------------------------------------
+// 7. Hook NWPath to Hide VPN Interface Types
+// ----------------------------------------------------------------------
 
-// ============================================================
-// MARK: - دوال العمليات (الزر الأزرق والبرتقالي) - تنفيذ فوري
-// ============================================================
+%hook NWPath
 
-void performFullReset() {
-    clearKeychainKeepingAccount();
-    clearAllCookies();
-    clearNetworkCache();
-    clearAllLocalFiles();
-    
-    fakeAdvertisingIDString = generateRandomUUIDString();
-    updateAtlantaLocation();
-    generateSessionIP();
-    fetchRealIP();
-    
-    @synchronized(networkLogs) {
-        [networkLogs removeAllObjects];
-    }
-    
-    // الخروج فوراً بدون تأخير
-    exit(0);
-}
-
-void changeIdentifiersOnly() {
-    fakeUDIDString = generateRandomUDID();
-    
-    // إغلاق التطبيق فوراً بدون تأخير
-    exit(0);
-}
-
-// ============================================================
-// MARK: - واجهة عرض التقارير
-// ============================================================
-
-@interface AtlantaReportViewController : UIViewController
-@end
-
-@implementation AtlantaReportViewController
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.95];
-    
-    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
-    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self.view addSubview:scrollView];
-    
-    NSString *idfaStr = fakeAdvertisingIDString ?: [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
-    NSString *udidDisplay = fakeUDIDString ?: @"غير متوفر (لم يتم التغيير بعد)";
-    
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير بالبرتقالي): %@\nIDFA (يتغير بالأزرق): %@", udidDisplay, idfaStr];
-    
-    NSString *logsText = @"";
-    @synchronized(networkLogs) {
-        if (networkLogs && networkLogs.count > 0) {
-            logsText = [networkLogs componentsJoinedByString:@"\n\n--------------------\n\n"];
-        } else {
-            logsText = @"لا توجد طلبات مسجلة بعد.";
-        }
-    }
-    
-    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 تفاصيل الطلبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
-    
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, self.view.bounds.size.width - 40, 0)];
-    label.text = fullReport;
-    label.textColor = [UIColor whiteColor];
-    label.font = [UIFont systemFontOfSize:13];
-    label.numberOfLines = 0;
-    [label sizeToFit];
-    
-    scrollView.contentSize = CGSizeMake(self.view.bounds.size.width, label.frame.size.height + 160);
-    [scrollView addSubview:label];
-    
-    UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeBtn.frame = CGRectMake(20, 30, 80, 35);
-    closeBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:1.0];
-    [closeBtn setTitle:@"إغلاق" forState:UIControlStateNormal];
-    [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    closeBtn.layer.cornerRadius = 8;
-    [closeBtn addTarget:self action:@selector(dismissPopup) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:closeBtn];
-}
-
-- (void)dismissPopup {
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
-@end
-
-// ============================================================
-// MARK: - الأزرار العائمة وإدارتها
-// ============================================================
-
-@interface AtlantaWindow : UIWindow
-@end
-
-@implementation AtlantaWindow
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn1 = [self viewWithTag:999888];
-    UIView *btn2 = [self viewWithTag:999777];
-    if ((btn1 && CGRectContainsPoint(btn1.frame, point)) || (btn2 && CGRectContainsPoint(btn2.frame, point))) {
-        return YES;
-    }
-    return NO;
-}
-@end
-
-@interface AtlantaInfoManager : NSObject
-@property (strong, nonatomic) AtlantaWindow *floatingWindow;
-@property (strong, nonatomic) UIButton *resetBtn;
-@property (strong, nonatomic) UIButton *changeIDBtn;
-+ (instancetype)sharedInstance;
-- (void)setupFloatingButtons;
-@end
-
-@implementation AtlantaInfoManager
-
-+ (instancetype)sharedInstance {
-    static AtlantaInfoManager *sharedInstance = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        sharedInstance = [[self alloc] init];
-    });
-    return sharedInstance;
-}
-
-- (void)setupFloatingButtons {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.floatingWindow) return;
-        
-        CGRect screenBounds = [UIScreen mainScreen].bounds;
-        self.floatingWindow = [[AtlantaWindow alloc] initWithFrame:screenBounds];
-        self.floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
-        self.floatingWindow.hidden = NO;
-        self.floatingWindow.backgroundColor = [UIColor clearColor];
-        
-        UIViewController *vc = [[UIViewController alloc] init];
-        vc.view.backgroundColor = [UIColor clearColor];
-        self.floatingWindow.rootViewController = vc;
-        
-        // الزر الأزرق (🔄)
-        self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.resetBtn.tag = 999888;
-        self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
-        self.resetBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.resetBtn setTitle:@"🔄" forState:UIControlStateNormal];
-        [self.resetBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.resetBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.resetBtn.layer.cornerRadius = 27.5;
-        self.resetBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.resetBtn.layer.shadowOffset = CGSizeMake(0, 2);
-        self.resetBtn.layer.shadowOpacity = 0.5;
-        self.resetBtn.layer.shadowRadius = 4;
-        
-        UIPanGestureRecognizer *pan1 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.resetBtn addGestureRecognizer:pan1];
-        [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
-        
-        // الزر البرتقالي لتغيير الـ UDID (🆔)
-        self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.changeIDBtn.tag = 999777;
-        self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
-        self.changeIDBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:0.9];
-        [self.changeIDBtn setTitle:@"🆔" forState:UIControlStateNormal];
-        [self.changeIDBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.changeIDBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.changeIDBtn.layer.cornerRadius = 27.5;
-        self.changeIDBtn.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.changeIDBtn.layer.shadowOffset = CGSizeMake(0, 2);
-        self.changeIDBtn.layer.shadowOpacity = 0.5;
-        self.changeIDBtn.layer.shadowRadius = 4;
-        
-        UIPanGestureRecognizer *pan2 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.changeIDBtn addGestureRecognizer:pan2];
-        [self.changeIDBtn addTarget:self action:@selector(handleChangeID) forControlEvents:UIControlEventTouchUpInside];
-        
-        [vc.view addSubview:self.resetBtn];
-        [vc.view addSubview:self.changeIDBtn];
-    });
-}
-
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    UIView *btn = gesture.view;
-    CGPoint translation = [gesture translationInView:btn.superview];
-    CGFloat newX = btn.center.x + translation.x;
-    CGFloat newY = btn.center.y + translation.y;
-    CGSize screenSize = [UIScreen mainScreen].bounds.size;
-    newX = MAX(30, MIN(screenSize.width - 30, newX));
-    newY = MAX(40, MIN(screenSize.height - 40, newY));
-    btn.center = CGPointMake(newX, newY);
-    [gesture setTranslation:CGPointZero inView:btn.superview];
-}
-
-- (void)handleReset {
-    performFullReset();
-}
-
-- (void)handleChangeID {
-    changeIdentifiersOnly();
-}
-
-@end
-
-// ============================================================
-// MARK: - الـ Hooks الآمنة
-// ============================================================
-
-%ctor {
-    updateAtlantaLocation();
-    generateSessionIP();
-    fakeAdvertisingIDString = generateRandomUUIDString();
-    fetchRealIP();
-    
-    // إظهار الأزرار فوراً بدون أي تأخير عند فتح التطبيق
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [[AtlantaInfoManager sharedInstance] setupFloatingButtons];
-    });
-}
-
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    if (fakeAdvertisingIDString) {
-        return [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString];
+- (BOOL)usesInterfaceType:(NWInterfaceType)interfaceType {
+    if (interfaceType == NWInterfaceTypeTunnel || interfaceType == NWInterfaceTypeOther) {
+        return NO;
     }
     return %orig;
 }
+
 %end
 
-%hook CLLocationManager
-- (void)startUpdatingLocation {
-    updateAtlantaLocation();
-    CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-    if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-        [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
-    }
-}
-- (CLLocation *)location {
-    updateAtlantaLocation();
-    return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-}
-%end
+// ----------------------------------------------------------------------
+// 8. Constructor – Install Hooks and Initialise Static Data
+// ----------------------------------------------------------------------
 
-%hook NSURLSession
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    if (sessionFakeIP) {
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
-    }
-    NSString *urlString = request.URL.absoluteString;
-    if (urlString) {
-        logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
-    }
-    return %orig(mutableReq, completionHandler);
-}
-%end
+%ctor {
+    vpnInterfaceNameSubstrings = @[@"tun", @"tap", @"ppp", @"ipsec", @"utun", @"pptp", @"l2tp", @"vpn"];
+    ipLookupHosts = @[
+        @"ip-api.com",
+        @"ipinfo.io",
+        @"ipwho.is",
+        @"ipapi.co",
+        @"ipgeolocation.io",
+        @"ip2location.com",
+        @"maxmind.com",
+        @"ipqualityscore.com",
+        @"getipintel.net",
+        @"proxycheck.io",
+        @"iphub.info",
+        @"vpnapi.io",
+        @"ipdata.co",
+        @"ipstack.com",
+        @"ipvigilante.com",
+        @"freegeoip.app",
+        @"extreme-ip-lookup.com",
+        @"ipify.org",
+        @"ipapi.com",
+        @"ipregistry.co",
+        @"ip.sb",
+        @"ipwhois.app",
+        @"ifconfig.co",
+        @"ipapi.is",
+        @"ip2location.io",
+    ];
 
-%hook NSURLConnection
-+ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    if (sessionFakeIP) {
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+    // Atlanta zip codes (common ones)
+    atlantaZipCodes = @[
+        @"30301", @"30303", @"30305", @"30308", @"30309", @"30310",
+        @"30312", @"30313", @"30314", @"30315", @"30316", @"30317",
+        @"30318", @"30319", @"30324", @"30326", @"30327", @"30328",
+        @"30329", @"30331", @"30332", @"30334", @"30339", @"30342",
+        @"30344", @"30346", @"30349", @"30350", @"30354", @"30363"
+    ];
+
+    // ISP data: name, org, as
+    ispData = @[
+        @{@"name": @"Comcast Cable", @"org": @"Comcast Cable Communications, LLC", @"as": @"AS7922 Comcast Cable Communications, LLC"},
+        @{@"name": @"AT&T Internet", @"org": @"AT&T Services, Inc.", @"as": @"AS7018 AT&T Services, Inc."},
+        @{@"name": @"Spectrum", @"org": @"Charter Communications", @"as": @"AS20115 Charter Communications"},
+        @{@"name": @"Verizon Fios", @"org": @"Verizon Business", @"as": @"AS701 Verizon Business"}
+    ];
+
+    // Hook C functions
+    void *getifaddrs_ptr = dlsym(RTLD_DEFAULT, "getifaddrs");
+    if (getifaddrs_ptr) {
+        MSHookFunction(getifaddrs_ptr, (void *)hooked_getifaddrs, (void **)&original_getifaddrs);
     }
-    NSString *urlString = request.URL.absoluteString;
-    if (urlString) {
-        logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
+
+    void *scni_name_ptr = dlsym(RTLD_DEFAULT, "SCNetworkInterfaceGetName");
+    if (scni_name_ptr) {
+        MSHookFunction(scni_name_ptr, (void *)hooked_SCNetworkInterfaceGetName, (void **)&original_SCNetworkInterfaceGetName);
     }
-    %orig(mutableReq, queue, handler);
+
+    void *scni_type_ptr = dlsym(RTLD_DEFAULT, "SCNetworkInterfaceGetInterfaceType");
+    if (scni_type_ptr) {
+        MSHookFunction(scni_type_ptr, (void *)hooked_SCNetworkInterfaceGetInterfaceType, (void **)&original_SCNetworkInterfaceGetInterfaceType);
+    }
+
+    void *scd_proxies_ptr = dlsym(RTLD_DEFAULT, "SCDynamicStoreCopyProxies");
+    if (scd_proxies_ptr) {
+        MSHookFunction(scd_proxies_ptr, (void *)hooked_SCDynamicStoreCopyProxies, (void **)&original_SCDynamicStoreCopyProxies);
+    }
+
+    void *cfn_proxies_ptr = dlsym(RTLD_DEFAULT, "CFNetworkCopySystemProxySettings");
+    if (cfn_proxies_ptr) {
+        MSHookFunction(cfn_proxies_ptr, (void *)hooked_CFNetworkCopySystemProxySettings, (void **)&original_CFNetworkCopySystemProxySettings);
+    }
 }
-%end
