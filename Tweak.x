@@ -135,8 +135,8 @@ static CFStringRef hooked_SCNetworkInterfaceGetInterfaceType(SCNetworkInterfaceR
         }
     }
     if (isVPN) {
-        // استخدم نوع Wi-Fi بدلاً من Ethernet
-        return kSCNetworkInterfaceTypeIEEE80211;
+        // استخدام سلسلة نصية تمثل نوع واجهة عادي (غير متوفر كثابت على iOS)
+        return CFSTR("WiFi");
     }
     return originalType;
 }
@@ -205,7 +205,7 @@ static CFDictionaryRef hooked_CFNetworkCopySystemProxySettings(void) {
 
 - (void)dealloc {
     self.completionHandler = nil;
-    [super dealloc]; // إضافة استدعاء super
+    [super dealloc];
 }
 
 @end
