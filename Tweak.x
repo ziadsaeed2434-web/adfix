@@ -303,8 +303,8 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
 %end
 
 %hook ATTrackingManager
-+ (ATTrackingManagerAuthorizationStatus)trackingAuthorizationStatus {
-    return ATTrackingManagerAuthorizationStatusAuthorized;
++ (NSInteger)trackingAuthorizationStatus {
+    return 3; // ATTrackingManagerAuthorizationStatusAuthorized
 }
 %end
 
@@ -485,7 +485,6 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
 // ----------------------------------------------------------------------
 
 %ctor {
-    // تهيئة المصفوفات والمجموعات
     vpnInterfaceNameSubstrings = @[@"tun", @"tap", @"ppp", @"ipsec", @"utun", @"pptp", @"l2tp", @"vpn"];
     ipLookupHosts = @[
         @"ip-api.com", @"ipinfo.io", @"ipwho.is", @"ipapi.co", @"ipgeolocation.io",
@@ -510,7 +509,6 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
         @{@"name": @"Verizon Fios", @"org": @"Verizon Business", @"as": @"AS701 Verizon Business"}
     ];
 
-    // أنماط مفاتيح NSUserDefaults الإعلانية
     adKeySubstrings = [NSSet setWithObjects:
         @"Capping", @"lastShown", @"lastVisit", @"sessionCount",
         @"SKANLastUpdatedTime", @"com.supersonic.events", @"vungle.connectivity.wait",
@@ -534,7 +532,6 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
         nil
     ];
 
-    // خدمات وحسابات Keychain للاعتراض
     keychainServicesToFake = [NSSet setWithObjects:
         @"io.appmetrica.service.application",
         @"com.google.sso.GeneratedDeviceIdentifier",
@@ -554,7 +551,6 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
         nil
     ];
 
-    // توليد الهوية الوهمية لهذه الجلسة
     generateFakeIdentity();
     sessionAdvertisingIdentifier = [NSUUID UUID];
 
