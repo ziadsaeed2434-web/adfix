@@ -18,25 +18,27 @@ static NSArray<NSString *> *ipLookupHosts;
 static NSArray<NSString *> *atlantaZipCodes;
 static NSArray<NSDictionary *> *ispData;
 
-// أنماط واسعة للمفاتيح الإعلانية
-static NSSet<NSString *> *adKeySubstrings;
+// كلمات زمنية
+static NSArray<NSString *> *timeIndicators;
+// كلمات إعلانية
+static NSArray<NSString *> *adIndicators;
 
-// كلمات زمنية إضافية
-static NSArray<NSString *> *timeKeySubstrings;
-
-// استثناءات Keychain (الحسابات المهمة)
-static NSSet<NSString *> *keychainExcludedServices; // الخدمات المستثناة
-static NSSet<NSString *> *keychainExcludedAccounts; // الحسابات المستثناة
+// استثناءات Keychain
+static NSSet<NSString *> *keychainExcludedServices;
+static NSSet<NSString *> *keychainExcludedAccounts;
+// قائمة محددة للخدمات/الحسابات المشبوهة
+static NSSet<NSString *> *suspiciousKeychainServices;
+static NSSet<NSString *> *suspiciousKeychainAccounts;
 
 // Keys for associated objects
 static char kFakeTaskKey;
 static char kFakeCompletionKey;
 
-// نطاق IP السكني: 172.56.0.0/13
+// نطاق IP السكني
 static uint32_t residentialBase = 0xAC380000;
 static uint32_t residentialMask = 0xFFF80000;
 
-// الهوية الوهمية لهذه الجلسة
+// الهوية الوهمية
 static NSString *fakeIP = nil;
 static NSString *fakeZip = nil;
 static double fakeLat = 0;
@@ -97,61 +99,56 @@ static NSString *generateFakeIPResponse(void) {
         fakeZip, fakeLat, fakeLon, fakeISPName, fakeISPOrg, fakeISPAS, fakeIP];
 }
 
-static BOOL isAdKey(NSString *key) {
-    for (NSString *sub in adKeySubstrings) {
-        if ([key rangeOfString:sub options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            return YES;
+static BOOL isAdTimeKey(NSString *key) {
+    BOOL hasTime = NO;
+    for (NSString *t in timeIndicators) {
+        if ([key rangeOfString:t options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            hasTime = YES;
+            break;
         }
     }
-    return NO;
-}
+    if (!hasTime) return NO;
 
-static BOOL isTimeKey(NSString *key) {
-    for (NSString *sub in timeKeySubstrings) {
-        if ([key rangeOfString:sub options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            return YES;
+    BOOL hasAd = NO;
+    for (NSString *a in adIndicators) {
+        if ([key rangeOfString:a options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            hasAd = YES;
+            break;
         }
     }
-    return NO;
+    return hasAd;
 }
 
-static long long randomTimeBetweenHoursAgoMillis(int minHours, int maxHours) {
-    long long minMillis = (long long)minHours * 3600000;
-    long long maxMillis = (long long)maxHours * 3600000;
+static long long randomTimeBetween24And48HoursAgoMillis(void) {
+    long long minMillis = 24LL * 3600000;
+    long long maxMillis = 48LL * 3600000;
     long long randomMillis = minMillis + arc4random_uniform((uint32_t)(maxMillis - minMillis + 1));
     long long currentMillis = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
     return currentMillis - randomMillis;
 }
 
-// فحص إذا كان يجب اعتراض مفتاح Keychain، مع استثناءات الحساب
 static BOOL shouldFakeKeychain(CFDictionaryRef query) {
     if (!query) return NO;
     NSDictionary *dict = (__bridge NSDictionary *)query;
     NSString *service = dict[(__bridge id)kSecAttrService];
     NSString *account = dict[(__bridge id)kSecAttrAccount];
 
-    // استثناء الخدمات أو الحسابات المهمة
-    if (service && [keychainExcludedServices containsObject:service]) {
-        return NO;
-    }
-    if (account && [keychainExcludedAccounts containsObject:account]) {
-        return NO;
-    }
+    // استثناء الخدمات والحسابات المهمة
+    if (service && [keychainExcludedServices containsObject:service]) return NO;
+    if (account && [keychainExcludedAccounts containsObject:account]) return NO;
 
-    // اعتراض كل ما يتعلق بالإعلانات والتتبع
-    NSArray *suspicious = @[@"appmetrica", @"firebase", @"installations", @"googlesso",
-                            @"generateddeviceidentifier", @"deviceidentifier", @"unity", @"vungle",
-                            @"inmobi", @"supersonic", @"ironsource", @"admob", @"ad", @"tracking",
-                            @"analytics", @"mintegral", @"applovin", @"tapjoy", @"chartboost"];
-    if (service) {
-        for (NSString *s in suspicious) {
-            if ([service.lowercaseString rangeOfString:s].location != NSNotFound) return YES;
-        }
-    }
-    if (account) {
-        for (NSString *s in suspicious) {
-            if ([account.lowercaseString rangeOfString:s].location != NSNotFound) return YES;
-        }
+    // اعتراض إذا كانت الخدمة أو الحساب ضمن القائمة المشبوهة
+    if (service && [suspiciousKeychainServices containsObject:service]) return YES;
+    if (account && [suspiciousKeychainAccounts containsObject:account]) return YES;
+
+    // اعتراض أي خدمة تحتوي على كلمات من القائمة العامة (احتياطي)
+    NSArray *generalSuspicious = @[@"appmetrica", @"firebase", @"installations", @"googlesso",
+                                   @"generateddeviceidentifier", @"unity", @"vungle", @"inmobi",
+                                   @"supersonic", @"ironsource", @"admob", @"mintegral",
+                                   @"applovin", @"tapjoy", @"chartboost"];
+    for (NSString *word in generalSuspicious) {
+        if (service && [service.lowercaseString rangeOfString:word].location != NSNotFound) return YES;
+        if (account && [account.lowercaseString rangeOfString:word].location != NSNotFound) return YES;
     }
     return NO;
 }
@@ -163,16 +160,13 @@ static BOOL shouldFakeKeychain(CFDictionaryRef query) {
 static int (*original_getifaddrs)(struct ifaddrs **);
 static CFStringRef (*original_SCNetworkInterfaceGetName)(SCNetworkInterfaceRef);
 static CFStringRef (*original_SCNetworkInterfaceGetInterfaceType)(SCNetworkInterfaceRef);
-static CFDictionaryRef (*original_SCDynamicStoreCopyProxies)(SCDynamicStoreRef);
-static CFDictionaryRef (*original_CFNetworkCopySystemProxySettings)(void);
-static Boolean (*original_SCNetworkReachabilityGetFlags)(SCNetworkReachabilityRef, SCNetworkReachabilityFlags *);
 static OSStatus (*original_SecItemCopyMatching)(CFDictionaryRef, CFTypeRef *);
 static OSStatus (*original_SecItemAdd)(CFDictionaryRef, CFTypeRef *);
 static OSStatus (*original_SecItemUpdate)(CFDictionaryRef, CFDictionaryRef);
 static OSStatus (*original_SecItemDelete)(CFDictionaryRef);
 
 // ----------------------------------------------------------------------
-// 4. Hooked C Functions
+// 4. Hooked C Functions (بدون Reachability أو Proxy)
 // ----------------------------------------------------------------------
 
 static int hooked_getifaddrs(struct ifaddrs **ifap) {
@@ -238,37 +232,6 @@ static CFStringRef hooked_SCNetworkInterfaceGetInterfaceType(SCNetworkInterfaceR
     return originalType;
 }
 
-static CFDictionaryRef hooked_SCDynamicStoreCopyProxies(SCDynamicStoreRef store) {
-    static CFDictionaryRef emptyProxies = NULL;
-    if (emptyProxies == NULL) {
-        emptyProxies = CFDictionaryCreate(kCFAllocatorDefault, NULL, NULL, 0,
-                                          &kCFTypeDictionaryKeyCallBacks,
-                                          &kCFTypeDictionaryValueCallBacks);
-    }
-    CFRetain(emptyProxies);
-    return emptyProxies;
-}
-
-static CFDictionaryRef hooked_CFNetworkCopySystemProxySettings(void) {
-    static CFDictionaryRef emptyProxies = NULL;
-    if (emptyProxies == NULL) {
-        emptyProxies = CFDictionaryCreate(kCFAllocatorDefault, NULL, NULL, 0,
-                                          &kCFTypeDictionaryKeyCallBacks,
-                                          &kCFTypeDictionaryValueCallBacks);
-    }
-    CFRetain(emptyProxies);
-    return emptyProxies;
-}
-
-static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SCNetworkReachabilityFlags *flags) {
-    Boolean result = original_SCNetworkReachabilityGetFlags(target, flags);
-    if (result && flags) {
-        *flags &= ~kSCNetworkReachabilityFlagsTransientConnection;
-        *flags |= kSCNetworkReachabilityFlagsReachable;
-    }
-    return result;
-}
-
 static OSStatus hooked_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
     if (shouldFakeKeychain(query)) return errSecItemNotFound;
     return original_SecItemCopyMatching(query, result);
@@ -290,7 +253,7 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
 }
 
 // ----------------------------------------------------------------------
-// 5. Hooks for NetworkExtension
+// 5. Hooks for NetworkExtension (إخفاء VPN)
 // ----------------------------------------------------------------------
 
 %hook NEVPNManager
@@ -369,7 +332,7 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
 %end
 
 // ----------------------------------------------------------------------
-// 7. IDFA جديد
+// 7. IDFA جديد (اختياري)
 // ----------------------------------------------------------------------
 
 %hook ASIdentifierManager
@@ -382,68 +345,51 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
 %end
 
 // ----------------------------------------------------------------------
-// 8. NSUserDefaults شامل
+// 8. NSUserDefaults – فقط مفاتيح الوقت والإعلانات معًا
 // ----------------------------------------------------------------------
 
 %hook NSUserDefaults
 
 - (id)objectForKey:(NSString *)defaultName {
-    if (isAdKey(defaultName)) {
-        if (isTimeKey(defaultName)) {
-            return @(randomTimeBetweenHoursAgoMillis(24, 48));
-        }
-        return nil;
+    if (isAdTimeKey(defaultName)) {
+        return @(randomTimeBetween24And48HoursAgoMillis());
     }
     return %orig;
 }
 
 - (NSInteger)integerForKey:(NSString *)defaultName {
-    if (isAdKey(defaultName)) {
-        if (isTimeKey(defaultName)) {
-            return (NSInteger)randomTimeBetweenHoursAgoMillis(24, 48);
-        }
-        return 0;
+    if (isAdTimeKey(defaultName)) {
+        return (NSInteger)randomTimeBetween24And48HoursAgoMillis();
     }
     return %orig;
 }
 
 - (double)doubleForKey:(NSString *)defaultName {
-    if (isAdKey(defaultName)) {
-        if (isTimeKey(defaultName)) {
-            long long millis = randomTimeBetweenHoursAgoMillis(24, 48);
-            return (double)millis / 1000.0;
-        }
-        return 0.0;
-    }
-    return %orig;
-}
-
-- (BOOL)boolForKey:(NSString *)defaultName {
-    if (isAdKey(defaultName)) {
-        return NO;
+    if (isAdTimeKey(defaultName)) {
+        long long millis = randomTimeBetween24And48HoursAgoMillis();
+        return (double)millis / 1000.0;
     }
     return %orig;
 }
 
 - (void)setObject:(id)value forKey:(NSString *)defaultName {
-    if (isAdKey(defaultName)) {
+    if (isAdTimeKey(defaultName)) {
         return;
     }
     %orig;
 }
 
 - (void)setInteger:(NSInteger)value forKey:(NSString *)defaultName {
-    if (isAdKey(defaultName)) return;
-    %orig;
-}
-
-- (void)setBool:(BOOL)value forKey:(NSString *)defaultName {
-    if (isAdKey(defaultName)) return;
+    if (isAdTimeKey(defaultName)) {
+        return;
+    }
     %orig;
 }
 
 - (void)setDouble:(double)value forKey:(NSString *)defaultName {
-    if (isAdKey(defaultName)) return;
+    if (isAdTimeKey(defaultName)) {
+        return;
+    }
     %orig;
 }
 
@@ -478,43 +424,60 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
         @{@"name": @"Verizon Fios", @"org": @"Verizon Business", @"as": @"AS701 Verizon Business"}
     ];
 
-    // أنماط واسعة جداً للمفاتيح الإعلانية
-    adKeySubstrings = [NSSet setWithObjects:
-        @"capping", @"lastshown", @"lastvisit", @"sessioncount",
-        @"skan", @"supersonic", @"vungle", @"inobi", @"inmobi", @"unity",
+    // مؤشرات الوقت والإعلان
+    timeIndicators = @[
+        @"lastshown", @"lastvisit", @"timestamp", @"time", @"sit",
+        @"cvfirstsessiontimestamp", @"browseruseragenttime", @"last_ad",
+        @"lastad", @"lastadtime", @"date", @"first", @"initial", @"launch"
+    ];
+
+    adIndicators = @[
+        @"capping", @"supersonic", @"vungle", @"inobi", @"inmobi", @"unity",
         @"ironsource", @"admob", @"google", @"firebase", @"analytics",
         @"tracking", @"consent", @"gdpr", @"ccpa", @"skad", @"mintegral",
         @"applovin", @"tapjoy", @"chartboost", @"facebook", @"audience",
         @"network", @"mediation", @"waterfall", @"placement", @"campaign",
         @"creative", @"cache", @"config", @"identifier", @"device", @"uuid",
         @"idfa", @"idfv", @"vendor", @"advertising", @"att", @"opt",
-        @"privacy", @"log", @"event", @"batch", @"queue", @"time",
-        @"timestamp", @"date", @"last", @"first", @"initial", @"launch",
-        @"run", @"usage", @"limit", @"cap", @"frequency", @"count",
-        @"attempt", @"retry", @"next", @"available", @"enabled", @"disabled",
-        @"status", @"state", @"flag", @"shown", @"seen", @"completed",
-        @"watched", @"earned", @"rewarded", @"credits", @"balance",
-        @"points", @"user", @"profile", @"data", @"soomla", @"auid",
-        @"uuidstring", @"gbchash", @"deviceosversion", @"browseruseragenttime",
-        @"ua", @"attvalue", @"optout", @"optin", nil
+        @"privacy", @"log", @"event", @"batch", @"queue", @"usage",
+        @"limit", @"cap", @"frequency", @"count", @"shown", @"seen",
+        @"completed", @"watched", @"rewarded", @"credits", @"balance",
+        @"points", @"profile", @"soomla", @"auid", @"uuidstring", @"gbchash",
+        @"deviceosversion", @"browseruseragenttime", @"ua", @"attvalue", @"optout", @"optin"
     ];
 
-    timeKeySubstrings = @[
-        @"lastshown", @"lastvisit", @"timestamp", @"time", @"sit",
-        @"cvfirstsessiontimestamp", @"browseruseragenttime", @"last_ad",
-        @"lastad", @"lastadtime", @"date", @"first", @"initial", @"launch"
-    ];
-
-    // استثناءات Keychain المحددة
+    // استثناءات Keychain
     keychainExcludedServices = [NSSet setWithObjects:
-        @"com.codebysms", // خدمة التطبيق الأساسية
+        @"com.codebysms",
+        // ملاحظة: لم نعد نستثني wiki.qaq.Asspp.Accounts
         nil
     ];
     keychainExcludedAccounts = [NSSet setWithObjects:
-        @"userIDKey",       // معرف المستخدم
-        @"accessTokenKey",  // رمز الوصول
-        @"Accounts",        // حساب التطبيق
-        @"User.id", @"User.token", @"User.balance", // بيانات الحساب الأخرى
+        @"userIDKey", @"accessTokenKey", @"Accounts",
+        @"User.id", @"User.token", @"User.balance",
+        nil
+    ];
+
+    // الخدمات والحسابات المشبوهة بالضبط من القائمة
+    suspiciousKeychainServices = [NSSet setWithObjects:
+        @"io.appmetrica.service.application",
+        @"com.google.sso.GeneratedDeviceIdentifier",
+        @"wiki.qaq.Asspp.DeviceIdentifier",
+        @"wiki.qaq.Asspp.Accounts",   // أضفناها هنا لتُعترض
+        @"com.firebase.FIRInstallations.installations",
+        @"AMADeviceDescription",
+        @"D7CA1CE6DE13787FD151D81C8E2C8C56",
+        nil
+    ];
+    suspiciousKeychainAccounts = [NSSet setWithObjects:
+        @"AMAMetricaPersistentConfigurationDeviceIDStorageKey",
+        @"AMAMetricaPersistentConfigurationDeviceIDHashStorageKey",
+        @"GeneratedDeviceIdentifier",
+        @"DeviceIdentifier",
+        @"AMAAppIdentifierPrefix",
+        @"1:580931174328:ios:bd844db744cd3c48a1194d__FIRAPP_DEFAULT",
+        @"1:755541669657:ios:4d6d5a5ce71e9d30__FIRAPP_DEFAULT",
+        @"D7CA1CE6DE13787FD151D81C8E2C8C56",
         nil
     ];
 
@@ -522,12 +485,13 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
     generateFakeIdentity();
     sessionAdvertisingIdentifier = [NSUUID UUID];
 
-    // Hook C functions
+    // Hook getifaddrs
     void *getifaddrs_ptr = dlsym(RTLD_DEFAULT, "getifaddrs");
     if (getifaddrs_ptr) {
         MSHookFunction(getifaddrs_ptr, (void *)hooked_getifaddrs, (void **)&original_getifaddrs);
     }
 
+    // Hook SCNetworkInterface
     void *scni_name_ptr = dlsym(RTLD_DEFAULT, "SCNetworkInterfaceGetName");
     if (scni_name_ptr) {
         MSHookFunction(scni_name_ptr, (void *)hooked_SCNetworkInterfaceGetName, (void **)&original_SCNetworkInterfaceGetName);
@@ -538,22 +502,7 @@ static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
         MSHookFunction(scni_type_ptr, (void *)hooked_SCNetworkInterfaceGetInterfaceType, (void **)&original_SCNetworkInterfaceGetInterfaceType);
     }
 
-    void *scd_proxies_ptr = dlsym(RTLD_DEFAULT, "SCDynamicStoreCopyProxies");
-    if (scd_proxies_ptr) {
-        MSHookFunction(scd_proxies_ptr, (void *)hooked_SCDynamicStoreCopyProxies, (void **)&original_SCDynamicStoreCopyProxies);
-    }
-
-    void *cfn_proxies_ptr = dlsym(RTLD_DEFAULT, "CFNetworkCopySystemProxySettings");
-    if (cfn_proxies_ptr) {
-        MSHookFunction(cfn_proxies_ptr, (void *)hooked_CFNetworkCopySystemProxySettings, (void **)&original_CFNetworkCopySystemProxySettings);
-    }
-
-    void *reach_flags_ptr = dlsym(RTLD_DEFAULT, "SCNetworkReachabilityGetFlags");
-    if (reach_flags_ptr) {
-        MSHookFunction(reach_flags_ptr, (void *)hooked_SCNetworkReachabilityGetFlags, (void **)&original_SCNetworkReachabilityGetFlags);
-    }
-
-    // Hook Keychain functions
+    // Hook Keychain
     void *secCopy = dlsym(RTLD_DEFAULT, "SecItemCopyMatching");
     if (secCopy) MSHookFunction(secCopy, (void *)hooked_SecItemCopyMatching, (void **)&original_SecItemCopyMatching);
 
