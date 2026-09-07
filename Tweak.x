@@ -7,6 +7,7 @@
 #import <objc/runtime.h>
 #import <AdSupport/ASIdentifierManager.h>
 #import <NetworkExtension/NetworkExtension.h>
+#import <Security/Security.h>
 
 // ----------------------------------------------------------------------
 // 1. Configuration & Constants
@@ -17,11 +18,15 @@ static NSArray<NSString *> *ipLookupHosts;
 static NSArray<NSString *> *atlantaZipCodes;
 static NSArray<NSDictionary *> *ispData;
 
-// قائمة الأنماط للمفاتيح الإعلانية (نفس القائمة السابقة)
+// أنماط واسعة للمفاتيح الإعلانية
 static NSSet<NSString *> *adKeySubstrings;
 
-// كلمات تدل على أن المفتاح زمني
+// كلمات زمنية إضافية
 static NSArray<NSString *> *timeKeySubstrings;
+
+// استثناءات Keychain (الحسابات المهمة)
+static NSSet<NSString *> *keychainExcludedServices; // الخدمات المستثناة
+static NSSet<NSString *> *keychainExcludedAccounts; // الحسابات المستثناة
 
 // Keys for associated objects
 static char kFakeTaskKey;
@@ -31,7 +36,7 @@ static char kFakeCompletionKey;
 static uint32_t residentialBase = 0xAC380000;
 static uint32_t residentialMask = 0xFFF80000;
 
-// الهوية الوهمية الثابتة لهذه الجلسة
+// الهوية الوهمية لهذه الجلسة
 static NSString *fakeIP = nil;
 static NSString *fakeZip = nil;
 static double fakeLat = 0;
@@ -40,7 +45,7 @@ static NSString *fakeISPName = nil;
 static NSString *fakeISPOrg = nil;
 static NSString *fakeISPAS = nil;
 
-// UUID ثابت لهذه الجلسة (لـ IDFA)
+// UUID جديد لكل جلسة
 static NSUUID *sessionAdvertisingIdentifier = nil;
 
 // ----------------------------------------------------------------------
@@ -83,31 +88,15 @@ static void generateFakeIdentity(void) {
 
 static NSString *generateFakeIPResponse(void) {
     if (!fakeIP) generateFakeIdentity();
-    NSString *json = [NSString stringWithFormat:
-        @"{\"status\":\"success\","
-        "\"country\":\"United States\","
-        "\"countryCode\":\"US\","
-        "\"region\":\"GA\","
-        "\"regionName\":\"Georgia\","
-        "\"city\":\"Atlanta\","
-        "\"zip\":\"%@\","
-        "\"lat\":%.4f,"
-        "\"lon\":%.4f,"
-        "\"timezone\":\"America/New_York\","
-        "\"isp\":\"%@\","
-        "\"org\":\"%@\","
-        "\"as\":\"%@\","
-        "\"query\":\"%@\","
-        "\"proxy\":false,"
-        "\"hosting\":false,"
-        "\"vpn\":false,"
-        "\"tor\":false,"
-        "\"datacenter\":false}",
+    return [NSString stringWithFormat:
+        @"{\"status\":\"success\",\"country\":\"United States\",\"countryCode\":\"US\","
+        "\"region\":\"GA\",\"regionName\":\"Georgia\",\"city\":\"Atlanta\","
+        "\"zip\":\"%@\",\"lat\":%.4f,\"lon\":%.4f,\"timezone\":\"America/New_York\","
+        "\"isp\":\"%@\",\"org\":\"%@\",\"as\":\"%@\",\"query\":\"%@\","
+        "\"proxy\":false,\"hosting\":false,\"vpn\":false,\"tor\":false,\"datacenter\":false}",
         fakeZip, fakeLat, fakeLon, fakeISPName, fakeISPOrg, fakeISPAS, fakeIP];
-    return json;
 }
 
-// فحص إذا كان المفتاح إعلانيًا
 static BOOL isAdKey(NSString *key) {
     for (NSString *sub in adKeySubstrings) {
         if ([key rangeOfString:sub options:NSCaseInsensitiveSearch].location != NSNotFound) {
@@ -117,7 +106,6 @@ static BOOL isAdKey(NSString *key) {
     return NO;
 }
 
-// فحص إذا كان المفتاح زمنيًا (يحتوي على كلمات تدل على الوقت)
 static BOOL isTimeKey(NSString *key) {
     for (NSString *sub in timeKeySubstrings) {
         if ([key rangeOfString:sub options:NSCaseInsensitiveSearch].location != NSNotFound) {
@@ -127,13 +115,45 @@ static BOOL isTimeKey(NSString *key) {
     return NO;
 }
 
-// توليد زمن عشوائي بين ساعة وساعتين مضت (بالميللي ثانية)
-static long long randomTimeBetweenOneAndTwoHoursAgoMillis(void) {
-    long long oneHourMillis = 3600000;
-    long long twoHoursMillis = 7200000;
-    long long randomMillis = oneHourMillis + arc4random_uniform((uint32_t)(twoHoursMillis - oneHourMillis + 1));
+static long long randomTimeBetweenHoursAgoMillis(int minHours, int maxHours) {
+    long long minMillis = (long long)minHours * 3600000;
+    long long maxMillis = (long long)maxHours * 3600000;
+    long long randomMillis = minMillis + arc4random_uniform((uint32_t)(maxMillis - minMillis + 1));
     long long currentMillis = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
     return currentMillis - randomMillis;
+}
+
+// فحص إذا كان يجب اعتراض مفتاح Keychain، مع استثناءات الحساب
+static BOOL shouldFakeKeychain(CFDictionaryRef query) {
+    if (!query) return NO;
+    NSDictionary *dict = (__bridge NSDictionary *)query;
+    NSString *service = dict[(__bridge id)kSecAttrService];
+    NSString *account = dict[(__bridge id)kSecAttrAccount];
+
+    // استثناء الخدمات أو الحسابات المهمة
+    if (service && [keychainExcludedServices containsObject:service]) {
+        return NO;
+    }
+    if (account && [keychainExcludedAccounts containsObject:account]) {
+        return NO;
+    }
+
+    // اعتراض كل ما يتعلق بالإعلانات والتتبع
+    NSArray *suspicious = @[@"appmetrica", @"firebase", @"installations", @"googlesso",
+                            @"generateddeviceidentifier", @"deviceidentifier", @"unity", @"vungle",
+                            @"inmobi", @"supersonic", @"ironsource", @"admob", @"ad", @"tracking",
+                            @"analytics", @"mintegral", @"applovin", @"tapjoy", @"chartboost"];
+    if (service) {
+        for (NSString *s in suspicious) {
+            if ([service.lowercaseString rangeOfString:s].location != NSNotFound) return YES;
+        }
+    }
+    if (account) {
+        for (NSString *s in suspicious) {
+            if ([account.lowercaseString rangeOfString:s].location != NSNotFound) return YES;
+        }
+    }
+    return NO;
 }
 
 // ----------------------------------------------------------------------
@@ -146,6 +166,10 @@ static CFStringRef (*original_SCNetworkInterfaceGetInterfaceType)(SCNetworkInter
 static CFDictionaryRef (*original_SCDynamicStoreCopyProxies)(SCDynamicStoreRef);
 static CFDictionaryRef (*original_CFNetworkCopySystemProxySettings)(void);
 static Boolean (*original_SCNetworkReachabilityGetFlags)(SCNetworkReachabilityRef, SCNetworkReachabilityFlags *);
+static OSStatus (*original_SecItemCopyMatching)(CFDictionaryRef, CFTypeRef *);
+static OSStatus (*original_SecItemAdd)(CFDictionaryRef, CFTypeRef *);
+static OSStatus (*original_SecItemUpdate)(CFDictionaryRef, CFDictionaryRef);
+static OSStatus (*original_SecItemDelete)(CFDictionaryRef);
 
 // ----------------------------------------------------------------------
 // 4. Hooked C Functions
@@ -245,6 +269,26 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
     return result;
 }
 
+static OSStatus hooked_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
+    if (shouldFakeKeychain(query)) return errSecItemNotFound;
+    return original_SecItemCopyMatching(query, result);
+}
+
+static OSStatus hooked_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
+    if (shouldFakeKeychain(attributes)) return errSecSuccess;
+    return original_SecItemAdd(attributes, result);
+}
+
+static OSStatus hooked_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attrs) {
+    if (shouldFakeKeychain(query)) return errSecSuccess;
+    return original_SecItemUpdate(query, attrs);
+}
+
+static OSStatus hooked_SecItemDelete(CFDictionaryRef query) {
+    if (shouldFakeKeychain(query)) return errSecSuccess;
+    return original_SecItemDelete(query);
+}
+
 // ----------------------------------------------------------------------
 // 5. Hooks for NetworkExtension
 // ----------------------------------------------------------------------
@@ -258,13 +302,13 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
 %end
 
 // ----------------------------------------------------------------------
-// 6. NSURLSession Interception (فقط لفحوصات IP)
+// 6. NSURLSession Interception (فحوصات IP فقط)
 // ----------------------------------------------------------------------
 
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
-                           completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+                           completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
     NSString *host = request.URL.host.lowercaseString;
     BOOL shouldIntercept = NO;
     for (NSString *h in ipLookupHosts) {
@@ -275,7 +319,6 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
     }
 
     if (shouldIntercept) {
-        // طلب فحص IP: نعترضه بالكامل
         NSURL *dummyURL = [NSURL URLWithString:@"http://127.0.0.1:1"];
         NSURLRequest *dummyRequest = [NSURLRequest requestWithURL:dummyURL];
         NSURLSessionDataTask *task = %orig(dummyRequest, ^(NSData *data, NSURLResponse *response, NSError *error) {});
@@ -285,16 +328,11 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
         }
         return task;
     } else {
-        // لا نضيف ترويسات IP للحفاظ على طلبات الإعلانات سليمة
         return %orig;
     }
 }
 
 %end
-
-// ----------------------------------------------------------------------
-// 7. Hook resume on NSURLSessionDataTask
-// ----------------------------------------------------------------------
 
 %hook NSURLSessionDataTask
 
@@ -304,8 +342,7 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
         void (^completion)(NSData *, NSURLResponse *, NSError *) = objc_getAssociatedObject(self, &kFakeCompletionKey);
         if (completion) {
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                NSString *json = generateFakeIPResponse();
-                NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSData *data = [generateFakeIPResponse() dataUsingEncoding:NSUTF8StringEncoding];
                 NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:[NSURL URLWithString:@"http://127.0.0.1:1"]
                                                                           statusCode:200
                                                                          HTTPVersion:@"HTTP/1.1"
@@ -332,7 +369,7 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
 %end
 
 // ----------------------------------------------------------------------
-// 8. إرجاع IDFA جديد لكل جلسة
+// 7. IDFA جديد
 // ----------------------------------------------------------------------
 
 %hook ASIdentifierManager
@@ -345,59 +382,75 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
 %end
 
 // ----------------------------------------------------------------------
-// 9. اعتراض NSUserDefaults لمفاتيح الوقت الإعلانية فقط
+// 8. NSUserDefaults شامل
 // ----------------------------------------------------------------------
 
 %hook NSUserDefaults
 
 - (id)objectForKey:(NSString *)defaultName {
-    if (isAdKey(defaultName) && isTimeKey(defaultName)) {
-        return @(randomTimeBetweenOneAndTwoHoursAgoMillis());
+    if (isAdKey(defaultName)) {
+        if (isTimeKey(defaultName)) {
+            return @(randomTimeBetweenHoursAgoMillis(24, 48));
+        }
+        return nil;
     }
     return %orig;
 }
 
 - (NSInteger)integerForKey:(NSString *)defaultName {
-    if (isAdKey(defaultName) && isTimeKey(defaultName)) {
-        return (NSInteger)(randomTimeBetweenOneAndTwoHoursAgoMillis());
+    if (isAdKey(defaultName)) {
+        if (isTimeKey(defaultName)) {
+            return (NSInteger)randomTimeBetweenHoursAgoMillis(24, 48);
+        }
+        return 0;
     }
     return %orig;
 }
 
 - (double)doubleForKey:(NSString *)defaultName {
-    if (isAdKey(defaultName) && isTimeKey(defaultName)) {
-        // بعض الشبكات تستخدم الثواني كـ double
-        long long millis = randomTimeBetweenOneAndTwoHoursAgoMillis();
-        return (double)millis / 1000.0;
+    if (isAdKey(defaultName)) {
+        if (isTimeKey(defaultName)) {
+            long long millis = randomTimeBetweenHoursAgoMillis(24, 48);
+            return (double)millis / 1000.0;
+        }
+        return 0.0;
+    }
+    return %orig;
+}
+
+- (BOOL)boolForKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) {
+        return NO;
     }
     return %orig;
 }
 
 - (void)setObject:(id)value forKey:(NSString *)defaultName {
-    if (isAdKey(defaultName) && isTimeKey(defaultName)) {
-        return; // لا تحفظ الوقت الجديد
+    if (isAdKey(defaultName)) {
+        return;
     }
     %orig;
 }
 
 - (void)setInteger:(NSInteger)value forKey:(NSString *)defaultName {
-    if (isAdKey(defaultName) && isTimeKey(defaultName)) {
-        return;
-    }
+    if (isAdKey(defaultName)) return;
+    %orig;
+}
+
+- (void)setBool:(BOOL)value forKey:(NSString *)defaultName {
+    if (isAdKey(defaultName)) return;
     %orig;
 }
 
 - (void)setDouble:(double)value forKey:(NSString *)defaultName {
-    if (isAdKey(defaultName) && isTimeKey(defaultName)) {
-        return;
-    }
+    if (isAdKey(defaultName)) return;
     %orig;
 }
 
 %end
 
 // ----------------------------------------------------------------------
-// 10. Constructor
+// 9. Constructor
 // ----------------------------------------------------------------------
 
 %ctor {
@@ -425,40 +478,48 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
         @{@"name": @"Verizon Fios", @"org": @"Verizon Business", @"as": @"AS701 Verizon Business"}
     ];
 
-    // القائمة الكبيرة للأنماط الإعلانية
+    // أنماط واسعة جداً للمفاتيح الإعلانية
     adKeySubstrings = [NSSet setWithObjects:
-        @"Capping", @"lastShown", @"lastVisit", @"sessionCount",
-        @"SKANLastUpdatedTime", @"com.supersonic.events", @"vungle.connectivity.wait",
-        @"com.inobi_defaultStore_f", @"com.inobi_defaultStore_skipFields",
-        @"INMOBICMP_LastVisitTimestamp", @"INMOBICMP_GDPR_Visit_Configs",
-        @"firebase-sessions-cache-key", @"ServerAPI.cacheDate",
-        @"ServerAPI.cachedServices", @"triggerEvents", @"maxEventsPerBatch",
-        @"com.supersonic.mediation.cvFirstSessionTimestamp",
-        @"com.supersonic.mediation.networkSkanIds",
-        @"SSV", @"ssaGlobalAppData", @"VungleOIT", @"currentVungleSDKVersion",
-        @"com.unity.ads.lastKnownUserAgent", @"com.unity.ads.lastSystemVersion",
-        @"unityads-idfi", @"com.inobi_defaultStore_SKAN",
-        @"IABTCF_", @"IABGPP_", @"IABUSPrivacy_String", @"optOut",
-        @"mtg_krepanKey", @"MTG_kTransformed", @"MintegralUserDefaultKeys",
-        @"IS_CappingManager", @"BN_CappingManager", @"RV_CappingManager",
-        @"soomlaGeneratedId", @"auid", @"uuidStringFromStore", @"GBCHash",
-        @"com.inobi_defaultStore_kA", @"com.inobi_defaultStore_cip",
-        @"com.inobi_defaultStore_vAK", @"com.inobi_defaultStore_inmobi.sdkversion",
-        @"DeviceOSVersion", @"browserUserAgentTime", @"ua",
-        @"attValue", @"IABUSPrivacy_String", @"optIn",
+        @"capping", @"lastshown", @"lastvisit", @"sessioncount",
+        @"skan", @"supersonic", @"vungle", @"inobi", @"inmobi", @"unity",
+        @"ironsource", @"admob", @"google", @"firebase", @"analytics",
+        @"tracking", @"consent", @"gdpr", @"ccpa", @"skad", @"mintegral",
+        @"applovin", @"tapjoy", @"chartboost", @"facebook", @"audience",
+        @"network", @"mediation", @"waterfall", @"placement", @"campaign",
+        @"creative", @"cache", @"config", @"identifier", @"device", @"uuid",
+        @"idfa", @"idfv", @"vendor", @"advertising", @"att", @"opt",
+        @"privacy", @"log", @"event", @"batch", @"queue", @"time",
+        @"timestamp", @"date", @"last", @"first", @"initial", @"launch",
+        @"run", @"usage", @"limit", @"cap", @"frequency", @"count",
+        @"attempt", @"retry", @"next", @"available", @"enabled", @"disabled",
+        @"status", @"state", @"flag", @"shown", @"seen", @"completed",
+        @"watched", @"earned", @"rewarded", @"credits", @"balance",
+        @"points", @"user", @"profile", @"data", @"soomla", @"auid",
+        @"uuidstring", @"gbchash", @"deviceosversion", @"browseruseragenttime",
+        @"ua", @"attvalue", @"optout", @"optin", nil
+    ];
+
+    timeKeySubstrings = @[
+        @"lastshown", @"lastvisit", @"timestamp", @"time", @"sit",
+        @"cvfirstsessiontimestamp", @"browseruseragenttime", @"last_ad",
+        @"lastad", @"lastadtime", @"date", @"first", @"initial", @"launch"
+    ];
+
+    // استثناءات Keychain المحددة
+    keychainExcludedServices = [NSSet setWithObjects:
+        @"com.codebysms", // خدمة التطبيق الأساسية
+        nil
+    ];
+    keychainExcludedAccounts = [NSSet setWithObjects:
+        @"userIDKey",       // معرف المستخدم
+        @"accessTokenKey",  // رمز الوصول
+        @"Accounts",        // حساب التطبيق
+        @"User.id", @"User.token", @"User.balance", // بيانات الحساب الأخرى
         nil
     ];
 
-    // كلمات زمنية
-    timeKeySubstrings = @[
-        @"lastshown", @"lastvisit", @"timestamp", @"time",
-        @"sit", @"cvfirstsessiontimestamp", @"browseruseragenttime",
-        @"last_ad", @"lastad", @"lastadtime", @"lastVisit"
-    ];
-
-    // توليد الهوية الوهمية لهذه الجلسة
+    // توليد الهوية الوهمية
     generateFakeIdentity();
-    // إنشاء UUID جديد لهذه الجلسة
     sessionAdvertisingIdentifier = [NSUUID UUID];
 
     // Hook C functions
@@ -491,4 +552,17 @@ static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef tar
     if (reach_flags_ptr) {
         MSHookFunction(reach_flags_ptr, (void *)hooked_SCNetworkReachabilityGetFlags, (void **)&original_SCNetworkReachabilityGetFlags);
     }
+
+    // Hook Keychain functions
+    void *secCopy = dlsym(RTLD_DEFAULT, "SecItemCopyMatching");
+    if (secCopy) MSHookFunction(secCopy, (void *)hooked_SecItemCopyMatching, (void **)&original_SecItemCopyMatching);
+
+    void *secAdd = dlsym(RTLD_DEFAULT, "SecItemAdd");
+    if (secAdd) MSHookFunction(secAdd, (void *)hooked_SecItemAdd, (void **)&original_SecItemAdd);
+
+    void *secUpdate = dlsym(RTLD_DEFAULT, "SecItemUpdate");
+    if (secUpdate) MSHookFunction(secUpdate, (void *)hooked_SecItemUpdate, (void **)&original_SecItemUpdate);
+
+    void *secDelete = dlsym(RTLD_DEFAULT, "SecItemDelete");
+    if (secDelete) MSHookFunction(secDelete, (void *)hooked_SecItemDelete, (void **)&original_SecItemDelete);
 }
