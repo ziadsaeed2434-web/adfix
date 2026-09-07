@@ -4,6 +4,9 @@
 #import <CFNetwork/CFNetwork.h>
 #import <ifaddrs.h>
 #import <dlfcn.h>
+#import <objc/runtime.h>
+#import <AdSupport/ASIdentifierManager.h>
+#import <NetworkExtension/NetworkExtension.h>
 
 // ----------------------------------------------------------------------
 // 1. Configuration & Constants
@@ -14,27 +17,67 @@ static NSArray<NSString *> *ipLookupHosts;
 static NSArray<NSString *> *atlantaZipCodes;
 static NSArray<NSDictionary *> *ispData;
 
+// Keys for associated objects
+static char kFakeTaskKey;
+static char kFakeCompletionKey;
+
+// نطاق IP السكني: 172.56.0.0/13
+static uint32_t residentialBase = 0xAC380000; // 172.56.0.0
+static uint32_t residentialMask = 0xFFF80000; // /13
+
+// الهوية الوهمية الثابتة لهذه الجلسة
+static NSString *fakeIP = nil;
+static NSString *fakeZip = nil;
+static double fakeLat = 0;
+static double fakeLon = 0;
+static NSString *fakeISPName = nil;
+static NSString *fakeISPOrg = nil;
+static NSString *fakeISPAS = nil;
+
 // ----------------------------------------------------------------------
-// 2. Dynamic Fake IP Response Generator (Atlanta, GA)
+// 2. Helpers
 // ----------------------------------------------------------------------
 
-static NSString *generateFakeIPResponse(void) {
-    NSArray<NSNumber *> *secondOctets = @[@56, @57, @59];
-    int second = [secondOctets[arc4random_uniform((uint32_t)secondOctets.count)] intValue];
-    int third = 1 + arc4random_uniform(254);
-    int fourth = 1 + arc4random_uniform(254);
-    NSString *ip = [NSString stringWithFormat:@"172.%d.%d.%d", second, third, fourth];
+static BOOL isIPResidential(NSString *ip) {
+    NSArray *parts = [ip componentsSeparatedByString:@"."];
+    if (parts.count != 4) return NO;
+    uint32_t octets[4] = {0};
+    for (int i = 0; i < 4; i++) octets[i] = [parts[i] intValue];
+    uint32_t ipInt = (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3];
+    return ((ipInt & residentialMask) == (residentialBase & residentialMask));
+}
 
-    NSString *zip = atlantaZipCodes[arc4random_uniform((uint32_t)atlantaZipCodes.count)];
+static NSString *generateRandomIPString(void) {
+    NSString *ip;
+    do {
+        uint32_t random = arc4random_uniform(0x00080000);
+        uint32_t ipInt = residentialBase | random;
+        uint8_t b1 = (ipInt >> 24) & 0xFF;
+        uint8_t b2 = (ipInt >> 16) & 0xFF;
+        uint8_t b3 = (ipInt >> 8) & 0xFF;
+        uint8_t b4 = ipInt & 0xFF;
+        ip = [NSString stringWithFormat:@"%d.%d.%d.%d", b1, b2, b3, b4];
+    } while (!isIPResidential(ip) || [ip hasSuffix:@".0"] || [ip hasSuffix:@".255"]);
+    return ip;
+}
 
-    double lat = 33.65 + ((double)arc4random_uniform(3000) / 10000.0);
-    double lon = -84.55 + ((double)arc4random_uniform(3000) / 10000.0);
-
+// توليد هوية وهمية كاملة مرة واحدة لكل جلسة
+static void generateFakeIdentity(void) {
+    fakeIP = generateRandomIPString();
+    fakeZip = atlantaZipCodes[arc4random_uniform((uint32_t)atlantaZipCodes.count)];
+    fakeLat = 33.65 + ((double)arc4random_uniform(3000) / 10000.0);
+    fakeLon = -84.55 + ((double)arc4random_uniform(3000) / 10000.0);
     NSDictionary *isp = ispData[arc4random_uniform((uint32_t)ispData.count)];
-    NSString *ispName = isp[@"name"];
-    NSString *ispOrg = isp[@"org"];
-    NSString *ispAS = isp[@"as"];
+    fakeISPName = isp[@"name"];
+    fakeISPOrg = isp[@"org"];
+    fakeISPAS = isp[@"as"];
+}
 
+// ----------------------------------------------------------------------
+// 3. Fake IP Response Generator (uses stored identity)
+// ----------------------------------------------------------------------
+static NSString *generateFakeIPResponse(void) {
+    if (!fakeIP) generateFakeIdentity(); // safety
     NSString *json = [NSString stringWithFormat:
         @"{\"status\":\"success\","
         "\"country\":\"United States\","
@@ -55,12 +98,12 @@ static NSString *generateFakeIPResponse(void) {
         "\"vpn\":false,"
         "\"tor\":false,"
         "\"datacenter\":false}",
-        zip, lat, lon, ispName, ispOrg, ispAS, ip];
+        fakeZip, fakeLat, fakeLon, fakeISPName, fakeISPOrg, fakeISPAS, fakeIP];
     return json;
 }
 
 // ----------------------------------------------------------------------
-// 3. Original C Function Pointers
+// 4. Original C Function Pointers
 // ----------------------------------------------------------------------
 
 static int (*original_getifaddrs)(struct ifaddrs **);
@@ -68,9 +111,10 @@ static CFStringRef (*original_SCNetworkInterfaceGetName)(SCNetworkInterfaceRef);
 static CFStringRef (*original_SCNetworkInterfaceGetInterfaceType)(SCNetworkInterfaceRef);
 static CFDictionaryRef (*original_SCDynamicStoreCopyProxies)(SCDynamicStoreRef);
 static CFDictionaryRef (*original_CFNetworkCopySystemProxySettings)(void);
+static Boolean (*original_SCNetworkReachabilityGetFlags)(SCNetworkReachabilityRef, SCNetworkReachabilityFlags *);
 
 // ----------------------------------------------------------------------
-// 4. Hooked C Functions
+// 5. Hooked C Functions (same as before)
 // ----------------------------------------------------------------------
 
 static int hooked_getifaddrs(struct ifaddrs **ifap) {
@@ -115,9 +159,7 @@ static CFStringRef hooked_SCNetworkInterfaceGetName(SCNetworkInterfaceRef interf
             break;
         }
     }
-    if (isVPN) {
-        return CFSTR("en0");
-    }
+    if (isVPN) return CFSTR("en0");
     return originalName;
 }
 
@@ -134,15 +176,11 @@ static CFStringRef hooked_SCNetworkInterfaceGetInterfaceType(SCNetworkInterfaceR
             break;
         }
     }
-    if (isVPN) {
-        // استخدام سلسلة نصية تمثل نوع واجهة عادي (غير متوفر كثابت على iOS)
-        return CFSTR("WiFi");
-    }
+    if (isVPN) return CFSTR("WiFi");
     return originalType;
 }
 
 static CFDictionaryRef hooked_SCDynamicStoreCopyProxies(SCDynamicStoreRef store) {
-    // إرجاع قاموس فارغ = لا يوجد بروكسي
     static CFDictionaryRef emptyProxies = NULL;
     if (emptyProxies == NULL) {
         emptyProxies = CFDictionaryCreate(kCFAllocatorDefault, NULL, NULL, 0,
@@ -164,54 +202,29 @@ static CFDictionaryRef hooked_CFNetworkCopySystemProxySettings(void) {
     return emptyProxies;
 }
 
-// ----------------------------------------------------------------------
-// 5. Fake NSURLSessionDataTask
-// ----------------------------------------------------------------------
-
-@interface FakeDataTask : NSURLSessionDataTask
-@property (nonatomic, copy) void (^completionHandler)(NSData *, NSURLResponse *, NSError *);
-@property (nonatomic, strong) NSURLRequest *request;
-@end
-
-@implementation FakeDataTask
-
-- (instancetype)initWithRequest:(NSURLRequest *)request
-             completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
-    self = [super init];
-    if (self) {
-        _request = request;
-        _completionHandler = [handler copy];
+static Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SCNetworkReachabilityFlags *flags) {
+    Boolean result = original_SCNetworkReachabilityGetFlags(target, flags);
+    if (result && flags) {
+        *flags &= ~kSCNetworkReachabilityFlagsTransientConnection;
+        *flags |= kSCNetworkReachabilityFlagsReachable;
     }
-    return self;
+    return result;
 }
-
-- (void)resume {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        if (self.completionHandler) {
-            NSString *json = generateFakeIPResponse();
-            NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
-            NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL
-                                                                      statusCode:200
-                                                                     HTTPVersion:@"HTTP/1.1"
-                                                                    headerFields:@{@"Content-Type": @"application/json"}];
-            self.completionHandler(data, response, nil);
-            self.completionHandler = nil;
-        }
-    });
-}
-
-- (void)cancel {}
-- (void)suspend {}
-
-- (void)dealloc {
-    self.completionHandler = nil;
-    [super dealloc];
-}
-
-@end
 
 // ----------------------------------------------------------------------
-// 6. Hook NSURLSession
+// 6. Hooks for NetworkExtension
+// ----------------------------------------------------------------------
+
+%hook NEVPNManager
+- (BOOL)enabled { return NO; }
+%end
+
+%hook NEVPNConnection
+- (NEVPNStatus)status { return NEVPNStatusDisconnected; }
+%end
+
+// ----------------------------------------------------------------------
+// 7. NSURLSession Interception + Header Injection
 // ----------------------------------------------------------------------
 
 %hook NSURLSession
@@ -226,24 +239,82 @@ static CFDictionaryRef hooked_CFNetworkCopySystemProxySettings(void) {
             break;
         }
     }
-    if (shouldIntercept) {
-        return [[FakeDataTask alloc] initWithRequest:request
-                                  completionHandler:completionHandler];
-    } else {
-        return %orig;
-    }
-}
 
-- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url
-                       completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSURLRequest *request = [NSURLRequest requestWithURL:url];
-    return [self dataTaskWithRequest:request completionHandler:completionHandler];
+    if (shouldIntercept) {
+        // طلب فحص IP: نعترضه بالكامل
+        NSURL *dummyURL = [NSURL URLWithString:@"http://127.0.0.1:1"];
+        NSURLRequest *dummyRequest = [NSURLRequest requestWithURL:dummyURL];
+        NSURLSessionDataTask *task = %orig(dummyRequest, ^(NSData *data, NSURLResponse *response, NSError *error) {});
+        if (task) {
+            objc_setAssociatedObject(task, &kFakeTaskKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(task, &kFakeCompletionKey, completionHandler, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        }
+        return task;
+    } else {
+        // أي طلب آخر: نعدّل الترويسات لإخفاء الـ IP الحقيقي
+        NSMutableURLRequest *mutableRequest = [request mutableCopy];
+        if (!fakeIP) generateFakeIdentity();
+        [mutableRequest setValue:fakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+        [mutableRequest setValue:fakeIP forHTTPHeaderField:@"X-Real-IP"];
+        [mutableRequest setValue:fakeIP forHTTPHeaderField:@"True-Client-IP"];
+        [mutableRequest setValue:fakeIP forHTTPHeaderField:@"CF-Connecting-IP"];
+        [mutableRequest setValue:fakeIP forHTTPHeaderField:@"X-Client-IP"];
+        return %orig(mutableRequest, completionHandler);
+    }
 }
 
 %end
 
 // ----------------------------------------------------------------------
-// 7. Constructor
+// 8. Hook resume on NSURLSessionDataTask
+// ----------------------------------------------------------------------
+
+%hook NSURLSessionDataTask
+
+- (void)resume {
+    NSNumber *isFake = objc_getAssociatedObject(self, &kFakeTaskKey);
+    if (isFake && [isFake boolValue]) {
+        void (^completion)(NSData *, NSURLResponse *, NSError *) = objc_getAssociatedObject(self, &kFakeCompletionKey);
+        if (completion) {
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                NSString *json = generateFakeIPResponse();
+                NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:[NSURL URLWithString:@"http://127.0.0.1:1"]
+                                                                          statusCode:200
+                                                                         HTTPVersion:@"HTTP/1.1"
+                                                                        headerFields:@{@"Content-Type": @"application/json"}];
+                completion(data, response, nil);
+            });
+        }
+        return;
+    }
+    %orig;
+}
+
+- (void)cancel {
+    NSNumber *isFake = objc_getAssociatedObject(self, &kFakeTaskKey);
+    if (isFake && [isFake boolValue]) {
+        objc_setAssociatedObject(self, &kFakeTaskKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(self, &kFakeCompletionKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        %orig;
+        return;
+    }
+    %orig;
+}
+
+%end
+
+// ----------------------------------------------------------------------
+// 9. Hide ad tracking
+// ----------------------------------------------------------------------
+
+%hook ASIdentifierManager
+- (NSUUID *)advertisingIdentifier { return [NSUUID UUID]; }
+- (BOOL)isAdvertisingTrackingEnabled { return YES; }
+%end
+
+// ----------------------------------------------------------------------
+// 10. Constructor
 // ----------------------------------------------------------------------
 
 %ctor {
@@ -271,6 +342,9 @@ static CFDictionaryRef hooked_CFNetworkCopySystemProxySettings(void) {
         @{@"name": @"Verizon Fios", @"org": @"Verizon Business", @"as": @"AS701 Verizon Business"}
     ];
 
+    // توليد الهوية الوهمية لهذه الجلسة
+    generateFakeIdentity();
+
     // Hook C functions
     void *getifaddrs_ptr = dlsym(RTLD_DEFAULT, "getifaddrs");
     if (getifaddrs_ptr) {
@@ -295,5 +369,10 @@ static CFDictionaryRef hooked_CFNetworkCopySystemProxySettings(void) {
     void *cfn_proxies_ptr = dlsym(RTLD_DEFAULT, "CFNetworkCopySystemProxySettings");
     if (cfn_proxies_ptr) {
         MSHookFunction(cfn_proxies_ptr, (void *)hooked_CFNetworkCopySystemProxySettings, (void **)&original_CFNetworkCopySystemProxySettings);
+    }
+
+    void *reach_flags_ptr = dlsym(RTLD_DEFAULT, "SCNetworkReachabilityGetFlags");
+    if (reach_flags_ptr) {
+        MSHookFunction(reach_flags_ptr, (void *)hooked_SCNetworkReachabilityGetFlags, (void **)&original_SCNetworkReachabilityGetFlags);
     }
 }
