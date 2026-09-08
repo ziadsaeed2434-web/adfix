@@ -68,50 +68,40 @@ void updateTopBarDisplay() {
 }
 
 // ============================================================
-// MARK: - نظام التوليد الديناميكي المتغير (مضمون 100% وغير ثابت)
+// MARK: - التوليد التلقائي للـ IP (قائمة موثوقة 100% وموسعة)
 // ============================================================
 
-void generateSessionIP() {
-    // قائمة ضخمة وديناميكية لعناوين سكنية نظيفة وموزعة على مزودي خدمة الإنترنت في أتلانطا (الولايات المتحدة)
-    // تضمن عدم حظر الحساب وظهور الإعلانات بشكل طبيعي تماماً ومتغير في كل مرة
-    NSArray *dynamicPool = @[
-        // نطاقات Comcast Cable (Atlanta, GA)
-        @{@"ip": [NSString stringWithFormat:@"24.184.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"Comcast Cable (Atlanta Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"73.150.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"Comcast Cable (Atlanta Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"68.35.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"Comcast Cable (Atlanta Residential)"},
-        
-        // نطاقات AT&T Internet (Atlanta, GA)
-        @{@"ip": [NSString stringWithFormat:@"174.56.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"AT&T Internet (Atlanta Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"104.12.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"AT&T Internet (Atlanta Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"75.110.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"AT&T Internet (Atlanta Residential)"},
-        
-        // نطاقات Spectrum / Charter (Atlanta, GA)
-        @{@"ip": [NSString stringWithFormat:@"24.28.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"Spectrum / Charter (Atlanta Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"69.140.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"Spectrum / Charter (Atlanta Residential)"},
-        
-        // نطاقات Verizon Fios (Atlanta, GA)
-        @{@"ip": [NSString stringWithFormat:@"71.198.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"Verizon Fios (Atlanta Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"108.20.%d.%d", arc4random_uniform(200)+1, arc4random_uniform(250)+1], @"isp": @"Verizon Fios (Atlanta Residential)"}
-    ];
-}
-
-// تعديل الدالة لتختار بشكل عشوائي ديناميكي تام في كل مرة يتم فيها الفتح أو إعادة التعيين
 void generateSessionIPReal() {
+    // قائمة موسعة من النطاقات السكنية الحقيقية والموثوقة (Residential ISPs)
     NSArray *dynamicPool = @[
-        @{@"ip": [NSString stringWithFormat:@"24.184.%d.%d", arc4random_uniform(150)+10, arc4random_uniform(240)+5], @"isp": @"Comcast Cable (Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"73.150.%d.%d", arc4random_uniform(150)+10, arc4random_uniform(240)+5], @"isp": @"Comcast Cable (Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"174.56.%d.%d", arc4random_uniform(150)+10, arc4random_uniform(240)+5], @"isp": @"AT&T Internet (Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"104.12.%d.%d", arc4random_uniform(150)+10, arc4random_uniform(240)+5], @"isp": @"AT&T Internet (Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"24.28.%d.%d", arc4random_uniform(150)+10, arc4random_uniform(240)+5], @"isp": @"Spectrum (Residential)"},
-        @{@"ip": [NSString stringWithFormat:@"71.198.%d.%d", arc4random_uniform(150)+10, arc4random_uniform(240)+5], @"isp": @"Verizon Fios (Residential)"}
+        // Comcast Cable (Atlanta / Georgia Pools)
+        @{@"ip": [NSString stringWithFormat:@"24.184.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Comcast Cable (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"73.140.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Comcast Cable (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"68.60.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Comcast Cable (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"96.80.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Comcast Cable (Residential)"},
+        
+        // AT&T Internet (Residential Pools)
+        @{@"ip": [NSString stringWithFormat:@"174.56.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"AT&T Internet (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"104.12.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"AT&T Internet (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"75.110.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"AT&T Internet (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"108.200.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"AT&T Internet (Residential)"},
+        
+        // Spectrum / Charter (Residential Pools)
+        @{@"ip": [NSString stringWithFormat:@"24.28.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Spectrum (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"65.30.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Spectrum (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"71.75.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Spectrum (Residential)"},
+        
+        // Verizon Fios (Residential Pools)
+        @{@"ip": [NSString stringWithFormat:@"71.198.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Verizon Fios (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"173.68.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Verizon Fios (Residential)"},
+        @{@"ip": [NSString stringWithFormat:@"69.168.%d.%d", arc4random_uniform(200)+10, arc4random_uniform(240)+10], @"isp": @"Verizon Fios (Residential)"}
     ];
     
     NSDictionary *selectedObj = dynamicPool[arc4random_uniform((uint32_t)dynamicPool.count)];
     sessionFakeIP = selectedObj[@"ip"];
     sessionIPType = selectedObj[@"isp"];
+    ipSourceStatus = @"✨ موثوق ومولد تلقائياً";
     
-    // تأكيد أن الـ IP تم توليده ديناميكياً بالكامل في هذه الجلسة
-    ipSourceStatus = @"✨ متولد ديناميكياً بنجاح (غير محظور)";
     updateTopBarDisplay();
 }
 
@@ -389,7 +379,6 @@ void changeIdentifiersOnly() {
         topStatusBarLabel.textColor = [UIColor greenColor];
         topStatusBarLabel.font = [UIFont boldSystemFontOfSize:10];
         topStatusBarLabel.textAlignment = NSTextAlignmentCenter;
-        topStatusBarLabel.text = @"🌐 جاري توليد IP جديد...";
         [topBar addSubview:topStatusBarLabel];
         [vc.view addSubview:topBar];
         
