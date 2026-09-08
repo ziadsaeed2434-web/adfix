@@ -58,7 +58,7 @@ static void addFloatingCleanButton() {
     // منع تكرار إنشاء الزر إذا كان موجوداً مسبقاً
     if ([keyWindow viewWithTag:9999]) return;
     
-    // تصميم الزر (موقع وحجم الزر على الشاشة، يمكنك تعديل الأبعاد كما تحب)
+    // تصميم الزر
     UIButton *cleanButton = [UIButton buttonWithType:UIButtonTypeSystem];
     cleanButton.frame = CGRectMake(30, 100, 60, 60);
     cleanButton.tag = 9999;
@@ -86,9 +86,9 @@ static void addFloatingCleanButton() {
 }
 @end
 
-// حقن الكود أول ما يشتغل التطبيق لكي تظهر الأيقونة/الزر تلقائياً
+// حقن الكود أول ما يشتغل التطبيق
 %ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queues ? dispatch_get_main_queue() : dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         addFloatingCleanButton();
     });
 }
