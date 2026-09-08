@@ -74,8 +74,7 @@ void updateTopBarDisplay() {
 BOOL verifyIPQuality(NSString *ip, NSString **outISPName) {
     if (!ip || ip.length == 0) return NO;
     
-    // فحص الـ IP عبر API يتحقق من الدولة، المزود، ومؤشرات الحظر والـ Proxy
-    NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,country,isp,org,proxy,hosting,mobile", ip];
+    NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,country,isp,org,proxy,hosting", ip];
     NSURL *url = [NSURL URLWithString:urlString];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     [request setTimeoutInterval:3.0];
@@ -100,21 +99,17 @@ BOOL verifyIPQuality(NSString *ip, NSString **outISPName) {
     NSString *country = json[@"country"] ?: @"";
     if (![country isEqualToString:@"United States"]) return NO;
     
-    // 2. التحقق من عدم كونه Proxy أو VPN أو Hosting (ممنوع منعاً باتاً لكي لا يحظر الحساب أو يعطل الإعلانات)
+    // 2. التحقق من عدم كونه Proxy أو VPN أو Hosting
     id proxyFlag = json[@"proxy"];
     id hostingFlag = json[@"hosting"];
     if (proxyFlag && [proxyFlag boolValue]) return NO;
     if (hostingFlag && [hostingFlag boolValue]) return NO;
     
-    // 3. فحص إضافي: التأكد من عدم تصنيفه كـ Mobile Datacenter مشبوه إذا وُجد
-    id mobileFlag = json[@"mobile"];
-    // نتركها مرنة قليلاً لكن سنفحص الكلمات المفتاحية الخطيرة بالأسفل
-    
     NSString *org = json[@"org"] ?: @"";
     NSString *isp = json[@"isp"] ?: @"";
     NSString *combined = [NSString stringWithFormat:@"%@ %@", org, isp];
     
-    // 4. استبعاد الكلمات المفتاحية المرتبطة بالحظْر، السيرفرات، والشركات المحظورة من شبكات الإعلانات
+    // 3. استبعاد الكلمات المفتاحية المرتبطة بالحظر والسيرفرات
     NSArray *blockedKeywords = @[
         @"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"VPS", 
         @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", 
@@ -123,18 +118,18 @@ BOOL verifyIPQuality(NSString *ip, NSString **outISPName) {
     ];
     for (NSString *keyword in blockedKeywords) {
         if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            return NO; // IP محظور أو ضمن النطاقات الخطيرة للإعلانات
+            return NO;
         }
     }
     
-    // 5. الاعتماد الحصري على مزودي خدمة سكنيين حقيقيين ومعتمدين (نظيفة 100% أمام Google AdMob وشركات الإعلانات)
+    // 4. الاعتماد على مزودي خدمة سكنيين حقيقيين
     NSArray *trustedISPs = @[@"Comcast", @"AT&T", @"Charter", @"Spectrum", @"Verizon", @"CenturyLink"];
     for (NSString *trustedISP in trustedISPs) {
         if ([combined rangeOfString:trustedISP options:NSCaseInsensitiveSearch].location != NSNotFound) {
             if (outISPName) {
                 *outISPName = isp.length > 0 ? isp : trustedISP;
             }
-            return YES; // IP نظيف، سكني، وغير محظور وجاهز لعرض الإعلانات
+            return YES;
         }
     }
     
@@ -143,18 +138,17 @@ BOOL verifyIPQuality(NSString *ip, NSString **outISPName) {
 
 void generateSessionIP() {
     NSArray *verifiedResidentialPools = @[
-        @[@24, 184], @[@73, 150], @[@68, 35],   // Comcast
-        @[@174, 56], @[@104, 12], @[@75, 110], // AT&T
-        @[@24, 28],  @[@69, 140],              // Spectrum
-        @[@71, 198], @[@108, 20],              // Verizon
-        @[@50, 195], @[@65, 128]               // CenturyLink
+        @[@24, @184], @[@73, @150], @[@68, @35],   
+        @[@174, @56], @[@104, @12], @[@75, @110], 
+        @[@24, @28],  @[@69, @140],              
+        @[@71, @198], @[@108, @20],              
+        @[@50, @195], @[@65, @128]               
     ];
     
     NSString *selectedIP = nil;
     NSString *detectedISP = nil;
     BOOL isFromFallback = NO;
     
-    // 100 محاولة بحث وفحص للتأكد من إيجاد IP غير محظور ونظيف تماماً
     for (int attempt = 0; attempt < 100; attempt++) {
         NSArray *pool = verifiedResidentialPools[arc4random_uniform((uint32_t)verifiedResidentialPools.count)];
         int first = [pool[0] intValue];
@@ -171,7 +165,6 @@ void generateSessionIP() {
         }
     }
     
-    // قائمة احتياطية نظيفة ومجربة مسبقاً لا تعرض الحساب للحظر
     if (!selectedIP) {
         NSArray *cleanFallbackPool = @[
             @"104.12.45.12", @"73.150.12.88", @"174.56.89.4", 
@@ -383,7 +376,7 @@ void changeIdentifiersOnly() {
         }
     }
     
-    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 سجل تفاصيل الطلبات والـ IP المستخدم لكل طلب:\n%@", locationInfo, ipInfo, ididentsInfo, logsText];
+    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 سجل تفاصيل الطلبات والـ IP المستخدم لكل طلب:\n%@", locationInfo, ipInfo, identsInfo, logsText];
     
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, self.view.bounds.size.width - 40, 0)];
     label.text = fullReport;
@@ -597,7 +590,7 @@ void changeIdentifiersOnly() {
     if (sessionFakeIP) {
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP`"];
     }
     NSString *urlString = request.URL.absoluteString;
     if (urlString) {
