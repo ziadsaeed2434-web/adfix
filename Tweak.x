@@ -5,7 +5,6 @@ static NSString *const kServiceKey = @"com.codebysms";
 static NSString *const kAccountUserID = @"userIDKey";
 static NSString *const kAccountToken = @"accessTokenKey";
 
-// قائمة الحسابات الـ 10
 NSArray *getAccountsList() {
     return @[
         @{@"user": @"61178", @"token": @"30fG3UW6M0ZK-naaub4SPaVua"},
@@ -13,28 +12,7 @@ NSArray *getAccountsList() {
     ];
 }
 
-// دالة لحذف ملفات التطبيق بالكامل (Documents & Caches)
-void clearApplicationFiles() {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *homeDir = NSHomeDirectory();
-    
-    // مسار مجلد المستندات والكاش
-    NSArray *pathsToClean = @[
-        [homeDir stringByAppendingPathComponent:@"Documents"],
-        [homeDir stringByAppendingPathComponent:@"Library/Caches"],
-        [homeDir stringByAppendingPathComponent:@"Library/Preferences"] // اختياري حسب الحاجة
-    ];
-    
-    for (NSString *path in pathsToClean) {
-        NSArray *contents = [fileManager contentsOfDirectoryAtPath:path error:nil];
-        for (NSString *file in contents) {
-            NSString *fullPath = [path stringByAppendingPathComponent:file];
-            [fileManager removeItemAtPath:fullPath error:nil];
-        }
-    }
-}
-
-// دالة لحذف الـ Keychain بالكامل الخاص بالخدمة
+// تعديل: حذف مفاتيح الـ Keychain الخاصة بالتطبيق فقط بدون تدمير مسار الكاش بالكامل لتجنب شاشة الخطأ
 void clearKeychain() {
     NSDictionary *spec = @{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
@@ -43,7 +21,6 @@ void clearKeychain() {
     SecItemDelete((__bridge CFDictionaryRef)spec);
 }
 
-// دالة لإضافة قيمة إلى الـ Keychain
 void saveToKeychain(NSString *accountName, NSString *passwordVal) {
     NSData *passwordData = [passwordVal dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *spec = @{
@@ -66,13 +43,10 @@ void setupAccountSwitcher() {
     
     NSDictionary *currentAcc = accounts[currentIndex];
     
-    // 1. حذف ملفات التطبيق أولاً
-    clearApplicationFiles();
-    
-    // 2. حذف الـ Keychain كاملاً
+    // تفريغ الـ Keychain فقط لتحديث الحساب دون تدمير ملفات التشغيل
     clearKeychain();
     
-    // 3. حقن بيانات الحساب الجديد في الـ Keychain
+    // حقن الحساب الجديد
     saveToKeychain(kAccountUserID, currentAcc[@"user"]);
     saveToKeychain(kAccountToken, currentAcc[@"token"]);
     
