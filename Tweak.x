@@ -11,13 +11,12 @@
 static double currentLat = 0.0;
 static double currentLon = 0.0;
 static NSString *sessionFakeIP = nil;
-static NSString *sessionIPType = @"جاهز تلقائياً...";
+static NSString *sessionIPType = @"جاهز...";
 static NSString *ipSourceStatus = @"محمي وآمن...";
 static NSMutableArray *networkLogs = nil;
 
-// المعرفات المزيفة (تلقائية)
-static NSString *fakeAdvertisingIDString = nil;
-static NSString *fakeUDIDString = nil; 
+// المعرفات المزيفة
+static NSString *fakeUDIDString = nil; // مرتبط بالزر الأزرق فقط
 
 // واجهة الشريط العلوي
 static UILabel *topStatusBarLabel = nil;
@@ -61,13 +60,13 @@ void updateAtlantaLocation() {
 void updateTopBarDisplay() {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (topStatusBarLabel) {
-            topStatusBarLabel.text = [NSString stringWithFormat:@"🌐 IP: %@ | 🏢 AT&T | 🛡️ تلقائي", sessionFakeIP ?: @"جاري التوليد..."];
+            topStatusBarLabel.text = [NSString stringWithFormat:@"🌐 IP: %@ | 🏢 AT&T | 🛡️ IDFA تلقائي", sessionFakeIP ?: @"جاهز"];
         }
     });
 }
 
 // ============================================================
-// MARK: - توليد IP واقعي من AT&T (تلقائي)
+// MARK: - توليد IP واقعي من AT&T
 // ============================================================
 
 void generateSessionIPReal() {
@@ -103,7 +102,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, NSString *ispType, double
 }
 
 // ============================================================
-// MARK: - إدارة الـ Keychain والتنظيف (تتم بالزر الأزرق فقط)
+// MARK: - إدارة الـ Keychain وتنظيف البيانات
 // ============================================================
 
 void clearKeychainKeepingAccount() {
@@ -182,12 +181,19 @@ void clearCookiesAndCacheSafely() {
 }
 
 // ============================================================
-// MARK: - عملية الزر الأزرق (تنظيف شامل وإعادة تشغيل فقط)
+// MARK: - عملية الزر الأزرق (توليد UDID جديد + تنظيف + إعادة تشغيل)
 // ============================================================
 
 void performFullResetWithNewIDs() {
     @try {
-        // تنظيف الكاش والكوكيز والـ Keychain مع الحفاظ على الحساب
+        // 1. توليد UDID جديد عند الضغط فقط
+        fakeUDIDString = generateRandomUDID();
+        
+        // 2. تحديث الـ IP والموقع
+        generateSessionIPReal();
+        updateAtlantaLocation();
+        
+        // 3. تنظيف الكاش والكوكيز والـ Keychain مع الحفاظ على الحساب
         clearKeychainKeepingAccount();
         clearCookiesAndCacheSafely();
         
@@ -195,7 +201,7 @@ void performFullResetWithNewIDs() {
             [networkLogs removeAllObjects];
         }
         
-        // إعادة تشغيل آمنة لتطبيق التنظيف
+        // 4. إعادة تشغيل آمنة لتطبيق التغييرات
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             exit(0);
         });
@@ -264,7 +270,7 @@ void performFullResetWithNewIDs() {
         [topBar addSubview:topStatusBarLabel];
         [vc.view addSubview:topBar];
         
-        // الزر الأزرق (للتنظيف الشامل وإعادة التشغيل فقط)
+        // الزر الأزرق لتوليد UDID جديد والتنظيف الشامل
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 100, 55, 55);
@@ -288,7 +294,7 @@ void performFullResetWithNewIDs() {
     });
 }
 
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+- (void)handlePan:(UIPanGestureRecognizer * _Nonnull)gesture {
     UIView *targetView = gesture.view;
     CGPoint translation = [gesture translationInView:targetView.superview];
     CGFloat newX = targetView.center.x + translation.x;
@@ -307,14 +313,12 @@ void performFullResetWithNewIDs() {
 @end
 
 // ============================================================
-// MARK: - الـ Hooks والتوليد التلقائي
+// MARK: - الـ Hooks
 // ============================================================
 
 %ctor {
-    // التوليد التلقائي الفوري عند تشغيل التويك
     updateAtlantaLocation();
     generateSessionIPReal();
-    fakeAdvertisingIDString = generateRandomUUIDString();
     fakeUDIDString = generateRandomUDID();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -322,12 +326,10 @@ void performFullResetWithNewIDs() {
     });
 }
 
+// جعل الـ IDFA يتولد تلقائياً وعشوائياً في كل مرة يطلبه التطبيق
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    if (fakeAdvertisingIDString) {
-        return [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString];
-    }
-    return %orig;
+    return [[NSUUID alloc] initWithUUIDString:generateRandomUUIDString()];
 }
 %end
 
