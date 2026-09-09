@@ -1,7 +1,56 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-// 1. مراقبة كلاس المتجر وتصفير العداد عند ظهور الشاشة
+// دالة مخصصة لتنفيذ عملية المسح الشامل ومحاكاة الحذف والتثبيت
+void performDeepCleanSimulation() {
+    @autoreleasepool {
+        NSLog(@"[AdDebug] Background clean trigger: Simulating clean app reinstall on exit!");
+        
+        // أ) مسح مجلد الـ Caches الخاص بالتطبيق
+        NSArray *cachesPaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+        NSString *cacheDirectory = [cachesPaths objectAtIndex:0];
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        NSError *error = nil;
+        NSArray *cacheFiles = [fileManager contentsOfDirectoryAtPath:cacheDirectory error:&error];
+        for (NSString *file in cacheFiles) {
+            NSString *filePath = [cacheDirectory stringByAppendingPathComponent:file];
+            [fileManager removeItemAtPath:filePath error:&error];
+        }
+        
+        // ب) مسح الملفات المؤقتة في مجلد tmp
+        NSString *tmpDirectory = NSTemporaryDirectory();
+        NSArray *tmpFiles = [fileManager contentsOfDirectoryAtPath:tmpDirectory error:&error];
+        for (NSString *file in tmpFiles) {
+            NSString *filePath = [tmpDirectory stringByAppendingPathComponent:file];
+            [fileManager removeItemAtPath:filePath error:&error];
+        }
+        
+        // ج) مسح نطاقات InMobi و Unity و Capping من NSUserDefaults وتوليد هوية جديدة
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSDictionary *dict = [defaults dictionaryRepresentation];
+        for (NSString *key in dict) {
+            if ([key containsString:@"inobi"] || [key containsString:@"unity"] || [key containsString:@"Capping"] || [key containsString:@"delivery"]) {
+                [defaults removeObjectForKey:key];
+            }
+        }
+        
+        // ضبط القيم الجديدة النظيفة
+        [defaults setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
+        [defaults setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
+        [defaults setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
+        [defaults setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
+        [defaults setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
+        [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
+        
+        NSString *freshIDFI = [[NSUUID UUID] UUIDString];
+        [defaults setObject:freshIDFI forKey:@"unityads-idfi"];
+        
+        [defaults synchronize];
+        NSLog(@"[AdDebug] Background cleanup complete. New IDFI prepared for next launch: %@", freshIDFI);
+    }
+}
+
+// 1. مراقبة كلاس المتجر لتصفير العداد فور ظهوره
 %hook StoreController
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
@@ -17,7 +66,7 @@
 }
 %end
 
-// 2. مراقبة وإدارة كلاسات InMobi الحقيقية المستخرجة من Runtime Browser لضمان الجاهزية
+// 2. مراقبة وإدارة كلاسات InMobi الحقيقية لضمان الجاهزية
 %hook IMOMAdSessionManager
 
 - (BOOL)isReady {
@@ -33,7 +82,6 @@
 
 %end
 
-// هوك إضافي لمراقبة واجهات العرض والرندرة الخاصة بالإعلانات
 %hook IMRenderViewController
 
 - (void)viewDidLoad {
@@ -48,10 +96,10 @@
 
 %end
 
-// 3. مراقبة وتعديل NSUserDefaults بشكل شامل (Capping & IDFI)
+// 3. مراقبة وتعديل NSUserDefaults بشكل شامل
 %hook NSUserDefaults
 
-- (void)setBool:(BOOL)value forKey:(NSString *)defaultName {
+- (void)setBool:(BOOL)value forKey:(NSString *__strong)defaultName {
     if ([defaultName containsString:@"Capping"] || [defaultName containsString:@"delivery"]) {
         NSLog(@"[AdDebug] NSUserDefaults setBool: %@ for key: %@", value ? @"YES" : @"NO", defaultName);
     }
@@ -74,65 +122,48 @@
     %orig(value, defaultName);
 }
 
-- (void)setInteger:(NSInteger)value forKey:(NSString *)defaultName {
+- (void)setInteger:(NSInteger)value forKey:(NSString *__strong)defaultName {
     if ([defaultName isEqualToString:@"com.inobi_defaultStore_sessionCount"]) {
-        NSLog(@"[AdDebug] NSUserDefaults trying to change sessionCount to: %ld. Blocking & resetting to 0.", (long)value);
         value = 0;
     }
     %orig(value, defaultName);
 }
 
-- (NSInteger)integerForKey:(NSString *)defaultName {
+- (NSInteger)integerForKey:(NSString *__strong)defaultName {
     if ([defaultName isEqualToString:@"com.inobi_defaultStore_sessionCount"]) {
-        NSLog(@"[AdDebug] NSUserDefaults integerForKey: %@ -> forced to return 0", defaultName);
         return 0;
     }
     return %orig;
 }
 
-- (void)setObject:(id)value forKey:(NSString *)defaultName {
-    // تزوير واقتناص مفتاح unityads-idfi وتوليد معرف عشوائي جديد لتجاوز الحظر
+- (void)setObject:(id)value forKey:(NSString *__strong)defaultName {
     if ([defaultName isEqualToString:@"unityads-idfi"]) {
-        NSString *randomID = [[NSUUID UUID] UUIDString];
-        NSLog(@"[AdDebug] Intercepted unityads-idfi. Changing from %@ to new random ID: %@", value, randomID);
-        value = randomID;
+        value = [[NSUUID UUID] UUIDString];
     }
     %orig(value, defaultName);
 }
 
-- (id)objectForKey:(NSString *)defaultName {
-    id val = %orig;
-    if ([defaultName containsString:@"sessionCount"] || [defaultName containsString:@"Capping"] || [defaultName isEqualToString:@"unityads-idfi"]) {
-        NSLog(@"[AdDebug] NSUserDefaults objectForKey: %@ -> value: %@", defaultName, val);
-    }
-    return val;
-}
-
 %end
 
-// 4. دالة التهيئة العامة: تعمل في كل مرة يُفتح فيها التطبيق من الصفر لتعمل كأنها أول تثبيت
+// 4. مراقبة دورة حياة التطبيق (App Lifecycle) لتنفيذ المسح الشامل فور الخروج إلى الخلفية أو الإغلاق
 %ctor {
     @autoreleasepool {
-        NSLog(@"[AdDebug] Fresh start triggered: Tweak simulating first-time launch!");
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        // مراقبة إشعار دخول التطبيق إلى الخلفية (عندما يخرج المستخدم منه)
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification * _Nonnull note) {
+            NSLog(@"[AdDebug] App entered background. Executing clean simulation...");
+            performCleanSimulation(); // تنفيذ عملية التنظيف بصمت في الخلفية
+        }];
         
-        // مسح القيم القديمة تماماً لضمان بداية نظيفة
-        [defaults removeObjectForKey:@"com.inobi_defaultStore_sessionCount"];
-        [defaults removeObjectForKey:@"unityads-idfi"];
-        
-        // ضبط القيم الافتراضية لتجاوز القيود
-        [defaults setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
-        [defaults setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
-        [defaults setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
-        [defaults setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
-        [defaults setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
-        [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
-        
-        // توليد هوية جديدة بالكامل (UUID) مع كل فتحة جديدة للتطبيق
-        NSString *freshIDFI = [[NSUUID UUID] UUIDString];
-        [defaults setObject:freshIDFI forKey:@"unityads-idfi"];
-        
-        [defaults synchronize];
-        NSLog(@"[AdDebug] Generated brand new unityads-idfi on launch: %@", freshIDFI);
+        // مراقبة إشعار إنهاء التطبيق بالكامل
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification * _Nonnull note) {
+            NSLog(@"[AdDebug] App will terminate. Executing final clean simulation...");
+            performCleanSimulation();
+        }];
     }
 }
