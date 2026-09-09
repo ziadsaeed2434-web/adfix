@@ -145,25 +145,23 @@ void performDeepCleanSimulation() {
 
 %end
 
-// 4. مراقبة دورة حياة التطبيق (App Lifecycle) لتنفيذ المسح الشامل فور الخروج إلى الخلفية أو الإغلاق
+// 4. مراقبة دورة حياة التطبيق لتنفيذ المسح الشامل فور الخروج إلى الخلفية أو الإغلاق
 %ctor {
     @autoreleasepool {
-        // مراقبة إشعار دخول التطبيق إلى الخلفية (عندما يخرج المستخدم منه)
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
                                                           object:nil
                                                            queue:[NSOperationQueue mainQueue]
                                                       usingBlock:^(NSNotification * _Nonnull note) {
             NSLog(@"[AdDebug] App entered background. Executing clean simulation...");
-            performCleanSimulation(); // تنفيذ عملية التنظيف بصمت في الخلفية
+            performDeepCleanSimulation(); // تم تصحيح اسم الدالة هنا لتتطابق تماماً
         }];
         
-        // مراقبة إشعار إنهاء التطبيق بالكامل
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification
                                                           object:nil
                                                            queue:[NSOperationQueue mainQueue]
                                                       usingBlock:^(NSNotification * _Nonnull note) {
             NSLog(@"[AdDebug] App will terminate. Executing final clean simulation...");
-            performCleanSimulation();
+            performDeepCleanSimulation(); // وتم تصحيح اسم الدالة هنا أيضاً
         }];
     }
 }
