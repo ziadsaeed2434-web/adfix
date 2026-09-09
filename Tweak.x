@@ -31,26 +31,25 @@ static id forcedValueForKey(NSString *key) {
 static void wipeAllPlists(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    // المسارات التي نمسح منها كل الـ plists
+    // نخزن المسارات في متغيرات أولاً (إصلاح الخطأ)
+    NSString *libDir    = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *appSupDir = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *cachesDir = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *docsDir   = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+
     NSArray *paths = @[
-        // الأهم: هنا يخزن NSUserDefaults ومعظم الـ SDKs عدّاداتها
-        [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"Preferences"],
-        // بعض الـ SDKs تخزن في مجلد Library مباشرة
-        NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject,
-        // Application Support
-        [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject],
-        // Caches
-        [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject],
-        // Documents
-        [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject]
+        [libDir stringByAppendingPathComponent:@"Preferences"],
+        libDir,
+        appSupDir,
+        cachesDir,
+        docsDir
     ];
 
     int deletedCount = 0;
 
     for (NSString *basePath in paths) {
-        if (!basePath || ![fm fileExistsAtPath:basePath]) continue;
+        if (!basePath || [basePath length] == 0 || ![fm fileExistsAtPath:basePath]) continue;
 
-        // المسح العميق: نمسح كل plist في المجلد وكل المجلدات الفرعية
         NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:basePath];
         NSString *relativePath;
         while ((relativePath = [enumerator nextObject]) != nil) {
@@ -64,7 +63,6 @@ static void wipeAllPlists(void) {
         }
     }
 
-    // أيضاً نمسح الـ NSUserDefaults الداخلي نفسه
     NSString *appBundleID = [[NSBundle mainBundle] bundleIdentifier];
     NSString *prefsPath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", appBundleID];
     if ([fm fileExistsAtPath:prefsPath]) {
@@ -73,7 +71,6 @@ static void wipeAllPlists(void) {
         NSLog(@"[AdForceGlobal] Deleted global prefs: %@", prefsPath);
     }
 
-    // إعادة كتابة القيم المفروضة بعد المسح
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     [d setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
     [d setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
@@ -127,17 +124,14 @@ static void wipeAllPlists(void) {
     @autoreleasepool {
         NSLog(@"[AdForceGlobal] Tweak loaded — full plist wipe mode");
 
-        // مسح فوري عند تحميل التويك
         wipeAllPlists();
 
-        // مسح عند كل فتح للتطبيق
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
                                                             object:nil queue:nil
                                                       usingBlock:^(NSNotification *n) {
             wipeAllPlists();
         }];
 
-        // مسح عند كل عودة من الخلفية
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification
                                                             object:nil queue:nil
                                                       usingBlock:^(NSNotification *n) {
