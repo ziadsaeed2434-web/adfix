@@ -11,29 +11,45 @@
     NSLog(@"[AdDebug] StoreController -> viewDidLoad triggered. Session count forced to 0.");
 }
 
-// إذا كان هناك دالة لطلب أو عرض الإعلان داخل الـ StoreController سنقوم برصدها
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     NSLog(@"[AdDebug] StoreController -> viewDidAppear. Store screen is now active.");
 }
 %end
 
-// 2. مراقبة استجابة كلاس الإعلانات وجاهزيته
+// 2. مراقبة وإدارة كلاس الإعلانات لضمان الجاهزية والتحميل المستمر
 %hook InMobiInterstitial
 - (BOOL)isReady {
     BOOL ready = %orig;
-    NSLog(@"[AdDebug] InMobiInterstitial -> isReady called. Original state was: %@", ready ? @"YES" : @"NO");
-    // إجبار الاعتبار بأن الإعلان جاهز دائماً
+    NSLog(@"[AdDebug] InMobiInterstitial -> isReady called. Original state was: %@, forcing YES.", ready ? @"YES" : @"NO");
     return YES;
 }
 
 - (void)showFromViewController:(UIViewController *)viewController {
     NSLog(@"[AdDebug] InMobiInterstitial -> showFromViewController called successfully!");
     %orig;
+    
+    // إجبار الإعلان على إعادة التحميل فوراً بعد عرضه ليكون جاهزاً للمرة القادمة دون انتظار
+    @try {
+        if ([self respondsToSelector:@selector(load)]) {
+            [self performSelector:@selector(load) withObject:nil afterDelay:0.4];
+            NSLog(@"[AdDebug] Triggered [self load] successfully after showing ad.");
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[AdDebug] Error reloading ad: %@", exception.reason);
+    }
 }
 %end
 
-// 3. مراقبة وتتبع كل مفتاح يتم تعديله أو قراءته في NSUserDefaults لمعرفة من يغيره
+// مراقبة مدير الإعلانات الداخلي إن وجد لتحفيز جلب الإعلانات
+%hook InMobiAdManager
+- (void)loadAd {
+    %orig;
+    NSLog(@"[AdDebug] InMobiAdManager -> loadAd called.");
+}
+%end
+
+// 3. مراقبة وتعديل NSUserDefaults بشكل شامل (شملنا integerForKey)
 %hook NSUserDefaults
 
 - (void)setBool:(BOOL)value forKey:(NSString *)defaultName {
@@ -65,6 +81,14 @@
         value = 0;
     }
     %orig(value, defaultName);
+}
+
+- (NSInteger)integerForKey:(NSString *)defaultName {
+    if ([defaultName isEqualToString:@"com.inobi_defaultStore_sessionCount"]) {
+        NSLog(@"[AdDebug] NSUserDefaults integerForKey: %@ -> forced to return 0", defaultName);
+        return 0;
+    }
+    return %orig;
 }
 
 - (id)objectForKey:(NSString *)defaultName {
