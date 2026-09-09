@@ -1,39 +1,53 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-// 1. استهداف كلاس المتجر ومراقبة تحميل الشاشة لإجبار إعادة التهيئة
+// 1. مراقبة كلاس المتجر وتسجيل كل حركة تحميل أو تفاعل
 %hook StoreController
 - (void)viewDidLoad {
     %orig;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
     [defaults synchronize];
-    NSLog(@"[AdForceCombined] StoreController loaded, session count forced to 0.");
+    NSLog(@"[AdDebug] StoreController -> viewDidLoad triggered. Session count forced to 0.");
+}
+
+// إذا كان هناك دالة لطلب أو عرض الإعلان داخل الـ StoreController سنقوم برصدها
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    NSLog(@"[AdDebug] StoreController -> viewDidAppear. Store screen is now active.");
 }
 %end
 
-// 2. استهداف كلاس الـ SDK الخاص بالإعلانات المباشر
+// 2. مراقبة استجابة كلاس الإعلانات وجاهزيته
 %hook InMobiInterstitial
 - (BOOL)isReady {
-    return YES; // إجبار النظام على اعتبار الإعلان جاهزاً دائماً
+    BOOL ready = %orig;
+    NSLog(@"[AdDebug] InMobiInterstitial -> isReady called. Original state was: %@", ready ? @"YES" : @"NO");
+    // إجبار الاعتبار بأن الإعلان جاهز دائماً
+    return YES;
 }
+
 - (void)showFromViewController:(UIViewController *)viewController {
+    NSLog(@"[AdDebug] InMobiInterstitial -> showFromViewController called successfully!");
     %orig;
-    NSLog(@"[AdForceCombined] Interstitial ad forced to show!");
 }
 %end
 
-// 3. قفل وتثبيت القيم المنطقية وعدادات الجلسات والطوابع الزمنية في NSUserDefaults
+// 3. مراقبة وتتبع كل مفتاح يتم تعديله أو قراءته في NSUserDefaults لمعرفة من يغيره
 %hook NSUserDefaults
 
 - (void)setBool:(BOOL)value forKey:(NSString *)defaultName {
+    if ([defaultName containsString:@"Capping"] || [defaultName containsString:@"delivery"]) {
+        NSLog(@"[AdDebug] NSUserDefaults setBool: %@ for key: %@", value ? @"YES" : @"NO", defaultName);
+    }
+    
     if ([defaultName isEqualToString:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"]) {
         value = NO;
     }
     else if ([defaultName isEqualToString:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"]) {
         value = YES;
     }
-    else if ([defaultName isEqualToString:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"]) {
+    else if ([defaultName isEqualToString:@"BN_CategoryManager.IS_CAPPING_ENABLED_DefaultBanner"] || [defaultName isEqualToString:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"]) {
         value = NO;
     }
     else if ([defaultName isEqualToString:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"]) {
@@ -47,33 +61,26 @@
 
 - (void)setInteger:(NSInteger)value forKey:(NSString *)defaultName {
     if ([defaultName isEqualToString:@"com.inobi_defaultStore_sessionCount"]) {
-        value = 0; // قفل العداد عند الصفر دائماً
-    }
-    %orig(value, defaultName);
-}
-
-- (void)setDouble:(double)value forKey:(NSString *)defaultName {
-    if ([defaultName containsString:@"Time"] || [defaultName containsString:@"Last"] || [defaultName containsString:@"pacing"]) {
+        NSLog(@"[AdDebug] NSUserDefaults trying to change sessionCount to: %ld. Blocking & resetting to 0.", (long)value);
         value = 0;
     }
     %orig(value, defaultName);
 }
 
-- (void)setObject:(id)value forKey:(NSString *)defaultName {
-    if ([defaultName isEqualToString:@"com.inobi_defaultStore_sessionCount"]) {
-        value = @0;
+- (id)objectForKey:(NSString *)defaultName {
+    id val = %orig;
+    if ([defaultName containsString:@"sessionCount"] || [defaultName containsString:@"Capping"]) {
+        NSLog(@"[AdDebug] NSUserDefaults objectForKey: %@ -> value: %@", defaultName, val);
     }
-    else if ([defaultName containsString:@"Time"] || [defaultName containsString:@"date"] || [defaultName containsString:@"timestamp"]) {
-        value = @0;
-    }
-    %orig(value, defaultName);
+    return val;
 }
 
 %end
 
-// 4. التنظيف الشامل وضبط القيم فور إطلاق التطبيق
+// 4. دالة التهيئة العامة وتسجيل حالة البدء
 %ctor {
     @autoreleasepool {
+        NSLog(@"[AdDebug] Tweak loaded into process successfully!");
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         
         [defaults setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
@@ -83,15 +90,6 @@
         [defaults setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
         [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
         
-        // مسح الطوابع الزمنية القديمة
-        NSDictionary *dict = [defaults dictionaryRepresentation];
-        for (NSString *key in dict.allKeys) {
-            if ([key containsString:@"Time"] || [key containsString:@"lastShown"] || [key containsString:@"Timestamp"]) {
-                [defaults removeObjectForKey:key];
-            }
-        }
-        
         [defaults synchronize];
-        NSLog(@"[AdForceCombined] All local and runtime hooks applied successfully!");
     }
 }
