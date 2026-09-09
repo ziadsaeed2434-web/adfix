@@ -49,7 +49,7 @@
 }
 %end
 
-// 3. مراقبة وتعديل NSUserDefaults بشكل شامل (شملنا integerForKey)
+// 3. مراقبة وتعديل NSUserDefaults بشكل شامل (شملنا integerForKey وتغيير unityads-idfi)
 %hook NSUserDefaults
 
 - (void)setBool:(BOOL)value forKey:(NSString *)defaultName {
@@ -91,9 +91,19 @@
     return %orig;
 }
 
+- (void)setObject:(id)value forKey:(NSString *)defaultName {
+    // تزوير واقتناص مفتاح unityads-idfi وتوليد معرف عشوائي جديد لتجاوز الحظر
+    if ([defaultName isEqualToString:@"unityads-idfi"]) {
+        NSString *randomID = [[NSUUID UUID] UUIDString];
+        NSLog(@"[AdDebug] Intercepted unityads-idfi. Changing from %@ to new random ID: %@", value, randomID);
+        value = randomID;
+    }
+    %orig(value, defaultName);
+}
+
 - (id)objectForKey:(NSString *)defaultName {
     id val = %orig;
-    if ([defaultName containsString:@"sessionCount"] || [defaultName containsString:@"Capping"]) {
+    if ([defaultName containsString:@"sessionCount"] || [defaultName containsString:@"Capping"] || [defaultName isEqualToString:@"unityads-idfi"]) {
         NSLog(@"[AdDebug] NSUserDefaults objectForKey: %@ -> value: %@", defaultName, val);
     }
     return val;
@@ -113,6 +123,9 @@
         [defaults setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
         [defaults setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
         [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
+        
+        // توليد هوية جديدة لـ unityads-idfi فور تشغيل التطبيق لتفادي حد الإعلانات
+        [defaults setObject:[[NSUUID UUID] UUIDString] forKey:@"unityads-idfi"];
         
         [defaults synchronize];
     }
