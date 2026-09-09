@@ -1,42 +1,90 @@
-#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
-// دالة لتصفير وتحديث القيم بشكل متكرر
-void resetAdPreferences() {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+// دالة تنفيذ الحذف الشامل مباشرة
+void executeFullResetAndExit() {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSError *error = nil;
     
-    // إعادة تعيين جميع مفاتيح الإعلانات والحظر والجلوس
-    [defaults setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
-    [defaults setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
+    // 1. حذف مسارات الـ Group Containers ديناميكياً
+    NSString *libraryPath = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *groupContainersPath = [libraryPath stringByAppendingPathComponent:@"Group Containers"];
     
-    [defaults setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
-    [defaults setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
-    
-    [defaults setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
-    
-    [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
-    
-    // مفاتيح إضافية محتملة قد يستخدمها التطبيق لتخزين وقت آخر إعلان
-    [defaults setObject:[NSDate distantPast] forKey:@"com.ironsource.lastInterstitialTime"];
-    [defaults setObject:[NSDate distantPast] forKey:@"lastInterstitialTime"];
-    [defaults setInteger:0 forKey:@"adShowCount"];
-    [defaults setInteger:0 forKey:@"interstitialShowCount"];
-    
-    [defaults synchronize];
-}
-
-%ctor {
-    @autoreleasepool {
-        // تنفيذ التصفير فور فتح التطبيق
-        resetAdPreferences();
-        
-        // استخدام المؤقت (Timer) لتكرار التصفير كل 5 ثوانٍ في الخلفية/الامام
-        // هذا يضمن أنه حتى لو حاول التطبيق حظر الإعلان بعد مشاهدته، سيقوم التويك بتصفير الحظر فوراً
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSTimer scheduledTimerWithTimeInterval:5.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
-                resetAdPreferences();
-            }];
-        });
-        
-        NSLog(@"[AdForceGlobal] Dynamic auto-reset timer started successfully!");
+    if ([fileManager fileExistsAtPath:groupContainersPath]) {
+        NSArray *contents = [fileManager contentsOfDirectoryAtPath:groupContainersPath error:&error];
+        for (NSString *item in contents) {
+            if ([item hasPrefix:@"group."]) {
+                NSString *fullPath = [groupContainersPath stringByAppendingPathComponent:item];
+                [fileManager removeItemAtPath:fullPath error:&error];
+            }
+        }
     }
+    
+    // 2. حذف بيانات التطبيق الداخلية (Documents, Library, tmp, StoreKit)
+    NSString *homeDir = NSHomeDirectory();
+    NSArray *foldersToDelete = @[@"Documents", @"Library", @"tmp", @"StoreKit"];
+    
+    for (NSString *folder in foldersToDelete) {
+        NSString *folderPath = [homeDir stringByAppendingPathComponent:folder];
+        if ([fileManager fileExistsAtPath:folderPath]) {
+            [fileManager removeItemAtPath:folderPath error:&error];
+        }
+    }
+    
+    // إغلاق التطبيق فوراً بعد الحذف
+    exit(0);
 }
+
+// دالة لإنشاء وعرض الزر العائم على الشاشة
+void addFloatingResetButton() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *keyWindow = nil;
+        for (UIWindow *window in [UIApplication sharedApplication].windows) {
+            if (window.isKeyWindow) {
+                keyWindow = window;
+                break;
+            }
+        }
+        if (!keyWindow) {
+            keyWindow = [UIApplication sharedApplication].keyWindow;
+        }
+        
+        // التحقق من عدم إضافة الزر مسبقاً
+        if ([keyWindow viewWithTag:9999]) return;
+        
+        // إنشاء الزر العائم
+        UIButton *resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        resetButton.frame = CGRectMake(30, 100, 110, 45);
+        resetButton.tag = 9999;
+        [resetButton setTitle:@"تصفير التطبيق" forState:UIControlStateNormal];
+        [resetButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        resetButton.backgroundColor = [UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:0.9]; // لون أحمر
+        resetButton.layer.cornerRadius = 22.5;
+        resetButton.layer.shadowColor = [UIColor blackColor].CGColor;
+        resetButton.layer.shadowOffset = CGSizeMake(0, 2);
+        resetButton.layer.shadowOpacity = 0.3;
+        resetButton.layer.shadowRadius = 4.0;
+        
+        // ربط الحدث بالدالة مباشرة دون إظهار أي نافذة تنبيه
+        [resetButton addTarget:nil action:@selector(resetButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+        
+        [keyWindow addSubview:resetButton];
+    });
+}
+
+// حقن الزر عند ظهور الواجهات
+%hook UIViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    addFloatingResetButton();
+}
+%end
+
+// تنفيذ الحذف وإغلاق التطبيق فور الضغط على الزر
+@interface NSObject (ResetButtonHandler)
+@end
+
+@implementation NSObject (ResetButtonHandler)
+- (void)resetButtonTapped:(id)sender {
+    executeFullResetAndExit();
+}
+@end
