@@ -12,8 +12,7 @@
 }
 %end
 
-// 2. استهداف كلاس الـ SDK الخاص بالإعلانات (إذا كان متوفراً لدعم جاهزية العرض قسراً)
-%if %c(InMobiInterstitial)
+// 2. استهداف كلاس الـ SDK الخاص بالإعلانات المباشر
 %hook InMobiInterstitial
 - (BOOL)isReady {
     return YES; // إجبار النظام على اعتبار الإعلان جاهزاً دائماً
@@ -22,7 +21,6 @@
     %orig;
     NSLog(@"[AdForceCombined] Interstitial ad forced to show!");
 }
-%end
 %end
 
 // 3. قفل وتثبيت القيم المنطقية وعدادات الجلسات والطوابع الزمنية في NSUserDefaults
