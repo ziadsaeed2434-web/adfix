@@ -26,63 +26,57 @@ static id forcedValueForKey(NSString *key) {
     return @NO;
 }
 
-#pragma mark - مسح كل ملفات plist
+#pragma mark - مسح ملفات plist (ينفذ يدوياً فقط)
 
 static void wipeAllPlists(void) {
-    NSFileManager *fm = [NSFileManager defaultManager];
+    @try {
+        NSFileManager *fm = [NSFileManager defaultManager];
 
-    // نخزن المسارات في متغيرات أولاً (إصلاح الخطأ)
-    NSString *libDir    = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *appSupDir = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *cachesDir = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *docsDir   = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSString *libDir    = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+        NSString *cachesDir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
 
-    NSArray *paths = @[
-        [libDir stringByAppendingPathComponent:@"Preferences"],
-        libDir,
-        appSupDir,
-        cachesDir,
-        docsDir
-    ];
+        NSArray *paths = @[
+            [libDir stringByAppendingPathComponent:@"Preferences"],
+            cachesDir
+        ];
 
-    int deletedCount = 0;
+        int deletedCount = 0;
 
-    for (NSString *basePath in paths) {
-        if (!basePath || [basePath length] == 0 || ![fm fileExistsAtPath:basePath]) continue;
+        for (NSString *basePath in paths) {
+            if (!basePath || [basePath length] == 0 || ![fm fileExistsAtPath:basePath]) continue;
 
-        NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:basePath];
-        NSString *relativePath;
-        while ((relativePath = [enumerator nextObject]) != nil) {
-            if ([relativePath.pathExtension.lowercaseString isEqualToString:@"plist"]) {
-                NSString *fullPath = [basePath stringByAppendingPathComponent:relativePath];
+            NSMutableArray *toDelete = [NSMutableArray array];
+            NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:basePath];
+            NSString *relativePath;
+            while ((relativePath = [enumerator nextObject]) != nil) {
+                if ([relativePath.pathExtension.lowercaseString isEqualToString:@"plist"]) {
+                    [toDelete addObject:[basePath stringByAppendingPathComponent:relativePath]];
+                }
+            }
+
+            for (NSString *fullPath in toDelete) {
                 if ([fm removeItemAtPath:fullPath error:nil]) {
                     deletedCount++;
-                    NSLog(@"[AdForceGlobal] Deleted plist: %@", fullPath);
                 }
             }
         }
+
+        // إعادة كتابة القيم المفروضة بعد المسح
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        [d setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
+        [d setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
+        [d setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
+        [d setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
+        [d setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
+        [d setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
+
+        NSLog(@"[AdForceGlobal] Manual wipe done: %d plist files deleted", deletedCount);
+    } @catch (NSException *e) {
+        NSLog(@"[AdForceGlobal] Wipe failed safely: %@", e.reason);
     }
-
-    NSString *appBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    NSString *prefsPath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", appBundleID];
-    if ([fm fileExistsAtPath:prefsPath]) {
-        [fm removeItemAtPath:prefsPath error:nil];
-        deletedCount++;
-        NSLog(@"[AdForceGlobal] Deleted global prefs: %@", prefsPath);
-    }
-
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-    [d setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
-    [d setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
-    [d setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
-    [d setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
-    [d setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
-    [d setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
-
-    NSLog(@"[AdForceGlobal] Wiped %d plist files, values re-forced", deletedCount);
 }
 
-#pragma mark - اعتراض NSUserDefaults
+#pragma mark - اعتراض NSUserDefaults (نفس النسخة القديمة الشغالة)
 
 %hook NSUserDefaults
 
@@ -118,24 +112,55 @@ static void wipeAllPlists(void) {
 
 %end
 
+#pragma mark - تفعيل المسح بالإيماءات
+
+// 1) هز الجهاز = مسح فوري
+%hook UIWindow
+
+- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
+    if (motion == UIEventSubtypeMotionShake) {
+        NSLog(@"[AdForceGlobal] Shake detected — wiping plists");
+        wipeAllPlists();
+    }
+    %orig(motion, event);
+}
+
+// 2) لمس ثلاثي على الشاشة = مسح فوري
+- (void)didMoveToWindow {
+    %orig;
+    if (self.window) {
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            UITapGestureRecognizer *tripleTap = [[UITapGestureRecognizer alloc]
+                initWithTarget:self action:@selector(adForceTripleTapAction:)];
+            tripleTap.numberOfTapsRequired = 3;
+            tripleTap.numberOfTouchesRequired = 1;
+            [[UIApplication sharedApplication].keyWindow addGestureRecognizer:tripleTap];
+        });
+    }
+}
+
+%new
+- (void)adForceTripleTapAction:(UITapGestureRecognizer *)gesture {
+    NSLog(@"[AdForceGlobal] Triple tap detected — wiping plists");
+    wipeAllPlists();
+}
+
+%end
+
 #pragma mark - التنفيذ
 
 %ctor {
     @autoreleasepool {
-        NSLog(@"[AdForceGlobal] Tweak loaded — full plist wipe mode");
+        // كتابة القيم المفروضة فقط — بدون أي حذف ملفات هنا
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        [d setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
+        [d setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
+        [d setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
+        [d setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
+        [d setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
+        [d setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
 
-        wipeAllPlists();
-
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification
-                                                            object:nil queue:nil
-                                                      usingBlock:^(NSNotification *n) {
-            wipeAllPlists();
-        }];
-
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification
-                                                            object:nil queue:nil
-                                                      usingBlock:^(NSNotification *n) {
-            wipeAllPlists();
-        }];
+        NSLog(@"[AdForceGlobal] Tweak loaded — manual wipe mode (shake or triple-tap)");
     }
 }
