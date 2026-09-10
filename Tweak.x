@@ -298,16 +298,18 @@ void clearGroupContainers() {
 }
 
 // ============================================================
-// MARK: - مسح الكوكيز وبيانات الويب
+// MARK: - مسح الكوكيز وبيانات الويب (نسخة متوافقة مع iOS 9+)
 // ============================================================
 
 void clearAllCookies() {
+    // (1) كوكيز التطبيق التقليدية
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
     [[NSHTTPCookieStorage sharedHTTPCookieStorage] removeCookiesSinceDate:[NSDate distantPast]];
     
+    // (2) كوكيز WebKit + كل بيانات الويب (LocalStorage / SessionStorage / IndexedDB / Cache ...)
     NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
     WKWebsiteDataStore *store = [WKWebsiteDataStore defaultDataStore];
     [store removeDataOfTypes:allWebTypes
@@ -316,13 +318,35 @@ void clearAllCookies() {
                NSLog(@"[Reset] تم مسح WKWebsiteDataStore بالكامل");
            }];
     
-    if (@available(iOS 9.0, *)) {
-        [WKWebsiteDataStore fetchAllDataStoreIdentifiers:^(NSArray<NSUUID *> *identifiers) {
-            for (NSUUID *uuid in identifiers) {
-                WKWebsiteDataStore *s = [WKWebsiteDataStore dataStoreForIdentifier:uuid];
-                [s removeDataOfTypes:allWebTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
-            }
-        }];
+    // (3) بيانات WebViews المعزولة — متاحة فقط من iOS 17+
+    //     نستخدم Runtime Check لأن الـ deployment target هو iOS 9.0
+    Class wkStoreClass = NSClassFromString(@"WKWebsiteDataStore");
+    SEL fetchAllSel = NSSelectorFromString(@"fetchAllDataStoreIdentifiers:");
+    SEL storeForID  = NSSelectorFromString(@"dataStoreForIdentifier:");
+    
+    if (wkStoreClass &&
+        [wkStoreClass respondsToSelector:fetchAllSel] &&
+        [wkStoreClass respondsToSelector:storeForID]) {
+        
+        // استدعاء ديناميكي لتجاوز فحص التوفر وقت التصريف
+        typedef void (*FetchAllFn)(id, SEL, void (^)(NSArray<NSUUID *> *));
+        FetchAllFn fetchImpl = (FetchAllFn)[wkStoreClass methodForSelector:fetchAllSel];
+        
+        typedef id (*StoreForIDFn)(id, SEL, NSUUID *);
+        StoreForIDFn storeImpl = (StoreForIDFn)[wkStoreClass methodForSelector:storeForID];
+        
+        if (fetchImpl && storeImpl) {
+            fetchImpl(wkStoreClass, fetchAllSel, ^(NSArray<NSUUID *> *identifiers) {
+                for (NSUUID *uuid in identifiers) {
+                    id s = storeImpl(wkStoreClass, storeForID, uuid);
+                    if (s && [s respondsToSelector:@selector(removeDataOfTypes:modifiedSince:completionHandler:)]) {
+                        [s removeDataOfTypes:allWebTypes
+                               modifiedSince:[NSDate distantPast]
+                           completionHandler:^{}];
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -477,7 +501,7 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - الزر العائم الأزرق وإدارته (بعد إلغاء البرتقالي)
+// MARK: - الزر العائم الأزرق وإدارته
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
