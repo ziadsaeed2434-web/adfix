@@ -243,10 +243,10 @@ void changeIdentifiersOnly() {
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
     
-    NSString *idfaStr = fakeAdvertisingIDString ?: [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
+    NSString *idfaDisplay = fakeAdvertisingIDString ?: [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
     NSString *udidDisplay = fakeUDIDString ?: @"غير متوفر";
     
-    NSString *fullReport = [NSString stringWithFormat:@"📍 الموقع: (%.4f, %.4f)\n🌐 IP وهمي: %@\n🆔 UDID: %@", currentLat, currentLon, sessionFakeIP, udidDisplay];
+    NSString *fullReport = [NSString stringWithFormat:@"📍 الموقع: (%.4f, %.4f)\n🌐 IP وهمي: %@\n🆔 UDID: %@\n🆔 IDFA: %@", currentLat, currentLon, sessionFakeIP, udidDisplay, idfaDisplay];
     
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, self.view.bounds.size.width - 40, 0)];
     label.text = fullReport;
@@ -370,12 +370,11 @@ void changeIdentifiersOnly() {
 }
 
 // ============================================================
-// MARK: - الـ Hooks (مع تثبيت البندل الأصلي com.codebysms)
+// MARK: - الـ Hooks
 // ============================================================
 
 %hook NSBundle
 - (NSString *)bundleIdentifier {
-    // البندل الأصلي المعتمد لسيرفرات الإعلانات
     NSString *originalBundleID = @"com.codebysms"; 
     
     NSArray *callStack = [NSThread callStackSymbols];
