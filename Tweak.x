@@ -3,6 +3,7 @@
 #import <AdSupport/ASIdentifierManager.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
+#import <Foundation/Foundation.h>
 
 // ============================================================
 // MARK: - المتغيرات العامة
@@ -16,7 +17,7 @@ static NSMutableArray *networkLogs = nil;
 
 // المعرفات المزيفة
 static NSString *fakeAdvertisingIDString = nil;
-static NSString *fakeUDIDString = nil;
+static NSString *fakeUDIDString = nil; 
 
 // ============================================================
 // MARK: - دالة توليد معرف عشوائي آمن (UUID String)
@@ -39,6 +40,27 @@ NSString *generateRandomUDID() {
     }
     
     return [NSString stringWithFormat:@"00008130-%@-%@", randomHex1, randomHex2];
+}
+
+// ============================================================
+// MARK: - دالة فرض إعدادات الإعلانات في أي وقت
+// ============================================================
+
+void forceAdConstraints() {
+    @autoreleasepool {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        
+        [defaults setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
+        [defaults setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
+        
+        [defaults setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
+        [defaults setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
+        
+        [defaults setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
+        [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
+        
+        [defaults synchronize];
+    }
 }
 
 // ============================================================
@@ -154,7 +176,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح Keychain مع الحفاظ على الحساب (بدون أي تعديل)
+// MARK: - مسح Keychain مع الحفاظ على الحساب
 // ============================================================
 
 void clearKeychainKeepingAccount() {
@@ -210,235 +232,66 @@ void clearKeychainKeepingAccount() {
     }
 }
 
-// ============================================================
-// MARK: - دوال مسح الملفات المتقدمة (Fresh Install Wipe)
-// ============================================================
-
-void clearDirectoryContents(NSString *path) {
-    if (!path || path.length == 0) return;
-    
-    NSFileManager *fm = [NSFileManager defaultManager];
-    BOOL isDir = NO;
-    if (![fm fileExistsAtPath:path isDirectory:&isDir] || !isDir) return;
-    
-    NSError *listError = nil;
-    NSArray *items = [fm contentsOfDirectoryAtPath:path error:&listError];
-    if (listError) {
-        NSLog(@"[Reset] فشل سرد محتويات %@ : %@", path, listError.localizedDescription);
-        return;
-    }
-    
-    for (NSString *item in items) {
-        NSString *full = [path stringByAppendingPathComponent:item];
-        NSError *removeError = nil;
-        if (![fm removeItemAtPath:full error:&removeError]) {
-            NSLog(@"[Reset] فشل حذف %@ : %@", full, removeError.localizedDescription);
-        }
-    }
-}
-
-NSArray<NSString *> *discoverGroupContainerPaths() {
-    NSMutableArray<NSString *> *paths = [NSMutableArray array];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    NSString *homeGroupDir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Group Containers"];
-    BOOL isDir = NO;
-    if ([fm fileExistsAtPath:homeGroupDir isDirectory:&isDir] && isDir) {
-        [paths addObject:homeGroupDir];
-    }
-    
-    NSString *sharedRoot = @"/private/var/mobile/Containers/Shared/AppGroup";
-    if ([fm fileExistsAtPath:sharedRoot]) {
-        NSString *teamPrefix = nil;
-        if (bundleID.length > 0) {
-            NSArray *parts = [bundleID componentsSeparatedByString:@"."];
-            if (parts.count > 0) teamPrefix = parts.firstObject;
-        }
-        
-        NSArray *uuids = [fm contentsOfDirectoryAtPath:sharedRoot error:nil];
-        for (NSString *uuid in uuids) {
-            NSString *containerPath = [sharedRoot stringByAppendingPathComponent:uuid];
-            NSString *metaPath = [containerPath stringByAppendingPathComponent:
-                                  @".com.apple.mobile_container_manager.metadata.plist"];
-            NSDictionary *meta = [NSDictionary dictionaryWithContentsOfFile:metaPath];
-            NSString *groupID = meta[@"MCMMetadataIdentifier"];
-            if (![groupID isKindOfClass:[NSString class]]) continue;
-            
-            BOOL matches = NO;
-            if (bundleID.length > 0 && [groupID containsString:bundleID]) matches = YES;
-            if (!matches && teamPrefix.length > 1 && [groupID containsString:teamPrefix]) matches = YES;
-            
-            if (matches) [paths addObject:containerPath];
-        }
-    }
-    
-    return paths;
-}
-
-void clearGroupContainers() {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray<NSString *> *containers = discoverGroupContainerPaths();
-    
-    for (NSString *containerPath in containers) {
-        BOOL isDir = NO;
-        if (![fm fileExistsAtPath:containerPath isDirectory:&isDir] || !isDir) continue;
-        
-        if ([containerPath.lastPathComponent isEqualToString:@"Group Containers"]) {
-            NSArray *children = [fm contentsOfDirectoryAtPath:containerPath error:nil];
-            for (NSString *child in children) {
-                NSString *childPath = [containerPath stringByAppendingPathComponent:child];
-                clearDirectoryContents(childPath);
-                [fm removeItemAtPath:childPath error:nil];
-            }
-        } else {
-            clearDirectoryContents(containerPath);
-        }
-    }
-}
-
-// ============================================================
-// MARK: - مسح الكوكيز وبيانات الويب (نسخة متوافقة مع iOS 9+)
-// ============================================================
-
 void clearAllCookies() {
-    // (1) كوكيز التطبيق التقليدية
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
     for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
         [cookieStorage deleteCookie:cookie];
     }
-    [[NSHTTPCookieStorage sharedHTTPCookieStorage] removeCookiesSinceDate:[NSDate distantPast]];
     
-    // (2) كوكيز WebKit + كل بيانات الويب (LocalStorage / SessionStorage / IndexedDB / Cache ...)
+    NSSet *dataTypes = [NSSet setWithObject:WKWebsiteDataTypeCookies];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+    
     NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-    WKWebsiteDataStore *store = [WKWebsiteDataStore defaultDataStore];
-    [store removeDataOfTypes:allWebTypes
-               modifiedSince:[NSDate distantPast]
-           completionHandler:^{
-               NSLog(@"[Reset] تم مسح WKWebsiteDataStore بالكامل");
-           }];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+}
+
+void clearNetworkCache() {
+    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    [[NSURLCache sharedURLCache] setDiskCapacity:0];
+    [[NSURLCache sharedURLCache] setMemoryCapacity:0];
+}
+
+void clearAllLocalFiles() {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *dirs = @[
+        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject,
+        NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject,
+        NSTemporaryDirectory()
+    ];
     
-    // (3) بيانات WebViews المعزولة — متاحة فقط من iOS 17+
-    //     نستخدم Runtime Check لأن الـ deployment target هو iOS 9.0
-    Class wkStoreClass = NSClassFromString(@"WKWebsiteDataStore");
-    SEL fetchAllSel = NSSelectorFromString(@"fetchAllDataStoreIdentifiers:");
-    SEL storeForID  = NSSelectorFromString(@"dataStoreForIdentifier:");
-    
-    if (wkStoreClass &&
-        [wkStoreClass respondsToSelector:fetchAllSel] &&
-        [wkStoreClass respondsToSelector:storeForID]) {
-        
-        // استدعاء ديناميكي لتجاوز فحص التوفر وقت التصريف
-        typedef void (*FetchAllFn)(id, SEL, void (^)(NSArray<NSUUID *> *));
-        FetchAllFn fetchImpl = (FetchAllFn)[wkStoreClass methodForSelector:fetchAllSel];
-        
-        typedef id (*StoreForIDFn)(id, SEL, NSUUID *);
-        StoreForIDFn storeImpl = (StoreForIDFn)[wkStoreClass methodForSelector:storeForID];
-        
-        if (fetchImpl && storeImpl) {
-            fetchImpl(wkStoreClass, fetchAllSel, ^(NSArray<NSUUID *> *identifiers) {
-                for (NSUUID *uuid in identifiers) {
-                    id s = storeImpl(wkStoreClass, storeForID, uuid);
-                    if (s && [s respondsToSelector:@selector(removeDataOfTypes:modifiedSince:completionHandler:)]) {
-                        [s removeDataOfTypes:allWebTypes
-                               modifiedSince:[NSDate distantPast]
-                           completionHandler:^{}];
-                    }
-                }
-            });
+    for (NSString *dir in dirs) {
+        if (dir) {
+            NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
+            for (NSString *item in items) {
+                [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
+            }
         }
     }
 }
 
 // ============================================================
-// MARK: - مسح كاش الشبكة
-// ============================================================
-
-void clearNetworkCache() {
-    NSURLCache *cache = [NSURLCache sharedURLCache];
-    [cache removeAllCachedResponses];
-    [cache removeCachedResponseForRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"about:blank"]]];
-    [cache setDiskCapacity:0];
-    [cache setMemoryCapacity:0];
-    [NSURLCache setSharedURLCache:[[NSURLCache alloc] initWithMemoryCapacity:0
-                                                                diskCapacity:0
-                                                                    diskPath:nil]];
-}
-
-// ============================================================
-// MARK: - مسح الملفات المحلية بشكل شامل
-// ============================================================
-
-void clearAllLocalFiles() {
-    NSString *home = NSHomeDirectory();
-    
-    clearDirectoryContents([home stringByAppendingPathComponent:@"Documents"]);
-    clearDirectoryContents([home stringByAppendingPathComponent:@"Library"]);
-    clearDirectoryContents(NSTemporaryDirectory());
-    
-    NSArray<NSString *> *extraPaths = @[
-        @"Documents/Inbox",
-        @"Library/Caches",
-        @"Library/Preferences",
-        @"Library/Application Support",
-        @"Library/Saved Application State",
-        @"Library/WebKit",
-        @"Library/Cookies",
-        @"Library/HTTPStorages",
-        @"Library/WebKit/WebsiteData",
-        @"Library/WebKit/WebsiteData/LocalStorage",
-        @"Library/WebKit/WebsiteData/IndexedDB",
-        @"Library/WebKit/WebsiteData/SessionStorage",
-        @"Library/WebKit/WebsiteData/Cookies"
-    ];
-    for (NSString *rel in extraPaths) {
-        clearDirectoryContents([home stringByAppendingPathComponent:rel]);
-    }
-}
-
-// ============================================================
-// MARK: - دالة إعادة التعيين الكاملة (الزر الأزرق الموحّد)
+// MARK: - دوال العمليات (الزر الأزرق والبرتقالي)
 // ============================================================
 
 void performFullReset() {
-    NSLog(@"[Reset] بدء إعادة التعيين الكاملة ...");
-    
-    // (1) Keychain — الحفاظ على الحساب (بدون أي تعديل على الدالة الأصلية)
+    forceAdConstraints(); // فرض الإعدادات قبل التطهير
     clearKeychainKeepingAccount();
-    
-    // (2) الكوكيز وبيانات الويب (WKWebView + WebKit dataStore)
     clearAllCookies();
-    
-    // (3) كاش الشبكة (Memory + Disk)
     clearNetworkCache();
-    
-    // (4) مسح كامل لملفات الحاوية الأساسية (Documents / Library / tmp)
     clearAllLocalFiles();
     
-    // (5) مسح حاويات المجموعة (Group Containers / AppGroup) وما بها من SDKs إعلانية
-    clearGroupContainers();
-    
-    // (6) تنظيف متغيرات الذاكرة
-    @synchronized(networkLogs) {
-        [networkLogs removeAllObjects];
-    }
-    sessionFakeIP = nil;
-    currentRealIP = @"جاري الجلب...";
-    
-    // (7) توليد هويات ومحددات جديدة تماماً (IDFA + UDID)
     fakeAdvertisingIDString = generateRandomUUIDString();
-    fakeUDIDString          = generateRandomUDID();
     updateAtlantaLocation();
     generateSessionIP();
     fetchRealIP();
     
-    NSLog(@"[Reset] اكتمل التنظيف، سيتم إغلاق التطبيق بعد 5 ثوان ...");
-    
-    // (8) مهلة كافية لاستكمال عمليات الحذف غير المتزامنة على القرص، ثم الإنهاء
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        exit(0);
-    });
+    @synchronized(networkLogs) {
+        [networkLogs removeAllObjects];
+    }
+}
+
+void changeIdentifiersOnly() {
+    fakeUDIDString = generateRandomUDID();
 }
 
 // ============================================================
@@ -458,11 +311,11 @@ void performFullReset() {
     [self.view addSubview:scrollView];
     
     NSString *idfaStr = fakeAdvertisingIDString ?: [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
-    NSString *udidDisplay = fakeUDIDString ?: @"غير متوفر";
+    NSString *udidDisplay = fakeUDIDString ?: @"غير متوفر (لم يتم التغيير بعد)";
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidDisplay, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير بالبرتقالي): %@\nIDFA (يتغير بالأزرق): %@", udidDisplay, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -501,7 +354,7 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - الزر العائم الأزرق وإدارته
+// MARK: - الأزرار العائمة وإدارتها
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -510,7 +363,8 @@ void performFullReset() {
 @implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn1 = [self viewWithTag:999888];
-    if (btn1 && CGRectContainsPoint(btn1.frame, point)) {
+    UIView *btn2 = [self viewWithTag:999777];
+    if ((btn1 && CGRectContainsPoint(btn1.frame, point)) || (btn2 && CGRectContainsPoint(btn2.frame, point))) {
         return YES;
     }
     return NO;
@@ -520,6 +374,7 @@ void performFullReset() {
 @interface AtlantaInfoManager : NSObject
 @property (strong, nonatomic) AtlantaWindow *floatingWindow;
 @property (strong, nonatomic) UIButton *resetBtn;
+@property (strong, nonatomic) UIButton *changeIDBtn;
 + (instancetype)sharedInstance;
 - (void)setupFloatingButtons;
 @end
@@ -549,7 +404,7 @@ void performFullReset() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // الزر الأزرق الوحيد (🔄) — ينفذ إعادة تعيين كاملة + UDID + IDFA جديد
+        // الزر الأزرق (🔄)
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
@@ -567,7 +422,26 @@ void performFullReset() {
         [self.resetBtn addGestureRecognizer:pan1];
         [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
+        // الزر البرتقالي لتغيير الـ UDID (🆔)
+        self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        self.changeIDBtn.tag = 999777;
+        self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
+        self.changeIDBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:0.9];
+        [self.changeIDBtn setTitle:@"🆔" forState:UIControlStateNormal];
+        [self.changeIDBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.changeIDBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
+        self.changeIDBtn.layer.cornerRadius = 27.5;
+        self.changeIDBtn.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.changeIDBtn.layer.shadowOffset = CGSizeMake(0, 2);
+        self.changeIDBtn.layer.shadowOpacity = 0.5;
+        self.changeIDBtn.layer.shadowRadius = 4;
+        
+        UIPanGestureRecognizer *pan2 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.changeIDBtn addGestureRecognizer:pan2];
+        [self.changeIDBtn addTarget:self action:@selector(handleChangeID) forControlEvents:UIControlEventTouchUpInside];
+        
         [vc.view addSubview:self.resetBtn];
+        [vc.view addSubview:self.changeIDBtn];
     });
 }
 
@@ -587,23 +461,54 @@ void performFullReset() {
     performFullReset();
 }
 
+- (void)handleChangeID {
+    changeIdentifiersOnly();
+}
+
 @end
+
+// ============================================================
+// MARK: - التنفيذ المستمر والتلقائي (%ctor)
+// ============================================================
+
+%ctor {
+    @autoreleasepool {
+        // 1. فرض إعدادات الإعلانات فور فتح التطبيق
+        forceAdConstraints();
+        
+        // 2. التهيئة الأولى للموقع والهوية والشبكة
+        updateAtlantaLocation();
+        generateSessionIP();
+        fakeAdvertisingIDString = generateRandomUUIDString();
+        fakeUDIDString = generateRandomUDID();
+        fetchRealIP();
+        
+        // 3. فرض الإعلانات وتحديثها باستمرار عند العودة للتطبيق أو فتحه
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+            forceAdConstraints();
+        }];
+        
+        // 4. تنفيذ إعادة التعيين والتطهير التلقائي لحظة الخروج من التطبيق
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillResignActiveNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+            performFullReset();
+            changeIdentifiersOnly();
+        }];
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [[AtlantaInfoManager sharedInstance] setupFloatingButtons];
+        });
+    }
+}
 
 // ============================================================
 // MARK: - الـ Hooks الآمنة
 // ============================================================
-
-%ctor {
-    updateAtlantaLocation();
-    generateSessionIP();
-    fakeAdvertisingIDString = generateRandomUUIDString();
-    fakeUDIDString          = generateRandomUDID();
-    fetchRealIP();
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[AtlantaInfoManager sharedInstance] setupFloatingButtons];
-    });
-}
 
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
