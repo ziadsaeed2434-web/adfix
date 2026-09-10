@@ -305,14 +305,25 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - التنفيذ التلقائي الجذري عند فتح التطبيق
+// MARK: - التنفيذ التلقائي عند الإقلاع وعند الخروج (Background)
 // ============================================================
 
 %ctor {
     @autoreleasepool {
+        // تنفيذ التنفيذ الأولي عند الفتح
         performFullReset();
         [AtlantaInfoManager shared];
-        NSLog(@"[AdForceGlobal] RAM and Caches purged successfully, ad constraints enforced!");
+        
+        // مراقبة حدث الخروج من التطبيق (الانتقال للخلفية / إغلاقه) لتنفيذ الفرمتة والتنظيف فوراً
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
+                                                          object:nil
+                                                           queue:nil
+                                                      usingBlock:^(NSNotification *note) {
+            performFullReset();
+            NSLog(@"[AdForceGlobal] App entered background, full reset performed successfully!");
+        }];
+        
+        NSLog(@"[AdForceGlobal] Hooked successfully with background exit trigger!");
     }
 }
 
