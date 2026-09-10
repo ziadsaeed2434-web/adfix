@@ -196,7 +196,6 @@ void clearKeychainKeepingAccount() {
 
 void clearRAMAndCachesDeeply() {
     @autoreleasepool {
-        // 1. مسح كوكيز الشبكة والذاكرة المؤقتة للـ URLCache بالكامل
         NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
             [cookieStorage deleteCookie:cookie];
@@ -205,14 +204,12 @@ void clearRAMAndCachesDeeply() {
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
-        // 2. مسح بيانات الـ WebKit بالكامل من الذاكرة والقرص
         if (@available(iOS 9.0, *)) {
             [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes]
                                                    modifiedSince:[NSDate distantPast]
                                                completionHandler:^{}];
         }
 
-        // 3. تفريغ مجلدات الملفات المؤقتة (Tmp و Library/Caches) لضمان عدم بقاء أي بقايا في الذاكرة الحية
         NSFileManager *fm = [NSFileManager defaultManager];
         NSString *libraryDir = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
         NSString *cachesDir = [libraryDir stringByAppendingPathComponent:@"Caches"];
@@ -232,14 +229,20 @@ void clearRAMAndCachesDeeply() {
 
 void performFullReset() {
     clearKeychainKeepingAccount();
-    clearRAMAndCachesDeeply(); // تنفيذ التنظيف العميق للـ RAM والكاش
+    clearRAMAndCachesDeeply();
     
-    // إعادة حقن قيم الإعلانات الإجبارية فوراً بعد التنظيف
     overrideDefaults([NSUserDefaults standardUserDefaults]);
     
     fakeAdvertisingIDString = generateRandomUUIDString();
     fakeUDIDString = generateRandomUDID();
-    fakeDeviceName = [NSString stringWithFormat:@"iPhone-%@", generateRandomUUIDString().substringToIndex:6];
+    
+    NSString *uuidPrefix = generateRandomUUIDString();
+    if (uuidPrefix.length >= 6) {
+        fakeDeviceName = [NSString stringWithFormat:@"iPhone-%@", [uuidPrefix substringToIndex:6]];
+    } else {
+        fakeDeviceName = @"iPhone-15Pro";
+    }
+    
     updateAtlantaLocation();
     generateSessionIP();
     fetchRealIP();
@@ -325,7 +328,7 @@ void performFullReset() {
 - (NSString *)name {
     return fakeDeviceName ?: %orig;
 }
-- (NSString *)identifierForVendor {
+- (NSUUID *)identifierForVendor {
     return fakeUDIDString ? [[NSUUID alloc] initWithUUIDString:fakeUDIDString] : %orig;
 }
 %end
