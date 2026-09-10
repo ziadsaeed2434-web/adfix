@@ -299,7 +299,9 @@ void performFullReset() {
     }
     return self;
 }
--resetAction { performFullReset(); }
+- (void)resetAction { 
+    performFullReset(); 
+}
 @end
 
 // ============================================================
