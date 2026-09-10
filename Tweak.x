@@ -25,10 +25,6 @@ static NSString *g_spoofedSystemVersion = nil;
 static NSUUID *g_spoofedVendorID = nil;
 static float g_spoofedBatteryLevel = 0.0;
 static UIDeviceBatteryState g_spoofedBatteryState = UIDeviceBatteryStateUnknown;
-static float g_spoofedBacklightLevel = 0.0;
-static BOOL g_spoofedSupportsPencil = NO;
-static BOOL g_spoofedIsDeveloperMode = NO;
-static NSString *g_spoofedProductType = nil;
 static NSString *g_spoofedUserAgent = nil;
 static BOOL g_hasSpoofed = NO;
 
@@ -75,11 +71,6 @@ static NSString *randomSystemVersion(void) {
     int minor = arc4random_uniform(10);
     int patch = arc4random_uniform(10);
     return [NSString stringWithFormat:@"%d.%d.%d", major, minor, patch];
-}
-
-static NSString *randomProductType(void) {
-    NSArray *products = @[@"iPhone14,2", @"iPhone15,3", @"iPhone16,1", @"iPhone17,2"];
-    return products[arc4random_uniform((uint32_t)products.count)];
 }
 
 static NSString *randomUserAgent(NSString *systemVersion) {
@@ -320,23 +311,16 @@ void clearAllLocalFiles() {
 
 void performFullReset() {
     @try {
-        // تحديث إعدادات الإعلانات وكسر القيود
         applyAdConstraintsDefaults();
 
-        // توليد بيانات التويك الثاني (Device Specs & Spoofing)
         g_spoofedName = randomDeviceName();
         g_spoofedSystemVersion = randomSystemVersion();
         g_spoofedVendorID = [NSUUID UUID];
         g_spoofedBatteryLevel = randomFloatBetween(0.15, 0.95);
         g_spoofedBatteryState = (arc4random_uniform(2) == 0) ? UIDeviceBatteryStateCharging : UIDeviceBatteryStateUnplugged;
-        g_spoofedBacklightLevel = randomFloatBetween(0.1, 1.0);
-        g_spoofedSupportsPencil = (arc4random_uniform(2) == 0);
-        g_spoofedIsDeveloperMode = (arc4random_uniform(2) == 0);
-        g_spoofedProductType = randomProductType();
         g_spoofedUserAgent = randomUserAgent(g_spoofedSystemVersion);
         g_hasSpoofed = YES;
 
-        // تنفيذ عمليات المسح
         clearKeychainKeepingAccount();
         clearAllCookies();
         clearNetworkCache();
@@ -346,11 +330,9 @@ void performFullReset() {
         if (bundleID) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
             [[NSUserDefaults standardUserDefaults] synchronize];
-            // إعادة تطبيق إعدادات الإعلانات بعد مسح الدومين
             applyAdConstraintsDefaults();
         }
 
-        // توليد معرفات الأمان والموقع والـ IP
         fakeAdvertisingIDString = generateRandomUUIDString();
         fakeUDIDString = generateRandomUDID();
         
@@ -361,11 +343,8 @@ void performFullReset() {
         @synchronized(networkLogs) {
             [networkLogs removeAllObjects];
         }
-    } @catch (NSException *exception) {
-        // تجاهل الاستثناءات
-    }
+    } @catch (NSException *exception) {}
     
-    // الخروج الفوري والنظيف
     exit(0);
 }
 
@@ -477,7 +456,6 @@ void performFullReset() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // الزر الأزرق (🔄)
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
@@ -523,7 +501,6 @@ void performFullReset() {
 
 %ctor {
     @autoreleasepool {
-        // تطبيق إعدادات الإعلانات فور فتح التطبيق
         applyAdConstraintsDefaults();
         
         if ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPhone) {
@@ -654,32 +631,3 @@ void performFullReset() {
     %orig(mutableReq, queue, handler);
 }
 %end
-
-// ============================================================
-// MARK: - Private Method Swizzling
-// ============================================================
-
-static float (*orig_backlightLevel)(id self, SEL _cmd) = NULL;
-static BOOL (*orig_supportsPencil)(id self, SEL _cmd) = NULL;
-static BOOL (*orig_developerModeEnabled)(id self, SEL _cmd) = NULL;
-static NSString * (*orig_productType)(id self, SEL _cmd) = NULL;
-
-static float replaced_backlightLevel(id self, SEL _cmd) {
-    if (g_hasSpoofed) return g_spoofedBacklightLevel;
-    return orig_backlightLevel(self, _cmd);
-}
-
-static BOOL replaced_supportsPencil(id self, SEL _cmd) {
-    if (g_hasSpoofed) return g_spoofedSupportsPencil;
-    return orig_supportsPencil(self, _cmd);
-}
-
-static BOOL replaced_developerModeEnabled(id self, SEL _cmd) {
-    if (g_hasSpoofed) return g_spoofedIsDeveloperMode;
-    return orig_developerModeEnabled(self, _cmd);
-}
-
-static NSString * replaced_productType(id self, SEL _cmd) {
-    if (g_hasSpoofed && g_spoofedProductType) return g_spoofedProductType;
-    return orig_productType(self, _cmd);
-}
