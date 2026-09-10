@@ -3,7 +3,6 @@
 #import <AdSupport/ASIdentifierManager.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
-#import <unistd.h>
 
 // ============================================================
 // MARK: - المتغيرات العامة
@@ -15,11 +14,12 @@ static NSString *sessionFakeIP = nil;
 static NSString *currentRealIP = @"جاري الجلب...";
 static NSMutableArray *networkLogs = nil;
 
+// المعرفات المزيفة
 static NSString *fakeAdvertisingIDString = nil;
-static NSString *fakeUDIDString = nil;
+static NSString *fakeUDIDString = nil; 
 
 // ============================================================
-// MARK: - دوال توليد المعرفات
+// MARK: - دالة توليد معرف عشوائي آمن (UUID String)
 // ============================================================
 
 NSString *generateRandomUUIDString() {
@@ -248,86 +248,27 @@ void clearAllLocalFiles() {
 }
 
 // ============================================================
-// MARK: - تفعيل الإعلانات (AdForce) - النسخة المُحصّنة
-// ============================================================
-
-void forceAdsOnLaunch() {
-    @autoreleasepool {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        
-        // ⭐ حيلة "اقلب ثم أعِد" لإجبار النظام على الكتابة على القرص
-        // بدلاً من الاعتماد على الذاكرة المؤقتة
-        
-        [defaults setBool:!YES forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
-        [defaults setBool:NO   forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
-        
-        [defaults setBool:!YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
-        [defaults setBool:YES  forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
-        
-        [defaults setBool:!NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
-        [defaults setBool:NO   forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
-        
-        [defaults setBool:!NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
-        [defaults setBool:NO   forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
-        
-        [defaults setBool:!YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
-        [defaults setBool:YES  forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
-        
-        [defaults setInteger:-1 forKey:@"com.inobi_defaultStore_sessionCount"];
-        [defaults setInteger:0  forKey:@"com.inobi_defaultStore_sessionCount"];
-        
-        [defaults synchronize];
-        
-        NSLog(@"[AdForceGlobal] Ad keys re-written and flushed to disk.");
-    }
-}
-
-// ============================================================
-// MARK: - الدالة الموحّدة (الزر الأزرق) - النسخة النهائية المضمونة
+// MARK: - دوال العمليات (الزر الأزرق والبرتقالي)
 // ============================================================
 
 void performFullReset() {
-    // 1) احتياطي: تفعيل الإعلانات قبل المسح
-    forceAdsOnLaunch();
-    
-    // 2) تغيير UDID
-    fakeUDIDString = generateRandomUDID();
-    
-    // 3) مسح كل شيء (يُحذف Preferences هنا بالكامل)
     clearKeychainKeepingAccount();
     clearAllCookies();
     clearNetworkCache();
     clearAllLocalFiles();
     
-    // 4) ⭐ الأهم: إعادة كتابة مفاتيح الإعلانات بعد الحذف
-    forceAdsOnLaunch();
-    
-    // 5) تأكيد إضافي: كتابة مباشرة عبر NSUserDefaults (double-tap)
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    [defaults setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
-    [defaults setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
-    [defaults setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
-    [defaults setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
-    [defaults setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
-    [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
-    [defaults synchronize];
-    
-    // 6) تغيير المعرفات والموقع والـ IP
     fakeAdvertisingIDString = generateRandomUUIDString();
     updateAtlantaLocation();
     generateSessionIP();
+    fetchRealIP();
     
     @synchronized(networkLogs) {
         [networkLogs removeAllObjects];
     }
-    
-    // 7) synchronize نهائي قبل الخروج
-    [defaults synchronize];
-    
-    // 8) انتظار 0.6 ثانية لضمان flush كامل على القرص، ثم خروج نظيف
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        exit(0);
-    });
+}
+
+void changeIdentifiersOnly() {
+    fakeUDIDString = generateRandomUDID();
 }
 
 // ============================================================
@@ -351,7 +292,7 @@ void performFullReset() {
     
     NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
     NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidDisplay, idfaStr];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID (يتغير بالبرتقالي): %@\nIDFA (يتغير بالأزرق): %@", udidDisplay, idfaStr];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
@@ -390,7 +331,7 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - النافذة العائمة (زر أزرق واحد)
+// MARK: - الأزرار العائمة وإدارتها
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -399,7 +340,8 @@ void performFullReset() {
 @implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn1 = [self viewWithTag:999888];
-    if (btn1 && CGRectContainsPoint(btn1.frame, point)) {
+    UIView *btn2 = [self viewWithTag:999777];
+    if ((btn1 && CGRectContainsPoint(btn1.frame, point)) || (btn2 && CGRectContainsPoint(btn2.frame, point))) {
         return YES;
     }
     return NO;
@@ -409,6 +351,7 @@ void performFullReset() {
 @interface AtlantaInfoManager : NSObject
 @property (strong, nonatomic) AtlantaWindow *floatingWindow;
 @property (strong, nonatomic) UIButton *resetBtn;
+@property (strong, nonatomic) UIButton *changeIDBtn;
 + (instancetype)sharedInstance;
 - (void)setupFloatingButtons;
 @end
@@ -438,6 +381,7 @@ void performFullReset() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
+        // الزر الأزرق (🔄)
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
@@ -455,7 +399,26 @@ void performFullReset() {
         [self.resetBtn addGestureRecognizer:pan1];
         [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
+        // الزر البرتقالي لتغيير الـ UDID (🆔)
+        self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        self.changeIDBtn.tag = 999777;
+        self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
+        self.changeIDBtn.backgroundColor = [UIColor colorWithRed:1.0 green:0.58 blue:0.0 alpha:0.9];
+        [self.changeIDBtn setTitle:@"🆔" forState:UIControlStateNormal];
+        [self.changeIDBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.changeIDBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
+        self.changeIDBtn.layer.cornerRadius = 27.5;
+        self.changeIDBtn.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.changeIDBtn.layer.shadowOffset = CGSizeMake(0, 2);
+        self.changeIDBtn.layer.shadowOpacity = 0.5;
+        self.changeIDBtn.layer.shadowRadius = 4;
+        
+        UIPanGestureRecognizer *pan2 = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.changeIDBtn addGestureRecognizer:pan2];
+        [self.changeIDBtn addTarget:self action:@selector(handleChangeID) forControlEvents:UIControlEventTouchUpInside];
+        
         [vc.view addSubview:self.resetBtn];
+        [vc.view addSubview:self.changeIDBtn];
     });
 }
 
@@ -475,25 +438,38 @@ void performFullReset() {
     performFullReset();
 }
 
+- (void)handleChangeID {
+    changeIdentifiersOnly();
+}
+
 @end
 
 // ============================================================
-// MARK: - الـ Hooks الآمنة
+// MARK: - التنفيذ التلقائي عند الخروج من التطبيق
 // ============================================================
 
+static void handleAppDidResignActive() {
+    // التنفيذ الفوري لإعادة التعيين والتحديث في الخلفية لحظة خروج المستخدم من التطبيق
+    performFullReset();
+    changeIdentifiersOnly();
+}
+
 %ctor {
-    @autoreleasepool {
-        // 1) تفعيل الإعلانات فور فتح التطبيق
-        forceAdsOnLaunch();
-        
-        // 2) تهيئة الموقع والمعرفات والـ IP
-        updateAtlantaLocation();
-        generateSessionIP();
-        fakeAdvertisingIDString = generateRandomUUIDString();
-        fetchRealIP();
-    }
+    // التهيئة الأولى الأساسية عند فتح التطبيق لأول مرة بأمان تام
+    updateAtlantaLocation();
+    generateSessionIP();
+    fakeAdvertisingIDString = generateRandomUUIDString();
+    fakeUDIDString = generateRandomUDID();
+    fetchRealIP();
     
-    // 3) إظهار الزر الأزرق بعد ثانيتين
+    // مراقبة الخروج من التطبيق (Background / Resignation) لتنفيذ العمليات أوتوماتيكياً بأمان
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillResignActiveNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        handleAppDidResignActive();
+    }];
+    
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AtlantaInfoManager sharedInstance] setupFloatingButtons];
     });
