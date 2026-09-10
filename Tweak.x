@@ -27,7 +27,6 @@ void backupAccountData() {
         if (status == errSecSuccess && result != NULL) {
             NSArray *items = (__bridge NSArray *)result;
             for (NSDictionary *item in items) {
-                NSString *service = item[(id)kSecAttrService];
                 NSString *account = item[(id)kSecAttrAccount];
                 NSData *valueData = item[(id)kSecValueData];
                 NSString *value = valueData ? [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding] : @"";
@@ -92,11 +91,13 @@ void restoreAccountData() {
 
 // خداع الـ Info.plist ليتوافق مع البندل الجديد تماماً
 - (NSDictionary *)infoDictionary {
-    NSMutableDictionary *dict = [%orig mutableCopy];
-    if (dict && currentDynamicBundleID) {
-        [dict setObject:currentDynamicBundleID forKey:@"CFBundleIdentifier"];
+    NSDictionary *origDict = %orig;
+    if (self == [NSBundle mainBundle] && currentDynamicBundleID && origDict) {
+        NSMutableDictionary *mutableDict = [origDict mutableCopy];
+        [mutableDict setObject:currentDynamicBundleID forKey:@"CFBundleIdentifier"];
+        return mutableDict;
     }
-    return dict;
+    return origDict;
 }
 
 %end
