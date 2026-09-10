@@ -7,7 +7,7 @@
 #import <sys/stat.h>
 
 // ============================================================
-// MARK: - المتغيرات العامة
+// MARK: - المتغيرات العامة (التويك الأول)
 // ============================================================
 
 static double currentLat = 0.0;
@@ -19,7 +19,10 @@ static NSMutableArray *networkLogs = nil;
 static NSString *fakeAdvertisingIDString = nil;
 static NSString *fakeUDIDString = nil;
 
-// متغيرات Device Spoofing
+// ============================================================
+// MARK: - متغيرات التمويه (التويك الثاني)
+// ============================================================
+
 static NSString *g_spoofedName = nil;
 static NSString *g_spoofedSystemVersion = nil;
 static NSUUID *g_spoofedVendorID = nil;
@@ -32,12 +35,8 @@ static NSString *g_spoofedProductType = nil;
 static NSString *g_spoofedUserAgent = nil;
 static BOOL g_hasSpoofed = NO;
 
-// أعلام لمنع التنفيذ المزدوج
-static BOOL g_initialSetupDone = NO;
-static BOOL g_buttonShown = NO;
-
 // ============================================================
-// MARK: - توليد معرفات
+// MARK: - دوال توليد المعرفات
 // ============================================================
 
 NSString *generateRandomUUIDString() {
@@ -60,11 +59,10 @@ NSString *generateRandomUDID() {
 }
 
 // ============================================================
-// MARK: - Device Spoofing Helpers
+// MARK: - دوال التمويه
 // ============================================================
 
 static float randomFloatBetween(float min, float max) {
-    if (max <= min) return min;
     return ((float)arc4random() / (float)UINT32_MAX) * (max - min) + min;
 }
 
@@ -76,7 +74,7 @@ static NSString *randomDeviceName(void) {
 }
 
 static NSString *randomSystemVersion(void) {
-    int major = 17 + arc4random_uniform(4);   // iOS 17-20
+    int major = 24 + arc4random_uniform(4);
     int minor = arc4random_uniform(10);
     int patch = arc4random_uniform(10);
     return [NSString stringWithFormat:@"%d.%d.%d", major, minor, patch];
@@ -88,9 +86,10 @@ static NSString *randomProductType(void) {
 }
 
 static NSString *randomUserAgent(NSString *systemVersion) {
+    if (!systemVersion) systemVersion = @"26.0.0";
     NSArray *components = [systemVersion componentsSeparatedByString:@"."];
     if (components.count < 2) {
-        components = @[@"18", @"0"];
+        components = @[@"26", @"0"];
     }
     NSString *major = components[0];
     NSString *minor = components.count > 1 ? components[1] : @"0";
@@ -110,58 +109,11 @@ static NSString *randomUserAgent(NSString *systemVersion) {
             major, minor, webKitMajor, webKitMinor, webKitPatch, safariMajor, safariMinor, build, webKitMajor, webKitMinor, webKitPatch];
 }
 
-void applyDeviceSpoofing() {
-    @try {
-        g_spoofedSystemVersion = randomSystemVersion();
-        g_spoofedName = randomDeviceName();
-        g_spoofedVendorID = [NSUUID UUID];
-        g_spoofedBatteryLevel = randomFloatBetween(0.15, 0.95);
-        g_spoofedBatteryState = (arc4random_uniform(2) == 0) ? UIDeviceBatteryStateCharging : UIDeviceBatteryStateUnplugged;
-        g_spoofedBacklightLevel = randomFloatBetween(0.1, 1.0);
-        g_spoofedSupportsPencil = (arc4random_uniform(2) == 0);
-        g_spoofedIsDeveloperMode = (arc4random_uniform(2) == 0);
-        g_spoofedProductType = randomProductType();
-        g_spoofedUserAgent = randomUserAgent(g_spoofedSystemVersion);
-        g_hasSpoofed = YES;
-    } @catch (NSException *e) {
-        NSLog(@"[AdForceGlobal] Device spoofing error: %@", e);
-    }
-}
-
 // ============================================================
-// MARK: - إعدادات الإعلانات
-// ============================================================
-
-void applyAdConstraintsBypass() {
-    @autoreleasepool {
-        @try {
-            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-            
-            [defaults setBool:NO  forKey:@"IS_CappingManager.IS_CAPPING_ENABLED_DefaultInterstitial"];
-            [defaults setBool:YES forKey:@"IS_CappingManager.IS_DELIVERY_ENABLED_DefaultInterstitial"];
-            
-            [defaults setBool:NO  forKey:@"BN_CappingManager.IS_CAPPING_ENABLED_DefaultBanner"];
-            [defaults setBool:NO  forKey:@"BN_CappingManager.IS_PACING_ENABLED_DefaultBanner"];
-            
-            [defaults setBool:YES forKey:@"RV_CappingManager.IS_DELIVERY_ENABLED_DefaultRewardedVideo"];
-            
-            [defaults setInteger:0 forKey:@"com.inobi_defaultStore_sessionCount"];
-            
-            [defaults synchronize];
-            
-            NSLog(@"[AdForceGlobal] Ad constraints applied");
-        } @catch (NSException *e) {
-            NSLog(@"[AdForceGlobal] Ad settings error: %@", e);
-        }
-    }
-}
-
-// ============================================================
-// MARK: - دوال الموقع و IP
+// MARK: - دوال مساعدة (التويك الأول)
 // ============================================================
 
 double randomInRange(double min, double max) {
-    if (max <= min) return min;
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
@@ -186,74 +138,66 @@ NSArray *generate10IPs() {
 BOOL verifyIPQuality(NSString *ip) {
     if (!ip || ip.length == 0) return NO;
     
-    @try {
-        NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,isp,org,as", ip];
-        NSURL *url = [NSURL URLWithString:urlString];
-        if (!url) return YES;
-        
-        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-        [request setTimeoutInterval:2.0];
-        
-        __block NSData *responseData = nil;
-        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-        NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            responseData = data;
-            dispatch_semaphore_signal(semaphore);
-        }];
-        [task resume];
-        dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
-        
-        if (!responseData) return YES;
-        
-        NSError *jsonError = nil;
-        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
-        if (jsonError || !json || ![json isKindOfClass:[NSDictionary class]]) return YES;
-        if (![json[@"status"] isEqualToString:@"success"]) return YES;
-        
-        NSString *org = json[@"org"] ?: @"";
-        NSString *isp = json[@"isp"] ?: @"";
-        NSString *as = json[@"as"] ?: @"";
-        NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", org, isp, as];
-        
-        NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
-        for (NSString *keyword in badKeywords) {
-            if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                return NO;
-            }
+    NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,isp,org,as", ip];
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (!url) return YES;
+    
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    [request setTimeoutInterval:2.0];
+    
+    __block NSData *responseData = nil;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        responseData = data;
+        dispatch_semaphore_signal(semaphore);
+    }];
+    [task resume];
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
+    
+    if (!responseData) return YES;
+    
+    NSError *jsonError = nil;
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
+    if (jsonError || !json || ![json isKindOfClass:[NSDictionary class]]) return YES;
+    if (![json[@"status"] isEqualToString:@"success"]) return YES;
+    
+    NSString *org = json[@"org"] ?: @"";
+    NSString *isp = json[@"isp"] ?: @"";
+    NSString *as = json[@"as"] ?: @"";
+    NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", org, isp, as];
+    
+    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
+    for (NSString *keyword in badKeywords) {
+        if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return NO;
         }
-        return YES;
-    } @catch (NSException *e) {
-        return YES;
     }
+    return YES;
 }
 
 void generateSessionIP() {
-    @try {
-        NSArray *candidates = generate10IPs();
-        NSString *selectedIP = nil;
-        
-        for (NSString *ip in candidates) {
-            if (verifyIPQuality(ip)) {
-                selectedIP = ip;
-                break;
-            }
+    NSArray *candidates = generate10IPs();
+    NSString *selectedIP = nil;
+    
+    for (NSString *ip in candidates) {
+        if (verifyIPQuality(ip)) {
+            selectedIP = ip;
+            break;
         }
-        
-        if (!selectedIP) {
-            selectedIP = candidates.lastObject;
-        }
-        
-        sessionFakeIP = selectedIP;
-    } @catch (NSException *e) {
-        sessionFakeIP = @"172.56.0.1";
     }
+    
+    if (!selectedIP) {
+        selectedIP = candidates.lastObject;
+    }
+    
+    sessionFakeIP = selectedIP;
 }
 
 void fetchRealIP() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         @try {
             NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
-            if (!url) { currentRealIP = @"غير قادر على الجلب"; return; }
+            if (!url) return;
             NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
             if (ip && ip.length > 0) {
                 currentRealIP = ip;
@@ -268,15 +212,16 @@ void fetchRealIP() {
 
 void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
     @try {
+        if (!urlStr) return;
         if (!networkLogs) {
             networkLogs = [[NSMutableArray alloc] init];
         }
         NSURL *url = [NSURL URLWithString:urlStr];
-        NSString *path = url.path ? url.path : urlStr;
+        NSString *path = (url && url.path) ? url.path : urlStr;
         if (path.length > 30) {
             path = [[path substringToIndex:30] stringByAppendingString:@"..."];
         }
-        NSString *logEntry = [NSString stringWithFormat:@"🔗 %@\n🌐 IP: %@\n📍 (%.4f, %.4f)", path, ip, lat, lon];
+        NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 خرج عبر IP: %@\n📍 الموقع: (%.4f, %.4f)", path, ip ?: @"-", lat, lon];
         @synchronized(networkLogs) {
             [networkLogs insertObject:logEntry atIndex:0];
             if (networkLogs.count > 15) {
@@ -342,39 +287,29 @@ void clearKeychainKeepingAccount() {
             };
             SecItemAdd((CFDictionaryRef)addQuery, NULL);
         }
-    } @catch (NSException *e) {
-        NSLog(@"[AdForceGlobal] Keychain error: %@", e);
-    }
+    } @catch (NSException *e) {}
 }
 
-// ============================================================
-// MARK: - مسح الكوكيز والكاش
-// ============================================================
-
-void clearAllCookiesSync() {
+void clearAllCookies() {
     @try {
         NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
             [cookieStorage deleteCookie:cookie];
         }
         
-        // WKWebsiteDataStore غير متزامن - ننتظر أقصى 2 ثواني
-        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+        NSSet *dataTypes = [NSSet setWithObject:WKWebsiteDataTypeCookies];
+        [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+        
         NSSet *allWebTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-        [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes
-                                                  modifiedSince:[NSDate distantPast]
-                                              completionHandler:^{
-            dispatch_semaphore_signal(semaphore);
-        }];
-        dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
-    } @catch (NSException *e) {
-        NSLog(@"[AdForceGlobal] Cookie error: %@", e);
-    }
+        [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:allWebTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
+    } @catch (NSException *e) {}
 }
 
 void clearNetworkCache() {
     @try {
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
+        [[NSURLCache sharedURLCache] setDiskCapacity:0];
+        [[NSURLCache sharedURLCache] setMemoryCapacity:0];
     } @catch (NSException *e) {}
 }
 
@@ -391,59 +326,64 @@ void clearAllLocalFiles() {
             if (dir) {
                 NSArray *items = [fm contentsOfDirectoryAtPath:dir error:nil];
                 for (NSString *item in items) {
-                    // لا نحذف Preferences عشان ما نمسح الإعدادات اللي ضفناها
-                    if ([item isEqualToString:@"Preferences"]) continue;
                     [fm removeItemAtPath:[dir stringByAppendingPathComponent:item] error:nil];
                 }
             }
         }
-        
+    } @catch (NSException *e) {}
+}
+
+// ============================================================
+// MARK: - دالة موحدة (الزر الأزرق)
+// ============================================================
+
+void performBlueButtonAction() {
+    @try {
+        // 1) تغيير UDID
+        fakeUDIDString = generateRandomUDID();
+
+        // 2) توليد بيانات التمويه
+        g_spoofedName = randomDeviceName();
+        g_spoofedSystemVersion = randomSystemVersion();
+        g_spoofedVendorID = [NSUUID UUID];
+        g_spoofedBatteryLevel = randomFloatBetween(0.15, 0.95);
+        g_spoofedBatteryState = (arc4random_uniform(2) == 0) ? UIDeviceBatteryStateCharging : UIDeviceBatteryStateUnplugged;
+        g_spoofedBacklightLevel = randomFloatBetween(0.1, 1.0);
+        g_spoofedSupportsPencil = (arc4random_uniform(2) == 0);
+        g_spoofedIsDeveloperMode = (arc4random_uniform(2) == 0);
+        g_spoofedProductType = randomProductType();
+        g_spoofedUserAgent = randomUserAgent(g_spoofedSystemVersion);
+        g_hasSpoofed = YES;
+
+        // 3) تنظيف Keychain / Cookies / Cache / Files
+        clearKeychainKeepingAccount();
+        clearAllCookies();
+        clearNetworkCache();
+        clearAllLocalFiles();
+
+        // 4) توليد IDFA + الموقع + IP
+        fakeAdvertisingIDString = generateRandomUUIDString();
+        updateAtlantaLocation();
+        generateSessionIP();
+        fetchRealIP();
+
+        // 5) مسح NSUserDefaults
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleID) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
             [[NSUserDefaults standardUserDefaults] synchronize];
         }
-    } @catch (NSException *e) {
-        NSLog(@"[AdForceGlobal] Files error: %@", e);
-    }
-}
 
-// ============================================================
-// MARK: - دالة العملية الرئيسية
-// ============================================================
-
-void performFullReset() {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        @try {
-            NSLog(@"[AdForceGlobal] Reset started");
-            
-            clearKeychainKeepingAccount();
-            clearAllCookiesSync();
-            clearNetworkCache();
-            clearAllLocalFiles();
-            
-            applyAdConstraintsBypass();
-            
-            fakeAdvertisingIDString = generateRandomUUIDString();
-            fakeUDIDString = generateRandomUDID();
-            applyDeviceSpoofing();
-            
-            updateAtlantaLocation();
-            generateSessionIP();
-            fetchRealIP();
-            
-            @synchronized(networkLogs) {
-                [networkLogs removeAllObjects];
-            }
-            
-            NSLog(@"[AdForceGlobal] Reset complete → exit");
-        } @catch (NSException *e) {
-            NSLog(@"[AdForceGlobal] Reset error: %@", e);
+        // 6) مسح سجلات الشبكة
+        @synchronized(networkLogs) {
+            [networkLogs removeAllObjects];
         }
-        
-        // خروج فوري
-        exit(0);
-    });
+    } @catch (NSException *exception) {
+        // تجاهل
+    }
+    
+    // ✅ الخروج فوراً
+    exit(0);
 }
 
 // ============================================================
@@ -462,24 +402,23 @@ void performFullReset() {
     scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:scrollView];
     
-    NSString *idfaStr = fakeAdvertisingIDString ?: @"-";
+    NSString *idfaStr = fakeAdvertisingIDString ?: [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString] ?: @"-";
     NSString *udidDisplay = fakeUDIDString ?: @"غير متوفر";
     
-    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع (أتلانتا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
-    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP وهمي:\n%@\n\n🛡️ IP حقيقي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP];
-    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@", udidDisplay, idfaStr];
-    NSString *deviceInfo = [NSString stringWithFormat:@"📱 الجهاز:\nName: %@\niOS: %@\nProduct: %@", g_spoofedName ?: @"-", g_spoofedSystemVersion ?: @"-", g_spoofedProductType ?: @"-"];
+    NSString *locationInfo = [NSString stringWithFormat:@"📍 الموقع الحالي (أتلانطا):\nLat: %.4f\nLon: %.4f", currentLat, currentLon];
+    NSString *ipInfo = [NSString stringWithFormat:@"🌐 IP الجلسة الوهمي:\n%@\n\n🛡️ IP الشبكة الفعلي:\n%@", sessionFakeIP ?: @"غير محدد", currentRealIP ?: @"-"];
+    NSString *identsInfo = [NSString stringWithFormat:@"🆔 المعرفات:\nUDID: %@\nIDFA: %@\n\n📱 الجهاز المزيف:\nName: %@\nSystem: %@\nProduct: %@", udidDisplay, idfaStr, g_spoofedName ?: @"-", g_spoofedSystemVersion ?: @"-", g_spoofedProductType ?: @"-"];
     
     NSString *logsText = @"";
     @synchronized(networkLogs) {
         if (networkLogs && networkLogs.count > 0) {
-            logsText = [networkLogs componentsJoinedByString:@"\n\n---\n\n"];
+            logsText = [networkLogs componentsJoinedByString:@"\n\n--------------------\n\n"];
         } else {
-            logsText = @"لا توجد طلبات بعد.";
+            logsText = @"لا توجد طلبات مسجلة بعد.";
         }
     }
     
-    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n%@\n\n📋 الطلبات:\n%@", locationInfo, ipInfo, identsInfo, deviceInfo, logsText];
+    NSString *fullReport = [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n📋 تفاصيل الطلبات:\n%@", locationInfo, ipInfo, identsInfo, logsText];
     
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, self.view.bounds.size.width - 40, 0)];
     label.text = fullReport;
@@ -507,7 +446,7 @@ void performFullReset() {
 @end
 
 // ============================================================
-// MARK: - الأزرار العائمة
+// MARK: - النافذة العائمة
 // ============================================================
 
 @interface AtlantaWindow : UIWindow
@@ -515,8 +454,12 @@ void performFullReset() {
 
 @implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn1 = [self viewWithTag:999888];
-    if (btn1 && CGRectContainsPoint(btn1.frame, point)) return YES;
+    @try {
+        UIView *btn1 = [self viewWithTag:999888];
+        if (btn1 && !btn1.hidden && CGRectContainsPoint(btn1.frame, point)) {
+            return YES;
+        }
+    } @catch (NSException *e) {}
     return NO;
 }
 @end
@@ -549,6 +492,7 @@ void performFullReset() {
             self.floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
             self.floatingWindow.hidden = NO;
             self.floatingWindow.backgroundColor = [UIColor clearColor];
+            self.floatingWindow.rootViewController = nil;
             
             UIViewController *vc = [[UIViewController alloc] init];
             vc.view.backgroundColor = [UIColor clearColor];
@@ -572,34 +516,36 @@ void performFullReset() {
             [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
             
             [vc.view addSubview:self.resetBtn];
-            g_buttonShown = YES;
-            NSLog(@"[AdForceGlobal] Button shown");
-        } @catch (NSException *e) {
-            NSLog(@"[AdForceGlobal] Button error: %@", e);
-        }
+        } @catch (NSException *e) {}
     });
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    UIView *btn = gesture.view;
-    CGPoint translation = [gesture translationInView:btn.superview];
-    CGFloat newX = btn.center.x + translation.x;
-    CGFloat newY = btn.center.y + translation.y;
-    CGSize screenSize = [UIScreen mainScreen].bounds.size;
-    newX = MAX(30, MIN(screenSize.width - 30, newX));
-    newY = MAX(40, MIN(screenSize.height - 40, newY));
-    btn.center = CGPointMake(newX, newY);
-    [gesture setTranslation:CGPointZero inView:btn.superview];
+    @try {
+        UIView *btn = gesture.view;
+        if (!btn || !btn.superview) return;
+        CGPoint translation = [gesture translationInView:btn.superview];
+        CGFloat newX = btn.center.x + translation.x;
+        CGFloat newY = btn.center.y + translation.y;
+        CGSize screenSize = [UIScreen mainScreen].bounds.size;
+        newX = MAX(30, MIN(screenSize.width - 30, newX));
+        newY = MAX(40, MIN(screenSize.height - 40, newY));
+        btn.center = CGPointMake(newX, newY);
+        [gesture setTranslation:CGPointZero inView:btn.superview];
+    } @catch (NSException *e) {}
 }
 
 - (void)handleReset {
-    performFullReset();
+    // تشغيل العملية في الخلفية حتى لا يتجمد الـ UI
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        performBlueButtonAction();
+    });
 }
 
 @end
 
 // ============================================================
-// MARK: - Private Swizzling Functions
+// MARK: - Private Method Swizzling
 // ============================================================
 
 static float (*orig_backlightLevel)(id self, SEL _cmd) = NULL;
@@ -624,141 +570,31 @@ static BOOL replaced_developerModeEnabled(id self, SEL _cmd) {
 
 static NSString * replaced_productType(id self, SEL _cmd) {
     if (g_hasSpoofed && g_spoofedProductType) return g_spoofedProductType;
-    return orig_productType ? orig_productType(self, _cmd) : @"iPhone14,2";
+    return orig_productType ? orig_productType(self, _cmd) : nil;
 }
 
 // ============================================================
-// MARK: - Hooks
-// ============================================================
-
-%hook UIDevice
-
-- (NSString *)name {
-    if (g_hasSpoofed && g_spoofedName) return g_spoofedName;
-    return %orig;
-}
-
-- (NSString *)systemVersion {
-    if (g_hasSpoofed && g_spoofedSystemVersion) return g_spoofedSystemVersion;
-    return %orig;
-}
-
-- (NSUUID *)identifierForVendor {
-    @try {
-        if (g_hasSpoofed && g_spoofedVendorID && [g_spoofedVendorID isKindOfClass:[NSUUID class]]) {
-            return g_spoofedVendorID;
-        }
-    } @catch (id e) {}
-    return %orig;
-}
-
-- (float)batteryLevel {
-    if (g_hasSpoofed) return g_spoofedBatteryLevel;
-    return %orig;
-}
-
-- (UIDeviceBatteryState)batteryState {
-    if (g_hasSpoofed) return g_spoofedBatteryState;
-    return %orig;
-}
-
-%end
-
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    @try {
-        if (fakeAdvertisingIDString) {
-            return [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString];
-        }
-    } @catch (id e) {}
-    return %orig;
-}
-%end
-
-%hook CLLocationManager
-- (void)startUpdatingLocation {
-    updateAtlantaLocation();
-    @try {
-        CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-        if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-            [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
-        }
-    } @catch (id e) {}
-}
-- (CLLocation *)location {
-    updateAtlantaLocation();
-    return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-}
-%end
-
-%hook NSURLSession
-
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    @try {
-        if (sessionFakeIP) {
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
-        }
-        if (g_hasSpoofed && g_spoofedUserAgent) {
-            [mutableReq setValue:g_spoofedUserAgent forHTTPHeaderField:@"User-Agent"];
-        }
-    } @catch (id e) {}
-    return %orig(mutableReq);
-}
-
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
-                            completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    @try {
-        if (sessionFakeIP) {
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
-        }
-        if (g_hasSpoofed && g_spoofedUserAgent) {
-            [mutableReq setValue:g_spoofedUserAgent forHTTPHeaderField:@"User-Agent"];
-        }
-    } @catch (id e) {}
-    return %orig(mutableReq, completionHandler);
-}
-
-%end
-
-%hook NSURLConnection
-+ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    @try {
-        if (sessionFakeIP) {
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
-        }
-        if (g_hasSpoofed && g_spoofedUserAgent) {
-            [mutableReq setValue:g_spoofedUserAgent forHTTPHeaderField:@"User-Agent"];
-        }
-    } @catch (id e) {}
-    %orig(mutableReq, queue, handler);
-}
-%end
-
-// ============================================================
-// MARK: - Constructor (خفيف جداً - بدون شبكة)
+// MARK: - Constructor
 // ============================================================
 
 %ctor {
-    %init;   // ← تفعيل الـ hooks
-    
     @autoreleasepool {
-        NSLog(@"[AdForceGlobal] ==== Tweak loaded ====");
+        // 🛡️ لا ننفذ أي عمليات حجب للـ Main Thread هنا
+        // كل توليد البيانات الثقيلة يحدث في الخلفية
         
-        // ===== المرحلة 1: عمليات آمنة فورية (بدون شبكة، بدون UI) =====
+        updateAtlantaLocation();
+        fakeAdvertisingIDString = generateRandomUUIDString();
         
-        // 1) إعدادات الإعلانات (NSUserDefaults فقط)
-        applyAdConstraintsBypass();
+        // توليد IP في الخلفية لتجنب تعليق الإقلاع
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+            @try {
+                generateSessionIP();
+            } @catch (NSException *e) {}
+        });
         
-        // 2) Swizzling للدوال الخاصة
+        fetchRealIP();
+        
+        // تسجيل Private Methods Swizzling
         @try {
             Class uidClass = NSClassFromString(@"UIDevice");
             if (uidClass) {
@@ -798,40 +634,178 @@ static NSString * replaced_productType(id self, SEL _cmd) {
                     }
                 }
             }
-        } @catch (NSException *e) {
-            NSLog(@"[AdForceGlobal] Swizzling error: %@", e);
-        }
+        } @catch (NSException *e) {}
         
-        // 3) توليد بيانات وهمية أولية (بدون شبكة - سريع جداً)
-        applyDeviceSpoofing();
-        fakeAdvertisingIDString = generateRandomUUIDString();
-        fakeUDIDString = generateRandomUDID();
-        updateAtlantaLocation();
-        
-        // ===== المرحلة 2: عمليات الشبكة والواجهة (مؤجلة 3 ثواني على خيط خلفي) =====
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
-                       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            
-            if (g_initialSetupDone) return;
-            g_initialSetupDone = YES;
-            
-            NSLog(@"[AdForceGlobal] Deferred init started");
-            
+        // إضافة الزر العائم بعد 2 ثانية
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             @try {
-                // IP وهمي (قد يأخذ عدة ثواني - لكنه على خيط خلفي)
-                generateSessionIP();
-                NSLog(@"[AdForceGlobal] Session IP ready: %@", sessionFakeIP ?: @"nil");
-                
-                // IP الحقيقي (async داخلياً)
-                fetchRealIP();
-            } @catch (NSException *e) {
-                NSLog(@"[AdForceGlobal] Network init error: %@", e);
-            }
-            
-            // إظهار الزر على الخيط الرئيسي
-            dispatch_async(dispatch_get_main_queue(), ^{
                 [[AtlantaInfoManager sharedInstance] setupFloatingButtons];
-            });
+            } @catch (NSException *e) {}
         });
     }
 }
+
+// ============================================================
+// MARK: - Hooks
+// ============================================================
+
+%hook ASIdentifierManager
+- (NSUUID *)advertisingIdentifier {
+    @try {
+        if (fakeAdvertisingIDString) {
+            NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString];
+            if (uuid) return uuid;
+        }
+    } @catch (NSException *e) {}
+    return %orig;
+}
+%end
+
+%hook UIDevice
+
+- (NSString *)name {
+    @try {
+        if (g_hasSpoofed && g_spoofedName) return g_spoofedName;
+    } @catch (NSException *e) {}
+    return %orig;
+}
+
+- (NSString *)systemVersion {
+    @try {
+        if (g_hasSpoofed && g_spoofedSystemVersion) return g_spoofedSystemVersion;
+    } @catch (NSException *e) {}
+    return %orig;
+}
+
+- (NSUUID *)identifierForVendor {
+    @try {
+        if (g_hasSpoofed && g_spoofedVendorID && [g_spoofedVendorID isKindOfClass:[NSUUID class]]) {
+            return g_spoofedVendorID;
+        }
+    } @catch (id e) {}
+    return %orig;
+}
+
+- (float)batteryLevel {
+    @try {
+        if (g_hasSpoofed) return g_spoofedBatteryLevel;
+    } @catch (NSException *e) {}
+    return %orig;
+}
+
+- (UIDeviceBatteryState)batteryState {
+    @try {
+        if (g_hasSpoofed) return g_spoofedBatteryState;
+    } @catch (NSException *e) {}
+    return %orig;
+}
+
+%end
+
+%hook CLLocationManager
+- (void)startUpdatingLocation {
+    @try {
+        updateAtlantaLocation();
+        CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
+        if (fakeLocation && self.delegate && [self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+            [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
+        }
+    } @catch (NSException *e) {}
+}
+- (CLLocation *)location {
+    @try {
+        updateAtlantaLocation();
+        return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
+    } @catch (NSException *e) {
+        return %orig;
+    }
+}
+%end
+
+%hook NSURLSession
+
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
+    @try {
+        if (!request) return %orig;
+        NSMutableURLRequest *mutableRequest = [request mutableCopy];
+        if (!mutableRequest) return %orig;
+
+        if (sessionFakeIP) {
+            [mutableRequest setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [mutableRequest setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
+            [mutableRequest setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+        }
+        
+        if (g_hasSpoofed && g_spoofedUserAgent) {
+            [mutableRequest setValue:g_spoofedUserAgent forHTTPHeaderField:@"User-Agent"];
+        }
+        [mutableRequest setValue:nil forHTTPHeaderField:@"Cookie"];
+        
+        NSString *urlString = request.URL.absoluteString;
+        if (urlString) {
+            logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
+        }
+        
+        return %orig(mutableRequest);
+    } @catch (NSException *e) {
+        return %orig;
+    }
+}
+
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
+                            completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    @try {
+        if (!request) return %orig;
+        NSMutableURLRequest *mutableRequest = [request mutableCopy];
+        if (!mutableRequest) return %orig(mutableRequest, completionHandler);
+        
+        if (sessionFakeIP) {
+            [mutableRequest setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [mutableRequest setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
+            [mutableRequest setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+        }
+        
+        if (g_hasSpoofed && g_spoofedUserAgent) {
+            [mutableRequest setValue:g_spoofedUserAgent forHTTPHeaderField:@"User-Agent"];
+        }
+        [mutableRequest setValue:nil forHTTPHeaderField:@"Cookie"];
+        
+        NSString *urlString = request.URL.absoluteString;
+        if (urlString) {
+            logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
+        }
+        
+        return %orig(mutableRequest, completionHandler);
+    } @catch (NSException *e) {
+        return %orig(request, completionHandler);
+    }
+}
+
+%end
+
+%hook NSURLConnection
++ (void)sendAsynchronousRequest:(NSURLRequest *)request queue:(NSOperationQueue *)queue completionHandler:(void (^)(NSURLResponse *response, NSData *data, NSError *error))handler {
+    @try {
+        if (!request) {
+            %orig;
+            return;
+        }
+        NSMutableURLRequest *mutableReq = [request mutableCopy];
+        if (sessionFakeIP) {
+            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
+            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
+            [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+        }
+        if (g_hasSpoofed && g_spoofedUserAgent) {
+            [mutableReq setValue:g_spoofedUserAgent forHTTPHeaderField:@"User-Agent"];
+        }
+        NSString *urlString = request.URL.absoluteString;
+        if (urlString) {
+            logNetworkRequest(urlString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
+        }
+        %orig(mutableReq, queue, handler);
+    } @catch (NSException *e) {
+        %orig;
+    }
+}
+%end
