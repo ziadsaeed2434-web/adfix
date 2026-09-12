@@ -2,11 +2,27 @@
 #import <Security/Security.h>
 #import <UIKit/UIKit.h>
 
-static void resetKeychainAndRestoreAccountOnce() {
+static void clearEverythingAndRestoreAccount() {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         @autoreleasepool {
-            // 1. مسح جميع عناصر الـ Keychain الخاصة بالتطبيق بالكامل
+            // 1. مسح جميع محتويات مجلد الحاوية (Sandbox Container) بالكامل دون استثناء
+            NSString *homeDir = NSHomeDirectory();
+            NSFileManager *fileManager = [NSFileManager defaultManager];
+            
+            NSArray *foldersToClean = @[@"Documents", @"Library", @"tmp", @"SystemData"];
+            for (NSString *folderName in foldersToClean) {
+                NSString *folderPath = [homeDir stringByAppendingPathComponent:folderName];
+                if ([fileManager fileExistsAtPath:folderPath]) {
+                    NSArray *contents = [fileManager contentsOfDirectoryAtPath:folderPath error:nil];
+                    for (NSString *item in contents) {
+                        NSString *itemPath = [folderPath stringByAppendingPathComponent:item];
+                        [fileManager removeItemAtPath:itemPath error:nil];
+                    }
+                }
+            }
+            
+            // 2. مسح عناصر الـ Keychain بالكامل
             NSDictionary *query = @{
                 (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
                 (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
@@ -18,8 +34,8 @@ static void resetKeychainAndRestoreAccountOnce() {
             OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result);
             
             if (status == errSecSuccess && result) {
-                NSArray *items = (NSArray *)result;
-                for (NSDictionary *item in items) {
+                NSArray *itemsArr = (__bridge_transfer NSArray *)result;
+                for (NSDictionary *item in itemsArr) {
                     NSString *service = [item objectForKey:(__bridge id)kSecAttrService];
                     NSString *account = [item objectForKey:(__bridge id)kSecAttrAccount];
                     
@@ -33,13 +49,11 @@ static void resetKeychainAndRestoreAccountOnce() {
                     
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 }
-                CFRelease(result);
             }
             
-            // 2. إعادة إدراج مفتاحي حسابك الأساسية
+            // 3. إعادة إدراج مفتاحي حسابك فقط ليبقى التطبيق فاتحاً على حسابك دون خروج
             NSString *targetService = @"app.getsmscode";
             
-            // مفتاح deviceTokenKey
             NSDictionary *addQuery1 = @{
                 (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
                 (__bridge id)kSecAttrService: targetService,
@@ -48,7 +62,6 @@ static void resetKeychainAndRestoreAccountOnce() {
             };
             SecItemAdd((__bridge CFDictionaryRef)addQuery1, NULL);
             
-            // مفتاح tokenKey
             NSDictionary *addQuery2 = @{
                 (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
                 (__bridge id)kSecAttrService: targetService,
@@ -63,7 +76,7 @@ static void resetKeychainAndRestoreAccountOnce() {
 %hook AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    resetKeychainAndRestoreAccountOnce();
+    clearEverythingAndRestoreAccount();
     return %orig;
 }
 
