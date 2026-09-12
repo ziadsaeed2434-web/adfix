@@ -154,11 +154,10 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح Keychain مع استثناء العنصر المحدد في الصورة
+// MARK: - مسح Keychain مع استثناء العنصر المحدد في الصورة (متوافق مع Non-ARC)
 // ============================================================
 
 void clearKeychainKeepingAccount() {
-    // 1. جلب كافة عناصر الـ Keychain المؤقتة لحفظ النسخة المستثناة مؤقتًا (إذا وجدت)
     NSString *savedService = nil;
     NSString *savedAccount = nil;
     NSData *savedValueData = nil;
@@ -173,12 +172,11 @@ void clearKeychainKeepingAccount() {
     CFArrayRef result = NULL;
     OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result);
     if (status == errSecSuccess && result != NULL) {
-        NSArray *items = (__bridge_transfer NSArray *)result;
+        NSArray *items = (__bridge NSArray *)result;
         for (NSDictionary *item in items) {
             NSString *service = item[(__bridge id)kSecAttrService];
             NSString *account = item[(__bridge id)kSecAttrAccount];
             
-            // البحث عن العنصر المستثنى: app.getsmscode و tokenKey
             if ([service isEqualToString:@"app.getsmscode"] && [account isEqualToString:@"tokenKey"]) {
                 savedService = service;
                 savedAccount = account;
@@ -186,9 +184,9 @@ void clearKeychainKeepingAccount() {
                 break;
             }
         }
+        CFRelease(result);
     }
 
-    // 2. حذف كافة أصناف الـ Keychain بالكامل
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword, 
         (__bridge id)kSecClassInternetPassword, 
@@ -205,7 +203,6 @@ void clearKeychainKeepingAccount() {
         SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
     }
 
-    // 3. إعادة إدراج العنصر المستثنى ليبقى الوحيد المحفوظ
     if (savedService && savedAccount && savedValueData) {
         NSDictionary *addQuery = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
