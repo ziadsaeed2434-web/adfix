@@ -256,32 +256,34 @@ void clearAllLocalFiles() {
 // ============================================================
 
 void performFullReset() {
-    clearKeychainKeepingAccount();
-    clearAllCookies();
-    clearNetworkCache();
-    clearAllLocalFiles();
-    
-    fakeAdvertisingIDString = generateRandomUUIDString();
-    updateAtlantaLocation();
-    generateSessionIP();
-    fetchRealIP();
-    
-    @synchronized(networkLogs) {
-        [networkLogs removeAllObjects];
-    }
-    
-    // تأخير 5 ثوانٍ قبل الخروج
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        exit(0);
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        clearKeychainKeepingAccount();
+        clearAllCookies();
+        clearNetworkCache();
+        clearAllLocalFiles();
+        
+        fakeAdvertisingIDString = generateRandomUUIDString();
+        updateAtlantaLocation();
+        generateSessionIP();
+        fetchRealIP();
+        
+        @synchronized(networkLogs) {
+            [networkLogs removeAllObjects];
+        }
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            exit(0);
+        });
     });
 }
 
 void changeIdentifiersOnly() {
-    fakeUDIDString = generateRandomUDID();
-    
-    // تأخير 5 ثوانٍ قبل إغلاق التطبيق
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        exit(0);
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        fakeUDIDString = generateRandomUDID();
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            exit(0);
+        });
     });
 }
 
