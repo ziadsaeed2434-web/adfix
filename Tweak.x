@@ -2,20 +2,7 @@
 #import <Security/Security.h>
 #import <UIKit/UIKit.h>
 
-%hook AppDelegate
-
-- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    [self clearKeychainExceptExemptions];
-    return %orig;
-}
-
-- (void)applicationDidBecomeActive:(UIApplication *)application {
-    [self clearKeychainExceptExemptions];
-    %orig;
-}
-
-%new
-- (void)clearKeychainExceptExemptions {
+static void clearKeychainExceptExemptions() {
     @autoreleasepool {
         NSString *targetService = @"app.getsmscode";
         NSArray *exemptAccounts = @[@"deviceTokenKey", @"tokenKey"];
@@ -53,6 +40,18 @@
             CFRelease(result);
         }
     }
+}
+
+%hook AppDelegate
+
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    clearKeychainExceptExemptions();
+    return %orig;
+}
+
+- (void)applicationDidBecomeActive:(UIApplication *)application {
+    clearKeychainExceptExemptions();
+    %orig;
 }
 
 %end
