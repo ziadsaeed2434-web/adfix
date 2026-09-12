@@ -154,39 +154,30 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح Keychain مع استثناء العنصر المحدد في الصورة (متوافق مع Non-ARC)
+// MARK: - مسح Keychain جذرياً مع استثناء عنصر الحساب بدقة
 // ============================================================
 
 void clearKeychainKeepingAccount() {
-    NSString *savedService = nil;
-    NSString *savedAccount = nil;
     NSData *savedValueData = nil;
+    NSString *savedService = nil;
     
+    // 1. البحث عن العنصر المستثنى وحفظ قيمته والـ Service الخاص به
     NSDictionary *query = @{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
+        (__bridge id)kSecAttrAccount: @"tokenKey",
         (__bridge id)kSecReturnAttributes: @YES,
-        (__bridge id)kSecReturnData: @YES
+        (__bridge id)kSecReturnData: @YES,
+        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitOne
     };
     
-    CFArrayRef result = NULL;
-    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result);
-    if (status == errSecSuccess && result != NULL) {
-        NSArray *items = (__bridge NSArray *)result;
-        for (NSDictionary *item in items) {
-            NSString *service = item[(__bridge id)kSecAttrService];
-            NSString *account = item[(__bridge id)kSecAttrAccount];
-            
-            if ([service isEqualToString:@"app.getsmscode"] && [account isEqualToString:@"tokenKey"]) {
-                savedService = service;
-                savedAccount = account;
-                savedValueData = item[(__bridge id)kSecValueData];
-                break;
-            }
-        }
-        CFRelease(result);
+    CFDictionaryRef result = NULL;
+    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result) == errSecSuccess && result != NULL) {
+        NSDictionary *item = (__bridge_transfer NSDictionary *)result;
+        savedValueData = item[(__bridge id)kSecValueData];
+        savedService = item[(__bridge id)kSecAttrService];
     }
 
+    // 2. حذف جميع فئات الـ Keychain جذرياً تماماً مثل الحذف اليدوي
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword, 
         (__bridge id)kSecClassInternetPassword, 
@@ -196,18 +187,16 @@ void clearKeychainKeepingAccount() {
     ];
     
     for (id secClass in secClasses) {
-        NSDictionary *deleteQuery = @{
-            (__bridge id)kSecClass: secClass, 
-            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
-        };
+        NSDictionary *deleteQuery = @{ (__bridge id)kSecClass: secClass };
         SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
     }
 
-    if (savedService && savedAccount && savedValueData) {
+    // 3. إعادة إدراج العنصر المستثنى بلطف ليعمل الحساب مباشرة بعد الحذف
+    if (savedValueData && savedService) {
         NSDictionary *addQuery = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
             (__bridge id)kSecAttrService: savedService,
-            (__bridge id)kSecAttrAccount: savedAccount,
+            (__bridge id)kSecAttrAccount: @"tokenKey",
             (__bridge id)kSecValueData: savedValueData
         };
         SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
