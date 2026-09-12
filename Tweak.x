@@ -1,16 +1,15 @@
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
+#import <UIKit/UIKit.h>
 
 %hook AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    // تنفيذ الحذف عند فتح التطبيق لأول مرة
     [self clearKeychainExceptExemptions];
     return %orig;
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
-    // تنفيذ الحذف أيضاً في كل مرة يعود فيها التطبيق للواجهة (الفتح من الخلفية)
     [self clearKeychainExceptExemptions];
     %orig;
 }
@@ -32,12 +31,11 @@
         OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result);
         
         if (status == errSecSuccess && result) {
-            NSArray *items = (__bridge_transfer NSArray *)result;
+            NSArray *items = (NSArray *)result;
             for (NSDictionary *item in items) {
-                NSString *service = item[(__bridge id)kSecAttrService];
-                NSString *account = item[(__bridge id)kSecAttrAccount];
+                NSString *service = [item objectForKey:(__bridge id)kSecAttrService];
+                NSString *account = [item objectForKey:(__bridge id)kSecAttrAccount];
                 
-                // الاستثناء والحفاظ على المفتاحين المطلوبين فقط
                 if ([service isEqualToString:targetService] && [exemptAccounts containsObject:account]) {
                     continue;
                 }
@@ -47,11 +45,12 @@
                     (__bridge id)kSecAttrService: service ? service : @""
                 }];
                 if (account) {
-                    delQuery[(__bridge id)kSecAttrAccount] = account;
+                    [delQuery setObject:account forKey:(__bridge id)kSecAttrAccount];
                 }
                 
                 SecItemDelete((__bridge CFDictionaryRef)delQuery);
             }
+            CFRelease(result);
         }
     }
 }
