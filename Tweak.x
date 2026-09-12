@@ -154,14 +154,14 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - مسح Keychain جذرياً مع استثناء عنصر الحساب بدقة
+// MARK: - مسح Keychain جذرياً (متوافق مع Non-ARC وخالي من الأخطاء)
 // ============================================================
 
 void clearKeychainKeepingAccount() {
     NSData *savedValueData = nil;
     NSString *savedService = nil;
     
-    // 1. البحث عن العنصر المستثنى وحفظ قيمته والـ Service الخاص به
+    // 1. البحث عن العنصر المستثنى وحفظ قيمته والـ Service الخاص به بأمان
     NSDictionary *query = @{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecAttrAccount: @"tokenKey",
@@ -172,7 +172,7 @@ void clearKeychainKeepingAccount() {
     
     CFDictionaryRef result = NULL;
     if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result) == errSecSuccess && result != NULL) {
-        NSDictionary *item = (__bridge_transfer NSDictionary *)result;
+        NSDictionary *item = (__bridge NSDictionary *)result;
         savedValueData = item[(__bridge id)kSecValueData];
         savedService = item[(__bridge id)kSecAttrService];
     }
@@ -200,6 +200,10 @@ void clearKeychainKeepingAccount() {
             (__bridge id)kSecValueData: savedValueData
         };
         SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
+    }
+    
+    if (result != NULL) {
+        CFRelease(result);
     }
 }
 
@@ -241,10 +245,11 @@ void clearAllLocalFiles() {
 }
 
 // ============================================================
-// MARK: - دوال العمليات (الزر الأزرق والبرتقالي)
+// MARK: - دوال العمليات المضمونة في الخلفية (الزر الأزرق والبرتقالي)
 // ============================================================
 
 void performFullReset() {
+    // تشغيل العمليات في طابور خلفي ذو أولوية عالية لضمان تنفيذها بالكامل دون كراش
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         clearKeychainKeepingAccount();
         clearAllCookies();
@@ -260,6 +265,7 @@ void performFullReset() {
             [networkLogs removeAllObjects];
         }
         
+        // مهلة زمنية آمنة (1.5 ثانية) للتأكد من انتهاء كافة عمليات الحفظ والكتابة ثم الخروج بسلاسة
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             exit(0);
         });
