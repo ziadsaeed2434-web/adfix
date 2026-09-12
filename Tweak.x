@@ -34,7 +34,7 @@ static void clearEverythingAndRestoreAccount() {
             OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result);
             
             if (status == errSecSuccess && result) {
-                NSArray *itemsArr = (__bridge_transfer NSArray *)result;
+                NSArray *itemsArr = (NSArray *)result;
                 for (NSDictionary *item in itemsArr) {
                     NSString *service = [item objectForKey:(__bridge id)kSecAttrService];
                     NSString *account = [item objectForKey:(__bridge id)kSecAttrAccount];
@@ -49,6 +49,7 @@ static void clearEverythingAndRestoreAccount() {
                     
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 }
+                CFRelease(result);
             }
             
             // 3. إعادة إدراج مفتاحي حسابك فقط ليبقى التطبيق فاتحاً على حسابك دون خروج
