@@ -69,7 +69,7 @@ void updateGreekLocation() {
 NSArray *generate10IPs() {
     NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
     NSArray *greekSubnets = @[
-        @{@"first": @79, @"second": @107}
+        @{@"first": @83, @"second": @82}
 
 
 
