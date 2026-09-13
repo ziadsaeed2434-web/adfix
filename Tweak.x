@@ -51,7 +51,6 @@ void updateGreekLocation() {
     currentLon = randomInRange(23.7000, 23.7800);
 }
 
-// توليد User-Agent حقيقي لجهاز آيفون متصل عبر شبكة محمولة أو أرضية في اليونان
 void generateSessionUserAgent() {
     NSArray *iosVersions = @[@"17_5_1", @"18_0", @"18_1", @"18_2", @"19_0"];
     NSArray *deviceModels = @[@"iPhone15,2", @"iPhone15,3", @"iPhone16,1", @"iPhone16,2", @"iPhone17,1", @"iPhone17,2"];
@@ -60,7 +59,6 @@ void generateSessionUserAgent() {
     NSString *device = deviceModels[arc4random_uniform((uint32_t)deviceModels.count)];
     NSString *safariVer = [NSString stringWithFormat:@"605.%d", arc4random_uniform(50) + 15];
     
-    // صيغة User-Agent رسمية ونظامية لمتصفح سفاري على آيفون بلغة تفضيل يونانية/إنجليزية
     currentSessionUserAgent = [NSString stringWithFormat:@"Mozilla/5.0 (%@; CPU iPhone OS %@ like Mac OS X) AppleWebKit/%@ (KHTML, like Gecko) Mobile/15E148 Safari/%@", device, iosVer, safariVer, safariVer];
 }
 
@@ -240,7 +238,7 @@ void performFullReset() {
         fakeUDIDString = generateRandomUDID();
         updateGreekLocation();
         generateSessionIP();
-        generateSessionUserAgent(); // توليد User-Agent جديد كلياً
+        generateSessionUserAgent();
         
         @synchronized(networkLogs) {
             [networkLogs removeAllObjects];
@@ -438,7 +436,7 @@ void changeIdentifiersOnly() {
 @end
 
 // ============================================================
-// MARK: - الـ Hooks (تضمين الـ IP والـ User-Agent بداخلها)
+// MARK: - الـ Hooks
 // ============================================================
 
 %ctor {
@@ -476,19 +474,16 @@ void changeIdentifiersOnly() {
 }
 %end
 
-// حقن الـ IP والـ User-Agent معاً في كل طلبات الشبكة (NSURLSession)
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
-    // حقن الـ IP الوهمي السكني
     if (sessionFakeIP) {
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
     }
     
-    // حقن الـ User-Agent الوهمي لجهاز الآيفون
     if (currentSessionUserAgent) {
         [mutableReq setValue:currentSessionUserAgent forHTTPHeaderField:@"User-Agent"];
     }
@@ -501,9 +496,8 @@ void changeIdentifiersOnly() {
 }
 %end
 
-// حقن الـ User-Agent في متصفحات الـ WebView (مثل Google Ads SDK التي تفتح عبر الـ Web)
 %hook WKWebView
--- (id)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
+- (instancetype)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
     if (currentSessionUserAgent) {
         configuration.applicationNameForUserAgent = currentSessionUserAgent;
     }
