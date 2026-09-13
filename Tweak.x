@@ -18,6 +18,12 @@ static NSMutableArray *networkLogs = nil;
 static NSString *fakeAdvertisingIDString = nil;
 static NSString *fakeUDIDString = nil; 
 
+// إعلان مسبق لمدير العرض لتحديث المربع العائم
+@interface GreeceInfoManager : NSObject
++ (instancetype)sharedInstance;
+- (void)updateIPDisplayLabel;
+@end
+
 // ============================================================
 // MARK: - دالة توليد معرف عشوائي آمن (UUID String)
 // ============================================================
@@ -59,7 +65,6 @@ void updateGreekLocation() {
 NSArray *generate10IPs() {
     NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
     
-    // نطاقات شائعة لمزودي الخدمة في اليونان (مثل 2a02 أو نطاقات OTE / Vodafone)
     NSArray *greekSubnets = @[
         @{@"first": @79, @"second": @107}, // OTE / Cosmote
         @{@"first": @94, @"second": @64},   // Vodafone Greece
@@ -132,17 +137,25 @@ void generateSessionIP() {
     }
     
     sessionFakeIP = selectedIP;
+    
+    // تحديث الواجهة عند تغيير الـ IP
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[GreeceInfoManager sharedInstance] updateIPDisplayLabel];
+    });
 }
 
 void fetchRealIP() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
         NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
-        if (ip && ip.length > 0) {
-            currentRealIP = ip;
-        } else {
-            currentRealIP = @"غير قادر على الجلب";
-        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (ip && ip.length > 0) {
+                currentRealIP = ip;
+            } else {
+                currentRealIP = @"غير قادر على الجلب";
+            }
+            [[GreeceInfoManager sharedInstance] updateIPDisplayLabel];
+        });
     });
 }
 
@@ -348,7 +361,7 @@ void changeIdentifiersOnly() {
 @end
 
 // ============================================================
-// MARK: - الأزرار العائمة وإدارتها
+// MARK: - الأزرار العائمة والمربع الجانبي وإدارتها
 // ============================================================
 
 @interface GreeceWindow : UIWindow
@@ -358,7 +371,10 @@ void changeIdentifiersOnly() {
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn1 = [self viewWithTag:999888];
     UIView *btn2 = [self viewWithTag:999777];
-    if ((btn1 && CGRectContainsPoint(btn1.frame, point)) || (btn2 && CGRectContainsPoint(btn2.frame, point))) {
+    UIView *ipBox = [self viewWithTag:999666];
+    if ((btn1 && CGRectContainsPoint(btn1.frame, point)) || 
+        (btn2 && CGRectContainsPoint(btn2.frame, point)) || 
+        (ipBox && CGRectContainsPoint(ipBox.frame, point))) {
         return YES;
     }
     return NO;
@@ -369,8 +385,10 @@ void changeIdentifiersOnly() {
 @property (strong, nonatomic) GreeceWindow *floatingWindow;
 @property (strong, nonatomic) UIButton *resetBtn;
 @property (strong, nonatomic) UIButton *changeIDBtn;
+@property (strong, nonatomic) UILabel *ipDisplayLabel;
 + (instancetype)sharedInstance;
 - (void)setupFloatingButtons;
+- (void)updateIPDisplayLabel;
 @end
 
 @implementation GreeceInfoManager
@@ -398,7 +416,7 @@ void changeIdentifiersOnly() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // الزر الأزرق (🔄)
+        // 1. الزر الأزرق (🔄)
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
@@ -416,7 +434,7 @@ void changeIdentifiersOnly() {
         [self.resetBtn addGestureRecognizer:pan1];
         [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
         
-        // الزر البرتقالي لتغيير الـ UDID (🆔)
+        // 2. الزر البرتقالي لتغيير الـ UDID (🆔)
         self.changeIDBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.changeIDBtn.tag = 999777;
         self.changeIDBtn.frame = CGRectMake(20, 190, 55, 55);
@@ -434,9 +452,41 @@ void changeIdentifiersOnly() {
         [self.changeIDBtn addGestureRecognizer:pan2];
         [self.changeIDBtn addTarget:self action:@selector(handleChangeID) forControlEvents:UIControlEventTouchUpInside];
         
+        // 3. مربع عرض الـ IP في يمين الشاشة (قابل للسحب والتحريك أيضاً)
+        UIView *ipContainer = [[UIView alloc] initWithFrame:CGRectMake(screenBounds.size.width - 160, 120, 140, 75)];
+        ipContainer.tag = 999666;
+        ipContainer.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.85];
+        ipContainer.layer.cornerRadius = 10;
+        ipContainer.layer.borderWidth = 1;
+        ipContainer.layer.borderColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.8].CGColor;
+        ipContainer.layer.shadowColor = [UIColor blackColor].CGColor;
+        ipContainer.layer.shadowOffset = CGSizeMake(0, 2);
+        ipContainer.layer.shadowOpacity = 0.4;
+        ipContainer.layer.shadowRadius = 3;
+        
+        self.ipDisplayLabel = [[UILabel alloc] initWithFrame:CGRectMake(5, 5, 130, 65)];
+        self.ipDisplayLabel.textColor = [UIColor whiteColor];
+        self.ipDisplayLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+        self.ipDisplayLabel.numberOfLines = 0;
+        self.ipDisplayLabel.textAlignment = NSTextAlignmentCenter;
+        [ipContainer addSubview:self.ipDisplayLabel];
+        
+        UIPanGestureRecognizer *panIP = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [ipContainer addGestureRecognizer:panIP];
+        
         [vc.view addSubview:self.resetBtn];
         [vc.view addSubview:self.changeIDBtn];
+        [vc.view addSubview:ipContainer];
+        
+        [self updateIPDisplayLabel];
     });
+}
+
+- (void)updateIPDisplayLabel {
+    if (!self.ipDisplayLabel) return;
+    NSString *fake = sessionFakeIP ?: @"جاري...";
+    NSString *real = currentRealIP ?: @"جاري...";
+    self.ipDisplayLabel.text = [NSString stringWithFormat:@"🇬🇷 Fake IP:\n%@\n\n🛡️ Real IP:\n%@", fake, real];
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
@@ -445,7 +495,7 @@ void changeIdentifiersOnly() {
     CGFloat newX = btn.center.x + translation.x;
     CGFloat newY = btn.center.y + translation.y;
     CGSize screenSize = [UIScreen mainScreen].bounds.size;
-    newX = MAX(30, MIN(screenSize.width - 30, newX));
+    newX = MAX(40, MIN(screenSize.width - 40, newX));
     newY = MAX(40, MIN(screenSize.height - 40, newY));
     btn.center = CGPointMake(newX, newY);
     [gesture setTranslation:CGPointZero inView:btn.superview];
