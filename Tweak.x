@@ -236,7 +236,7 @@ void performFullResetWithoutExit() {
             UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
             UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(50, keyWindow.bounds.size.height - 150, keyWindow.bounds.size.width - 100, 40)];
             toast.backgroundColor = [UIColor colorWithRed:0.0 green:0.0 blue:0.0 alpha:0.8];
-            toast.textColor = [UIColor whiteItem] ? [UIColor whiteColor] : [UIColor whiteColor];
+            toast.textColor = [UIColor whiteColor];
             toast.textAlignment = NSTextAlignmentCenter;
             toast.font = [UIFont boldSystemFontOfSize:14];
             toast.text = @"✅ تم تغيير البصمة والـ IP بنجاح!";
