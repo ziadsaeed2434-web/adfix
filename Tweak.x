@@ -69,10 +69,9 @@ void updateGreekLocation() {
 NSArray *generate10IPs() {
     NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
     NSArray *greekSubnets = @[
-        @{@"first": @83, @"second": @82}
-
-
-
+        @{@"first": @79, @"second": @107},
+        @{@"first": @94, @"second": @64},
+        @{@"first": @212, @"second": @205}
     ];
     
     for (int i = 0; i < 10; i++) {
@@ -153,7 +152,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - التنظيف العميق وتوليد بصمة جديدة بالكامل
+// MARK: - التنظيف الفوري وتوليد بصمة جديدة في الخلفية بدون خروج
 // ============================================================
 
 void clearKeychainKeepingAccount() {
@@ -203,7 +202,7 @@ void clearKeychainKeepingAccount() {
     }
 }
 
-void performFullReset() {
+void performFullResetWithoutExit() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         clearKeychainKeepingAccount();
         
@@ -221,7 +220,7 @@ void performFullReset() {
         
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         
-        // توليد بيانات جهاز جديد كلياً
+        // توليد بيانات جهاز جديد كلياً وبصمة جديدة فوراً
         fakeAdvertisingIDString = generateRandomUUIDString();
         fakeIDFVString = generateRandomUUIDString();
         fakeUDIDString = generateRandomUDID();
@@ -232,8 +231,24 @@ void performFullReset() {
         
         @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
         
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            exit(0);
+        // إشعار بسيط للمستخدم داخل التطبيق بأن العملية تمت بنجاح دون إغلاقه
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+            UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(50, keyWindow.bounds.size.height - 150, keyWindow.bounds.size.width - 100, 40)];
+            toast.backgroundColor = [UIColor colorWithRed:0.0 green:0.0 blue:0.0 alpha:0.8];
+            toast.textColor = [UIColor whiteItem] ? [UIColor whiteColor] : [UIColor whiteColor];
+            toast.textAlignment = NSTextAlignmentCenter;
+            toast.font = [UIFont boldSystemFontOfSize:14];
+            toast.text = @"✅ تم تغيير البصمة والـ IP بنجاح!";
+            toast.layer.cornerRadius = 10;
+            toast.clipsToBounds = YES;
+            [keyWindow addSubview:toast];
+            
+            [UIView animateWithDuration:2.0 animations:^{
+                toast.alpha = 0.0;
+            } completion:^(BOOL finished) {
+                [toast removeFromSuperview];
+            }];
         });
     });
 }
@@ -282,7 +297,7 @@ void performFullReset() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
-        // الزر الأزرق الشامل الوحيد
+        // الزر الأزرق الشامل لتحديث كل شي بدون خروج
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
@@ -309,7 +324,7 @@ void performFullReset() {
     [gesture setTranslation:CGPointZero inView:btn.superview];
 }
 
-- (void)handleReset { performFullReset(); }
+- (void)handleReset { performFullResetWithoutExit(); }
 
 @end
 
