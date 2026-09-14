@@ -1,48 +1,52 @@
 #import <UIKit/UIKit.h>
 
-// دالة للبحث عن زر الإغلاق أو علامة الـ X والضغط عليها
-void findAndDismissAd(UIView *view) {
+void bypassAndClickAd(UIView *view) {
     for (UIView *subview in view.subviews) {
         
-        // التحقق مما إذا كان الزر عبارة عن زر إغلاق إعلان بناءً على حجمه وموقعه في الزوايا العليا
         if ([subview isKindOfClass:[UIButton class]] || [subview isKindOfClass:[UIControl class]]) {
-            CGRect frame = subview.frame;
+            UIButton *button = (UIButton *)subview;
+            NSString *title = [button titleForState:UIControlStateNormal];
             
-            // أزرار الإغلاق عادة تكون مربعة وصغيرة (أقل من 50x50 بكسل) وتوجد في الأجزاء العليا من الشاشة
-            BOOL isTopArea = frame.origin.y < 150;
-            BOOL isSmallSize = frame.size.width > 10 && frame.size.width < 60 && frame.size.height > 10 && frame.size.height < 60;
+            // 1. تفعيل زر التحميل أو أزرار المشاهدة والتخطي قسراً والضغط عليها فوراً
+            if (title && ([title localizedCaseInsensitiveContainsString:@"Loading ad"] || 
+                          [title localizedCaseInsensitiveContainsString:@"Watch Ad & Earn"] ||
+                          [title localizedCaseInsensitiveContainsString:@"Continue"] ||
+                          [title localizedCaseInsensitiveContainsString:@"Skip"])) {
+                
+                button.enabled = YES;
+                button.userInteractionEnabled = YES;
+                button.alpha = 1.0;
+                
+                [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+                break;
+            }
             
-            if (isTopArea && isSmallSize && subview.isHidden == NO && subview.alpha > 0.5) {
-                // محاكاة الضغط على زر الإغلاق
-                if ([subview isKindOfClass:[UIButton class]]) {
-                    [(UIButton *)subview sendActionsForControlEvents:UIControlEventTouchUpInside];
-                } else {
-                    [(UIControl *)subview sendActionsForControlEvents:UIControlEventTouchUpInside];
-                }
+            // 2. البحث عن علامة الإغلاق العادية (X) في الزوايا العليا
+            CGRect frame = button.frame;
+            if (frame.origin.y < 150 && frame.size.width > 10 && frame.size.width < 60 && frame.size.height > 10 && frame.size.height < 60) {
+                [button sendActionsForControlEvents:UIControlEventTouchUpInside];
                 break;
             }
         }
         
-        // البحث بشكل متكرر داخل الـ Subviews
         if (subview.subviews.count > 0) {
-            findAndDismissAd(subview);
+            bypassAndClickAd(subview);
         }
     }
 }
 
-// مراقبة تحديثات الشاشة بانتظام للبحث عن زر الإغلاق فور ظهوره
 %hook UIWindow
 
 - (void)layoutSubviews {
     %orig;
     
-    // تنفيذ الفحص بشكل آمن لتفادي الضغط المستمر غير الضروري
     static NSTimeInterval lastCheck = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     
-    if (now - lastCheck > 0.5) { // يفحص الشاشة كل نصف ثانية
+    // تم تعديل سرعة الفحص لتصبح كل 0.1 ثانية لأقصى سرعة ممكنة
+    if (now - lastCheck > 0.1) {
         lastCheck = now;
-        findAndDismissAd(self);
+        bypassAndClickAd(self);
     }
 }
 
