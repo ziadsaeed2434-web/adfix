@@ -1,416 +1,86 @@
-#import <CoreLocation/CoreLocation.h>
 #import <UIKit/UIKit.h>
-#import <AdSupport/ASIdentifierManager.h>
-#import <WebKit/WebKit.h>
-#import <Security/Security.h>
 
-// ============================================================
-// MARK: - المتغيرات العامة للبصمة المتغيرة
-// ============================================================
+static BOOL isAutoRunning = NO;
 
-static double currentLat = 0.0;
-static double currentLon = 0.0;
-static NSString *sessionFakeIP = nil;
-static NSString *currentRealIP = @"جاري الجلب...";
-static NSMutableArray *networkLogs = nil;
-
-// المعرفات المزيفة
-static NSString *fakeAdvertisingIDString = nil;
-static NSString *fakeUDIDString = nil;
-static NSString *fakeIDFVString = nil;
-static NSString *currentFakeUserAgent = nil;
-static NSString *currentFakeModel = nil;
-static NSString *currentFakeSystemVersion = nil;
-
-// ============================================================
-// MARK: - دوال توليد بصمات وأجهزة وهمية مختلفة
-// ============================================================
-
-NSString *generateRandomUUIDString() {
-    return [[NSUUID UUID] UUIDString];
-}
-
-NSString *generateRandomUDID() {
-    NSString *letters = @"0123456789abcdef";
-    NSMutableString *randomHex1 = [NSMutableString stringWithCapacity:8];
-    NSMutableString *randomHex2 = [NSMutableString stringWithCapacity:12];
-    
-    for (int i = 0; i < 8; i++) {
-        [randomHex1 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
-    }
-    for (int i = 0; i < 12; i++) {
-        [randomHex2 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
-    }
-    
-    return [NSString stringWithFormat:@"00008130-%@-%@", randomHex1, randomHex2];
-}
-
-void generateRandomDeviceProfile() {
-    NSArray *models = @[@"iPhone15,2", @"iPhone14,3", @"iPhone15,4", @"iPhone16,1", @"iPhone14,5", @"iPhone13,2"];
-    NSArray *versions = @[@"17.2", @"17.4", @"17.5", @"18.0", @"18.1", @"17.1"];
-    NSArray *iosVersions = @[@"17_2", @"17_4", @"17_5", @"18_0", @"18_1"];
-    
-    currentFakeModel = models[arc4random_uniform((uint32_t)models.count)];
-    currentFakeSystemVersion = versions[arc4random_uniform((uint32_t)versions.count)];
-    NSString *randomIOSVerForUA = iosVersions[arc4random_uniform((uint32_t)iosVersions.count)];
-    
-    currentFakeUserAgent = [NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", randomIOSVerForUA];
-}
-
-double randomInRange(double min, double max) {
-    return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
-}
-
-void updateGreekLocation() {
-    // إحداثيات دقيقة داخل أثينا، اليونان
-    currentLat = randomInRange(37.9700, 38.0300);
-    currentLon = randomInRange(23.7000, 23.7800);
-}
-
-// دالة توليد IP بناءً على أفضل وأدق النطاقات السكنية المعتمدة في اليونان
-NSString *generateGreekResidentialIPBySubnet() {
-    // قائمة بأفضل نطاقات الإنترنت المنزلي (ADSL / VDSL / FTTH) في اليونان
-    NSArray *primeSubnets = @[
-        // Cosmote (OTE) - أكبر مزود خدمة في اليونان
-        @{@"first": @79, @"second": @128},
-        @{@"first": @79, @"second": @129},
-        @{@"first": @79, @"second": @131},
-        @{@"first": @94, @"second": @65},
+// دالة تنفذ النقر وتعرض دائرة حمراء مؤقتة في مكان النقرة لترى أين يضغط التويك
+static void tapAtPointWithVisual(CGPoint point) {
+    UIWindow *window = [[[UIApplication sharedApplication] windows] firstObject];
+    if (window) {
+        // إنشاء دائرة حمراء صغيرة مرئية عند الإحداثيات لتوضيح مكان النقرة
+        UIView *debugDot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 40, 40)];
+        debugDot.center = point;
+        debugDot.backgroundColor = [UIColor colorWithRed:1.0 green:0.0 blue:0.0 alpha:0.6]; // حمراء شفافة
+        debugDot.layer.cornerRadius = 20;
+        debugDot.layer.zPosition = 999999; // تظهر فوق كل العناصر
+        [window addSubview:debugDot];
         
-        // Vodafone Greece (أبرز مزود خدمة منزلي)
-        @{@"first": @94, @"second": @68},
-        @{@"first": @62, @"second": @1.   }, // سيتم التعامل معها برقم صحيح
-        @{@"first": @213, @"second": @16},
-        
-        // Nova / Wind Hellas (مزود منزلي رئيسي)
-        @{@"first": @178, @"second": @134},
-        @{@"first": @178, @"second": @135},
-        @{@"first": @212, @"second": @205}
-    ];
+        // إزالة الدائرة بعد نصف ثانية
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [debugDot removeFromSuperview];
+        });
+    }
+
+    // محاكاة اللمس الفعلية
+    CGEventRef down = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseDown, point, kCGMouseButtonLeft);
+    CGEventRef up = CGEventCreateMouseEvent(NULL, kCGEventLeftMouseUp, point, kCGMouseButtonLeft);
     
-    // اختيار نطاق عشوائي من القائمة المميزة
-    NSDictionary *selectedSubnet = primeSubnets[arc4random_uniform((uint32_t)primeSubnets.count)];
-    int first = [selectedSubnet[@"first"] intValue];
-    int second = [selectedSubnet[@"second"] intValue];
+    CGEventPost(kCGHIDEventTap, down);
+    CGEventPost(kCGHIDEventTap, up);
     
-    // تجنب أي قيم فارغة أو خاطئة في النطاق الثاني
-    if (second <= 0) second = 129;
-    
-    // توليد الجزء الثالث والرابع لضمان IP منزلي نشط ضمن النطاق الصحيح
-    int third = arc4random_uniform(254) + 1; // من 1 إلى 254 لتجنب عناوين الشبكة الصفرية
-    int fourth = arc4random_uniform(254) + 1;
-    
-    return [NSString stringWithFormat:@"%d.%d.%d.%d", first, second, third, fourth];
+    CFRelease(down);
+    CFRelease(up);
 }
 
-// فحص دقيق للتأكد من أن الـ IP فعال، حقيقي، وغير تابع لمركز بيانات أو بروكسي
-BOOL verifyIPQuality(NSString *ip) {
-    if (!ip || ip.length == 0) return NO;
-    NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,isp,org,as,mobile,proxy,hosting", ip];
-    NSURL *url = [NSURL URLWithString:urlString];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    [request setTimeoutInterval:2.5];
+// مراقبة الشاشة وبدء الأتمتة
+%hook UIHostingController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
     
-    __block NSData *responseData = nil;
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        responseData = data;
-        dispatch_semaphore_signal(semaphore);
-    }];
-    [task resume];
-    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)));
+    if (isAutoRunning) return;
+    isAutoRunning = YES;
     
-    if (!responseData) return NO;
-    
-    NSError *jsonError = nil;
-    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
-    if (jsonError || !json) return NO;
-    
-    if (![json[@"status"] isEqualToString:@"success"]) return NO;
-    
-    // رفض قاطع إذا كان الـ IP يتبع لـ Hosting أو Proxy أو Datacenter
-    if ([json[@"hosting"] boolValue] == YES || [json[@"proxy"] boolValue] == YES) {
-        return NO;
-    }
-    
-    NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", json[@"org"] ?: @"", json[@"isp"] ?: @"", json[@"as"] ?: @""];
-    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH", @"Oracle", @"Google Cloud", @"M247", @"Leaseweb", @"Contabo"];
-    for (NSString *keyword in badKeywords) {
-        if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            return NO;
-        }
-    }
-    
-    return YES; // IP سكني، صحيح، ونظيف 100%
+    [self startAutomationLoop];
 }
 
-// حلقة تكرارية ذكية تضمن توليد IP صحيح وغير خاطئ نهائياً
-void generateSessionIP() {
-    __block NSString *validIP = nil;
-    int maxAttempts = 20; // محاولات متعددة لضمان جودة النطاق
-    int attempts = 0;
-    
-    while (validIP == nil && attempts < maxAttempts) {
-        attempts++;
-        NSString *candidateIP = generateGreekResidentialIPBySubnet();
-        if (verifyIPQuality(candidateIP)) {
-            validIP = candidateIP;
-            break;
-        }
-    }
-    
-    // احتياط آمن ضمن نطاق Cosmote المنزلي الموثوق في حال استنفاد المحاولات
-    if (!validIP) {
-        validIP = [NSString stringWithFormat:@"79.129.%d.%d", arc4random_uniform(200) + 1, arc4random_uniform(250) + 1];
-    }
-    
-    sessionFakeIP = validIP;
-}
+%end
 
-void fetchRealIP() {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
-        NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
-        currentRealIP = (ip && ip.length > 0) ? ip : @"غير قادر على الجلب";
-    });
-}
+@interface UIHostingController (AutoEarn)
+- (void)startAutomationLoop;
+@end
 
-void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
-    if (!networkLogs) networkLogs = [[NSMutableArray alloc] init];
-    NSURL *url = [NSURL URLWithString:urlStr];
-    NSString *path = url.path ? url.path : urlStr;
-    if (path.length > 30) path = [[path substringToIndex:30] stringByAppendingString:@"..."];
-    NSString *logEntry = [NSString stringWithFormat:@"🔗 الرابط: %@\n🌐 IP سكني موثوق: %@\n📱 الجهاز: %@ (iOS %@)", path, ip, currentFakeModel, currentFakeSystemVersion];
-    @synchronized(networkLogs) {
-        [networkLogs insertObject:logEntry atIndex:0];
-        if (networkLogs.count > 15) [networkLogs removeLastObject];
-    }
-}
+@implementation UIHostingController (AutoEarn)
 
-// ============================================================
-// MARK: - التنظيف العميق وتوليد بصمة جديدة بالكامل
-// ============================================================
-
-void clearKeychainKeepingAccount() {
-    NSData *savedValueData = nil;
-    NSString *savedService = nil;
-    
-    NSDictionary *query = @{
-        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecAttrAccount: @"tokenKey",
-        (__bridge id)kSecReturnAttributes: @YES,
-        (__bridge id)kSecReturnData: @YES,
-        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitOne
-    };
-    
-    CFDictionaryRef result = NULL;
-    if (SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&result) == errSecSuccess && result != NULL) {
-        NSDictionary *item = (__bridge NSDictionary *)result;
-        savedValueData = item[(__bridge id)kSecValueData];
-        savedService = item[(__bridge id)kSecAttrService];
-    }
-
-    NSArray *secClasses = @[
-        (__bridge id)kSecClassGenericPassword, 
-        (__bridge id)kSecClassInternetPassword, 
-        (__bridge id)kSecClassCertificate, 
-        (__bridge id)kSecClassKey, 
-        (__bridge id)kSecClassIdentity
-    ];
-    
-    for (id secClass in secClasses) {
-        NSDictionary *deleteQuery = @{ (__bridge id)kSecClass: secClass };
-        SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
-    }
-
-    if (savedValueData && savedService) {
-        NSDictionary *addQuery = @{
-            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-            (__bridge id)kSecAttrService: savedService,
-            (__bridge id)kSecAttrAccount: @"tokenKey",
-            (__bridge id)kSecValueData: savedValueData
-        };
-        SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
-    }
-    
-    if (result != NULL) {
-        CFRelease(result);
-    }
-}
-
-void performFullReset() {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        clearKeychainKeepingAccount();
+- (void)startAutomationLoop {
+    // 1. الضغط على زر Shake & Earn
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!isAutoRunning) return;
+        tapAtPointWithVisual(CGPointMake(215, 750));
         
-        NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-        for (NSHTTPCookie *cookie in [cookieStorage cookies]) { [cookieStorage deleteCookie:cookie]; }
-        
-        NSSet *dataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-        [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:dataTypes modifiedSince:[NSDate distantPast] completionHandler:^{}];
-        
-        NSString *domainName = [[NSBundle mainBundle] bundleIdentifier];
-        if (domainName) {
-            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:domainName];
-            [[NSUserDefaults standardUserDefaults] synchronize];
-        }
-        
-        [[NSURLCache sharedURLCache] removeAllCachedResponses];
-        
-        fakeAdvertisingIDString = generateRandomUUIDString();
-        fakeIDFVString = generateRandomUUIDString();
-        fakeUDIDString = generateRandomUDID();
-        generateRandomDeviceProfile();
-        updateGreekLocation();
-        generateSessionIP();
-        fetchRealIP();
-        
-        @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
-        
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            exit(0);
+        // 2. الضغط على Start Shaking!
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            tapAtPointWithVisual(CGPointMake(215, 900));
+            
+            // 3. الضغط على Watch Ad & Earn
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                tapAtPointWithVisual(CGPointMake(215, 630));
+                
+                // 4. الضغط على Awesome! بعد انتهاء الإعلان
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    tapAtPointWithVisual(CGPointMake(215, 630));
+                    
+                    // 5. الرجوع للخلف عبر سهم الأعلى (<)
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        tapAtPointWithVisual(CGPointMake(50, 80));
+                        
+                        // التكرار المستمر
+                        isAutoRunning = NO;
+                        [self startAutomationLoop];
+                    });
+                });
+            });
         });
     });
 }
 
-// ============================================================
-// MARK: - الواجهة والزر العائم الوحيد
-// ============================================================
-
-@interface GreeceWindow : UIWindow
 @end
-
-@implementation GreeceWindow
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *btn1 = [self viewWithTag:999888];
-    return (btn1 && CGRectContainsPoint(btn1.frame, point));
-}
-@end
-
-@interface GreeceInfoManager : NSObject
-@property (strong, nonatomic) GreeceWindow *floatingWindow;
-@property (strong, nonatomic) UIButton *resetBtn;
-+ (instancetype)sharedInstance;
-- (void)setupFloatingButton;
-@end
-
-@implementation GreeceInfoManager
-
-+ (instancetype)sharedInstance {
-    static GreeceInfoManager *sharedInstance = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ sharedInstance = [[self alloc] init]; });
-    return sharedInstance;
-}
-
-- (void)setupFloatingButton {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.floatingWindow) return;
-        
-        CGRect screenBounds = [UIScreen mainScreen].bounds;
-        self.floatingWindow = [[GreeceWindow alloc] initWithFrame:screenBounds];
-        self.floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
-        self.floatingWindow.hidden = NO;
-        self.floatingWindow.backgroundColor = [UIColor clearColor];
-        
-        UIViewController *vc = [[UIViewController alloc] init];
-        vc.view.backgroundColor = [UIColor clearColor];
-        self.floatingWindow.rootViewController = vc;
-        
-        self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.resetBtn.tag = 999888;
-        self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
-        self.resetBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:0.9];
-        [self.resetBtn setTitle:@"🔄" forState:UIControlStateNormal];
-        [self.resetBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        self.resetBtn.titleLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.resetBtn.layer.cornerRadius = 27.5;
-        
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.resetBtn addGestureRecognizer:pan];
-        [self.resetBtn addTarget:self action:@selector(handleReset) forControlEvents:UIControlEventTouchUpInside];
-        
-        [vc.view addSubview:self.resetBtn];
-    });
-}
-
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    UIView *btn = gesture.view;
-    CGPoint translation = [gesture translationInView:btn.superview];
-    CGFloat newX = MAX(30, MIN([UIScreen mainScreen].bounds.size.width - 30, btn.center.x + translation.x));
-    CGFloat newY = MAX(40, MIN([UIScreen mainScreen].bounds.size.height - 40, btn.center.y + translation.y));
-    btn.center = CGPointMake(newX, newY);
-    [gesture setTranslation:CGPointZero inView:btn.superview];
-}
-
-- (void)handleReset { performFullReset(); }
-
-@end
-
-// ============================================================
-// MARK: - الـ Hooks لتزوير الهوية والـ Headers للطلبات الشبكية
-// ============================================================
-
-%ctor {
-    generateRandomDeviceProfile();
-    updateGreekLocation();
-    generateSessionIP();
-    fakeAdvertisingIDString = generateRandomUUIDString();
-    fakeIDFVString = generateRandomUUIDString();
-    fakeUDIDString = generateRandomUDID();
-    fetchRealIP();
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[GreeceInfoManager sharedInstance] setupFloatingButton];
-    });
-}
-
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    return fakeAdvertisingIDString ? [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString] : %orig;
-}
-%end
-
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return fakeIDFVString ? [[NSUUID alloc] initWithUUIDString:fakeIDFVString] : %orig;
-}
-- (NSString *)model {
-    return currentFakeModel ?: %orig;
-}
-- (NSString *)systemVersion {
-    return currentFakeSystemVersion ?: %orig;
-}
-%end
-
-%hook CLLocationManager
-- (void)startUpdatingLocation {
-    updateGreekLocation();
-    CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-    if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-        [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
-    }
-}
-- (CLLocation *)location {
-    updateGreekLocation();
-    return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-}
-%end
-
-%hook NSURLSession
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    if (sessionFakeIP) {
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"True-Client-IP"];
-    }
-    if (currentFakeUserAgent) {
-        [mutableReq setValue:currentFakeUserAgent forHTTPHeaderField:@"User-Agent"];
-    }
-    if (request.URL.absoluteString) {
-        logNetworkRequest(request.URL.absoluteString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
-    }
-    return %orig(mutableReq, completionHandler);
-}
-%end
