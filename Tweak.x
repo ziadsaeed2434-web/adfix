@@ -1,40 +1,41 @@
 #import <UIKit/UIKit.h>
 
-void bypassAndClickAd(UIView *view) {
+// دالة للبحث عن زر الإغلاق، علامة الـ X، أو زر Continue والضغط عليها
+void findAndDismissAd(UIView *view) {
     for (UIView *subview in view.subviews) {
         
-        if ([subview isKindOfClass:[UIButton class]] || [subview isKindOfClass:[UIControl class]]) {
+        // التحقق مما إذا كان العنصر عبارة عن زر
+        if ([subview isKindOfClass:[UIButton class]]) {
             UIButton *button = (UIButton *)subview;
-            NSString *title = [button titleForState:UIControlStateNormal];
-            
-            // 1. تفعيل زر التحميل أو أزرار المشاهدة والتخطي قسراً والضغط عليها فوراً
-            if (title && ([title localizedCaseInsensitiveContainsString:@"Loading ad"] || 
-                          [title localizedCaseInsensitiveContainsString:@"Watch Ad & Earn"] ||
-                          [title localizedCaseInsensitiveContainsString:@"Continue"] ||
-                          [title localizedCaseInsensitiveContainsString:@"Skip"])) {
-                
-                button.enabled = YES;
-                button.userInteractionEnabled = YES;
-                button.alpha = 1.0;
-                
-                [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-                break;
-            }
-            
-            // 2. البحث عن علامة الإغلاق العادية (X) في الزوايا العليا
             CGRect frame = button.frame;
-            if (frame.origin.y < 150 && frame.size.width > 10 && frame.size.width < 60 && frame.size.height > 10 && frame.size.height < 60) {
+            
+            // شروط الموقع: يجب أن يكون في الجزء العلوي من الشاشة (مثل الأماكن التي تظهر فيها أزرار الإعلانات)
+            BOOL isTopArea = frame.origin.y < 150;
+            
+            // استخراج النص الموجود داخل الزر (إن وجد) للتحقق مما إذا كان زر Continue أو تخطي
+            NSString *buttonTitle = [button titleForState:UIControlStateNormal];
+            BOOL hasContinueText = buttonTitle && ([buttonTitle localizedCaseInsensitiveContainsString:@"Continue"] || 
+                                                   [buttonTitle localizedCaseInsensitiveContainsString:@"Skip"] || 
+                                                   [buttonTitle localizedCaseInsensitiveContainsString:@"إغلاق"]);
+            
+            // أو إذا كان زرًا صغيرًا في الزاوية (يمثل علامة X)
+            BOOL isSmallXButton = (frame.size.width > 10 && frame.size.width < 70 && frame.size.height > 10 && frame.size.height < 60);
+            
+            if (isTopArea && (hasContinueText || isSmallXButton) && button.isHidden == NO && button.alpha > 0.5) {
+                // محاكاة الضغط على الزر
                 [button sendActionsForControlEvents:UIControlEventTouchUpInside];
                 break;
             }
         }
         
+        // البحث بشكل متكرر داخل العناصر الفرعية
         if (subview.subviews.count > 0) {
-            bypassAndClickAd(subview);
+            findAndDismissAd(subview);
         }
     }
 }
 
+// مراقبة الشاشة وتنفيذ الفحص بشكل دوري
 %hook UIWindow
 
 - (void)layoutSubviews {
@@ -43,10 +44,10 @@ void bypassAndClickAd(UIView *view) {
     static NSTimeInterval lastCheck = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     
-    // تم تعديل سرعة الفحص لتصبح كل 0.1 ثانية لأقصى سرعة ممكنة
-    if (now - lastCheck > 0.1) {
+    // فحص الشاشة كل نصف ثانية لتوفير استهلاك البطارية وسرعة الاستجابة
+    if (now - lastCheck > 0.2) {
         lastCheck = now;
-        bypassAndClickAd(self);
+        findAndDismissAd(self);
     }
 }
 
