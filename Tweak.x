@@ -2,16 +2,15 @@
 
 static BOOL isAutoRunning = NO;
 
-// تعريف واجهة تفصيلية لتجنب أخطاء المترجم
-@interface UIHostingController : UIViewController
+@interface UIViewController (AutoEarn)
 - (void)startAutomationLoop;
 @end
 
-// دالة النقر الآمنة والمرئية دون استخدام CGEvent المعقدة
+// دالة الضغط التي تبحث عن الـ Gesture Recognizer وتفعله مباشرة في SwiftUI
 static void tapAtPointWithVisual(CGPoint point) {
     UIWindow *window = [[[UIApplication sharedApplication] windows] firstObject];
     if (window) {
-        // إنشاء دائرة حمراء شفافة لتتبع مكان النقر على الشاشة
+        // دائرة حمراء مرئية لتتأكد بنفسك من مكان النقر
         UIView *debugDot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 40, 40)];
         debugDot.center = point;
         debugDot.backgroundColor = [UIColor colorWithRed:1.0 green:0.0 blue:0.0 alpha:0.6];
@@ -24,25 +23,49 @@ static void tapAtPointWithVisual(CGPoint point) {
         });
     }
 
-    // إيجاد العنصر البرمجي في هذه النقطة ومحاكاة الضغط عليه بأمان تام
-    UIView *hitView = [window hitTest:point withEvent:nil];
-    if (hitView) {
-        // إرسال حدث الضغط مباشرة للـ View المستهدف
-        [hitView touchesBegan:[NSSet setWithObject:[[UITouch alloc] init]] withEvent:nil];
-        [hitView touchesEnded:[NSSet setWithObject:[[UITouch alloc] init]] withEvent:nil];
+    // إيجاد العنصر وتفعيل الـ Actions المرتبطة به في SwiftUI
+    UIView *targetView = [window hitTest:point withEvent:nil];
+    if (targetView) {
+        UIView *tempView = targetView;
+        BOOL actionFired = NO;
+        
+        // البحث الصاعد في الـ Superviews عن أي Gesture Recognizer خاص بالزر وتفعيل الـ Targets الخاصة به
+        while (tempView && !actionFired) {
+            for (UIGestureRecognizer *recognizer in tempView.gestureRecognizers) {
+                // استخراج الـ targets والـ actions الخاصة بالإيماءة وتشغيلها برمجياً
+                NSArray *targets = [recognizer valueForKey:@"targets"];
+                for (id targetEntry in targets) {
+                    id target = [targetEntry valueForKey:@"target"];
+                    SEL action = NSSelectorFromString([targetEntry valueForKey:@"action"]);
+                    if (target && [target respondsToSelector:action]) {
+                        #pragma clang diagnostic push
+                        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                        [target performSelector:action withObject:recognizer];
+                        #pragma clang diagnostic pop
+                        actionFired = YES;
+                        break;
+                    }
+                }
+            }
+            tempView = tempView.superview;
+        }
+        
+        // كحتياط إضافي إذا كان العنصر UIControl تقليدي
+        UIResponder *responder = targetView;
+        while (responder && ![responder isKindOfClass:[UIControl class]] && [responder nextResponder]) {
+            responder = [responder nextResponder];
+        }
+        if ([responder isKindOfClass:[UIControl class]]) {
+            [(UIControl *)responder sendActionsForControlEvents:UIControlEventTouchUpInside];
+        }
     }
 }
 
-// هوك على أي UIViewController أو واجهة عامة لضمان عمل التويك فور ظهور الشاشة
 %hook UIViewController
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    
-    // التأكد من أننا داخل التطبيق المستهدف وأن الكود لا يتكرر بلا نهاية
     if (isAutoRunning) return;
-    
-    // التحقق من اسم الـ Controller أو تركها تعمل بشكل عام إذا كانت هذه هي صفحة التطبيق
     isAutoRunning = YES;
     [self performSelector:@selector(startAutomationLoop) withObject:nil afterDelay:2.0];
 }
@@ -53,25 +76,24 @@ static void tapAtPointWithVisual(CGPoint point) {
 
 - (void)startAutomationLoop {
     // 1. الضغط على زر Shake & Earn
-    tapAtPointWithVisual(CGPointMake(215, 750));
+    tapAtPointWithVisual(CGPointMake(215, 755));
     
-    // 2. الضغط على Start Shaking! بعد ثانيتين
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        tapAtPointWithVisual(CGPointMake(215, 900));
+    // 2. الضغط على Start Shaking!
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        tapAtPointWithVisual(CGPointMake(215, 890));
         
         // 3. الضغط على Watch Ad & Earn
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             tapAtPointWithVisual(CGPointMake(215, 630));
             
-            // 4. الضغط على Awesome! بعد انتهاء الإعلان (15 ثانية)
+            // 4. الضغط على Awesome! بعد انتهاء الإعلان
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 tapAtPointWithVisual(CGPointMake(215, 630));
                 
-                // 5. الرجوع للخلف عبر سهم الأعلى (<)
+                // 5. الرجوع للخلف (<)
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    tapAtPointWithVisual(CGPointMake(50, 80));
+                    tapAtPointWithVisual(CGPointMake(45, 75));
                     
-                    // إعادة تفعيل الحالة لتكرار اللوب
                     isAutoRunning = NO;
                     [self performSelector:@selector(startAutomationLoop) withObject:nil afterDelay:2.0];
                 });
