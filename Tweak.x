@@ -1,28 +1,9 @@
 #import <UIKit/UIKit.h>
 
-// دالة للبحث والضغط
 void findAndDismissAd(UIView *view) {
     for (UIView *subview in view.subviews) {
         
-        CGRect frame = subview.frame;
-        
-        // 1. فحص زر الـ X أو علامات الإغلاق في الزوايا العليا
-        BOOL isTopArea = frame.origin.y < 220;
-        BOOL isTopRightOrLeft = (frame.origin.x < 100 || frame.origin.x > (view.bounds.size.width - 100));
-        BOOL isSmallSize = (frame.size.width > 10 && frame.size.width < 75 && frame.size.height > 10 && frame.size.height < 75);
-        
-        if (isTopArea && isTopRightOrLeft && isSmallSize && !subview.isHidden && subview.alpha > 0.2) {
-            if ([subview isKindOfClass:[UIControl class]]) {
-                [(UIControl *)subview sendActionsForControlEvents:UIControlEventTouchUpInside];
-            }
-            if ([subview isKindOfClass:[UIButton class]]) {
-                ((UIButton *)subview).enabled = YES;
-                [((UIButton *)subview) sendActionsForControlEvents:UIControlEventTouchUpInside];
-                break;
-            }
-        }
-        
-        // 2. فحص أزرار Continue و Skip و Loading ad وضغطها
+        // 1. الأولوية الأولى: البحث عن أزرار الاستمرار والمكافأة (Continue / Skip / Watch Ad) لضمان أخذ الجائزة وعدم الخروج
         if ([subview isKindOfClass:[UIButton class]]) {
             UIButton *button = (UIButton *)subview;
             NSString *title = [button titleForState:UIControlStateNormal];
@@ -33,11 +14,30 @@ void findAndDismissAd(UIView *view) {
                           [title localizedCaseInsensitiveContainsString:@"Loading ad"] ||
                           [title localizedCaseInsensitiveContainsString:@"إغلاق"])) {
                 
-                button.enabled = YES;
-                button.userInteractionEnabled = YES;
-                button.alpha = 1.0;
-                [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-                break;
+                if (button.alpha > 0.3 && !button.isHidden) {
+                    button.enabled = YES;
+                    button.userInteractionEnabled = YES;
+                    [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+                    return; // الخروج من الدالة بمجرد الضغط لضمان عدم تداخل الأوامر
+                }
+            }
+        }
+        
+        // 2. الأولوية الثانية: البحث عن زر الـ (X) بحذر شديد وفي الزاوية العليا المحددة فقط
+        CGRect frame = subview.frame;
+        BOOL isTopArea = frame.origin.y < 120; // تقليل النطاق قليلاً ليكون أكثر دقة في الزاوية العليا
+        BOOL isTopRightOrLeft = (frame.origin.x < 70 || frame.origin.x > (view.bounds.size.width - 70));
+        BOOL isSmallSize = (frame.size.width > 15 && frame.size.width < 60 && frame.size.height > 15 && frame.size.height < 60);
+        
+        if (isTopArea && isTopRightOrLeft && isSmallSize && !subview.isHidden && subview.alpha > 0.5) {
+            if ([subview isKindOfClass:[UIControl class]]) {
+                [(UIControl *)subview sendActionsForControlEvents:UIControlEventTouchUpInside];
+                return;
+            }
+            if ([subview isKindOfClass:[UIButton class]]) {
+                ((UIButton *)subview).enabled = YES;
+                [((UIButton *)subview) sendActionsForControlEvents:UIControlEventTouchUpInside];
+                return;
             }
         }
         
@@ -48,7 +48,7 @@ void findAndDismissAd(UIView *view) {
     }
 }
 
-// تنفيذ الفحص كل 0.2 ثانية مع كل تحديث للشاشة
+// تنفيذ الفحص كل 0.2 ثانية
 %hook UIWindow
 
 - (void)layoutSubviews {
@@ -57,7 +57,6 @@ void findAndDismissAd(UIView *view) {
     static NSTimeInterval lastCheck = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     
-    // تنفيذ الفحص كل 0.2 ثانية
     if (now - lastCheck > 0.2) {
         lastCheck = now;
         findAndDismissAd(self);
