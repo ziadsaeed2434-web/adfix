@@ -1,73 +1,49 @@
 #import <UIKit/UIKit.h>
 
-static BOOL isAutoRunning = NO;
-
-@interface UIViewController (AutoEarn)
-- (void)startAutomationLoop;
-@end
-
-// دالة محاكاة اللمس اليدوي الحقيقي (نفس طريقة لمس الإصبع تماماً)
-static void simulateRealTouchAtPoint(CGPoint point) {
-    UIWindow *window = [[[UIApplication sharedApplication] windows] firstObject];
-    if (!window) return;
-
-    // إيجاد العنصر الموجود تحت الإحداثيات بدقة
-    UIView *targetView = [window hitTest:point withEvent:nil];
-    if (targetView) {
-        // إنشاء حدث لمس نظامي متكامل (بداية اللمس ثم رفع الإصبع)
-        UITouch *touch = [[UITouch alloc] init];
-        NSSet *touches = [NSSet setWithObject:touch];
+// دالة للبحث عن زر الإغلاق أو علامة الـ X والضغط عليها
+void findAndDismissAd(UIView *view) {
+    for (UIView *subview in view.subviews) {
         
-        // إرسال دورة اللمس للـ View لتستجيب إيماءات SwiftUI فوراً دون أي كراش
-        [targetView touchesBegan:touches withEvent:nil];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [targetView touchesEnded:touches withEvent:nil];
-        });
+        // التحقق مما إذا كان الزر عبارة عن زر إغلاق إعلان بناءً على حجمه وموقعه في الزوايا العليا
+        if ([subview isKindOfClass:[UIButton class]] || [subview isKindOfClass:[UIControl class]]) {
+            CGRect frame = subview.frame;
+            
+            // أزرار الإغلاق عادة تكون مربعة وصغيرة (أقل من 50x50 بكسل) وتوجد في الأجزاء العليا من الشاشة
+            BOOL isTopArea = frame.origin.y < 150;
+            BOOL isSmallSize = frame.size.width > 10 && frame.size.width < 60 && frame.size.height > 10 && frame.size.height < 60;
+            
+            if (isTopArea && isSmallSize && subview.isHidden == NO && subview.alpha > 0.5) {
+                // محاكاة الضغط على زر الإغلاق
+                if ([subview isKindOfClass:[UIButton class]]) {
+                    [(UIButton *)subview sendActionsForControlEvents:UIControlEventTouchUpInside];
+                } else {
+                    [(UIControl *)subview sendActionsForControlEvents:UIControlEventTouchUpInside];
+                }
+                break;
+            }
+        }
+        
+        // البحث بشكل متكرر داخل الـ Subviews
+        if (subview.subviews.count > 0) {
+            findAndDismissAd(subview);
+        }
     }
 }
 
-%hook UIViewController
+// مراقبة تحديثات الشاشة بانتظام للبحث عن زر الإغلاق فور ظهوره
+%hook UIWindow
 
-- (void)viewDidAppear:(BOOL)animated {
+- (void)layoutSubviews {
     %orig;
-    if (isAutoRunning) return;
-    isAutoRunning = YES;
     
-    // بدء حلقة الأتمتة التلقائية بعد فتح الصفحة بثانيتين
-    [self performSelector:@selector(startAutomationLoop) withObject:nil afterDelay:2.0];
+    // تنفيذ الفحص بشكل آمن لتفادي الضغط المستمر غير الضروري
+    static NSTimeInterval lastCheck = 0;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    
+    if (now - lastCheck > 0.5) { // يفحص الشاشة كل نصف ثانية
+        lastCheck = now;
+        findAndDismissAd(self);
+    }
 }
 
 %end
-
-@implementation UIViewController (AutoEarn)
-
-- (void)startAutomationLoop {
-    // 1. الضغط على زر "Shake & Earn"
-    simulateRealTouchAtPoint(CGPointMake(215, 755));
-    
-    // 2. الانتظار ثم الضغط على "Start Shaking!"
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        simulateRealTouchAtPoint(CGPointMake(215, 890));
-        
-        // 3. الانتظار ثم الضغط على "Watch Ad & Earn"
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            simulateRealTouchAtPoint(CGPointMake(215, 630));
-            
-            // 4. الانتظار حتى ينتهي الإعلان (15 ثانية) ثم الضغط على "Awesome!"
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                simulateRealTouchAtPoint(CGPointMake(215, 630));
-                
-                // 5. الانتظار ثم الضغط على زر الرجوع للخلف (<) للعودة للقائمة الرئيسية وتكرار العملية من جديد
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    simulateRealTouchAtPoint(CGPointMake(45, 75));
-                    
-                    // إعادة تشغيل الحلقة التلقائية (Loop) من جديد باستمرار
-                    isAutoRunning = NO;
-                    [self performSelector:@selector(startAutomationLoop) withObject:nil afterDelay:2.0];
-                });
-            });
-        });
-    });
-}
-
-@end
