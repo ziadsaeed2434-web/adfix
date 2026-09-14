@@ -1,54 +1,60 @@
 #import <UIKit/UIKit.h>
 
-// دالة للبحث عن زر الإغلاق، علامة الـ X، أو زر Continue والضغط عليها
+// دالة فورية للبحث والضغط بلا انتظار أو فحص زمني
 void findAndDismissAd(UIView *view) {
     for (UIView *subview in view.subviews) {
         
-        // التحقق مما إذا كان العنصر عبارة عن زر
+        CGRect frame = subview.frame;
+        
+        // 1. فحص زر الـ X أو علامات الإغلاق في الزوايا العليا فوراً
+        BOOL isTopArea = frame.origin.y < 220;
+        BOOL isTopRightOrLeft = (frame.origin.x < 100 || frame.origin.x > (view.bounds.size.width - 100));
+        BOOL isSmallSize = (frame.size.width > 10 && frame.size.width < 75 && frame.size.height > 10 && frame.size.height < 75);
+        
+        if (isTopArea && isTopRightOrLeft && isSmallSize && !subview.isHidden && subview.alpha > 0.2) {
+            if ([subview isKindOfClass:[UIControl class]]) {
+                [(UIControl *)subview sendActionsForControlEvents:UIControlEventTouchUpInside];
+            }
+            if ([subview isKindOfClass:[UIButton class]]) {
+                ((UIButton *)subview).enabled = YES;
+                [((UIButton *)subview) sendActionsForControlEvents:UIControlEventTouchUpInside];
+                break;
+            }
+        }
+        
+        // 2. فحص أزرار Continue و Skip و Loading ad وضغطها فوراً بلا شروط زمنية
         if ([subview isKindOfClass:[UIButton class]]) {
             UIButton *button = (UIButton *)subview;
-            CGRect frame = button.frame;
+            NSString *title = [button titleForState:UIControlStateNormal];
             
-            // شروط الموقع: يجب أن يكون في الجزء العلوي من الشاشة (مثل الأماكن التي تظهر فيها أزرار الإعلانات)
-            BOOL isTopArea = frame.origin.y < 150;
-            
-            // استخراج النص الموجود داخل الزر (إن وجد) للتحقق مما إذا كان زر Continue أو تخطي
-            NSString *buttonTitle = [button titleForState:UIControlStateNormal];
-            BOOL hasContinueText = buttonTitle && ([buttonTitle localizedCaseInsensitiveContainsString:@"Continue"] || 
-                                                   [buttonTitle localizedCaseInsensitiveContainsString:@"Skip"] || 
-                                                   [buttonTitle localizedCaseInsensitiveContainsString:@"إغلاق"]);
-            
-            // أو إذا كان زرًا صغيرًا في الزاوية (يمثل علامة X)
-            BOOL isSmallXButton = (frame.size.width > 10 && frame.size.width < 70 && frame.size.height > 10 && frame.size.height < 60);
-            
-            if (isTopArea && (hasContinueText || isSmallXButton) && button.isHidden == NO && button.alpha > 0.5) {
-                // محاكاة الضغط على الزر
+            if (title && ([title localizedCaseInsensitiveContainsString:@"Continue"] || 
+                          [title localizedCaseInsensitiveContainsString:@"Skip"] || 
+                          [title localizedCaseInsensitiveContainsString:@"Watch Ad"] ||
+                          [title localizedCaseInsensitiveContainsString:@"Loading ad"] ||
+                          [title localizedCaseInsensitiveContainsString:@"إغلاق"])) {
+                
+                button.enabled = YES;
+                button.userInteractionEnabled = YES;
+                button.alpha = 1.0;
                 [button sendActionsForControlEvents:UIControlEventTouchUpInside];
                 break;
             }
         }
         
-        // البحث بشكل متكرر داخل العناصر الفرعية
+        // البحث التلقائي المستمر داخل العناصر الفرعية
         if (subview.subviews.count > 0) {
             findAndDismissAd(subview);
         }
     }
 }
 
-// مراقبة الشاشة وتنفيذ الفحص بشكل دوري
+// تنفيذ مباشر مع كل حدث تحديث للشاشة دون أي شروط وقت أو تأخير
 %hook UIWindow
 
 - (void)layoutSubviews {
     %orig;
-    
-    static NSTimeInterval lastCheck = 0;
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    
-    // فحص الشاشة كل نصف ثانية لتوفير استهلاك البطارية وسرعة الاستجابة
-    if (now - lastCheck > 0.0) {
-        lastCheck = now;
-        findAndDismissAd(self);
-    }
+    // التنفيذ الفوري بلا انتظار
+    findAndDismissAd(self);
 }
 
 %end
