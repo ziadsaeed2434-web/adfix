@@ -1,55 +1,30 @@
 #import <UIKit/UIKit.h>
 
-// دالة متقدمة للبحث عن الأزرار، النصوص، وعناصر التفاعل وضغطها فوراً
+// دالة للبحث عن زر الإغلاق، علامة الـ X، أو زر Continue والضغط عليها
 void findAndDismissAd(UIView *view) {
     for (UIView *subview in view.subviews) {
         
-        // 1. فحص عناصر الـ UIControl بشكل عام (يشمل الأزرار وكل ما يقبل الضغط)
-        if ([subview isKindOfClass:[UIControl class]]) {
-            UIControl *control = (UIControl *)subview; // تم تصحيح القوس هنا
-            CGRect frame = control.frame;
-            
-            // توسيع نطاق البحث ليشمل الأجزاء العليا بمرونة أكبر
-            BOOL isTopArea = frame.origin.y < 200;
-            BOOL isSmallXButton = (frame.size.width > 10 && frame.size.width < 80 && frame.size.height > 10 && frame.size.height < 80);
-            
-            if (isTopArea && isSmallXButton && !control.isHidden && control.alpha > 0.3) {
-                [control sendActionsForControlEvents:UIControlEventTouchUpInside];
-                break;
-            }
-        }
-        
-        // 2. فحص الأزرار والتحقق من النصوص بداخلها أو العناوين المرتبطة
+        // التحقق مما إذا كان العنصر عبارة عن زر
         if ([subview isKindOfClass:[UIButton class]]) {
             UIButton *button = (UIButton *)subview;
-            NSString *title = [button titleForState:UIControlStateNormal];
+            CGRect frame = button.frame;
             
-            if (title && ([title localizedCaseInsensitiveContainsString:@"Continue"] || 
-                          [title localizedCaseInsensitiveContainsString:@"Skip"] || 
-                          [title localizedCaseInsensitiveContainsString:@"Loading ad"] ||
-                          [title localizedCaseInsensitiveContainsString:@"Watch Ad"] ||
-                          [title localizedCaseInsensitiveContainsString:@"إغلاق"])) {
-                
-                button.enabled = YES;
-                button.userInteractionEnabled = YES;
-                button.alpha = 1.0;
+            // شروط الموقع: يجب أن يكون في الجزء العلوي من الشاشة (مثل الأماكن التي تظهر فيها أزرار الإعلانات)
+            BOOL isTopArea = frame.origin.y < 150;
+            
+            // استخراج النص الموجود داخل الزر (إن وجد) للتحقق مما إذا كان زر Continue أو تخطي
+            NSString *buttonTitle = [button titleForState:UIControlStateNormal];
+            BOOL hasContinueText = buttonTitle && ([buttonTitle localizedCaseInsensitiveContainsString:@"Continue"] || 
+                                                   [buttonTitle localizedCaseInsensitiveContainsString:@"Skip"] || 
+                                                   [buttonTitle localizedCaseInsensitiveContainsString:@"إغلاق"]);
+            
+            // أو إذا كان زرًا صغيرًا في الزاوية (يمثل علامة X)
+            BOOL isSmallXButton = (frame.size.width > 10 && frame.size.width < 70 && frame.size.height > 10 && frame.size.height < 60);
+            
+            if (isTopArea && (hasContinueText || isSmallXButton) && button.isHidden == NO && button.alpha > 0.5) {
+                // محاكاة الضغط على الزر
                 [button sendActionsForControlEvents:UIControlEventTouchUpInside];
                 break;
-            }
-        }
-        
-        // 3. أحياناً يكون النص داخل UILabel فوق زر تفاعلي، نقوم بفحص النصوص أيضاً
-        if ([subview isKindOfClass:[UILabel class]]) {
-            UILabel *label = (UILabel *)subview;
-            NSString *text = label.text;
-            
-            if (text && ([text localizedCaseInsensitiveContainsString:@"Continue"] || 
-                         [text localizedCaseInsensitiveContainsString:@"Skip"])) {
-                // محاكاة الضغط على العنصر الأب (SuperView) الذي يحمل تفاعل اللمس
-                if (label.superview && [label.superview isKindOfClass:[UIControl class]]) {
-                    [(UIControl *)label.superview sendActionsForControlEvents:UIControlEventTouchUpInside];
-                    break;
-                }
             }
         }
         
@@ -60,6 +35,7 @@ void findAndDismissAd(UIView *view) {
     }
 }
 
+// مراقبة الشاشة وتنفيذ الفحص بشكل دوري
 %hook UIWindow
 
 - (void)layoutSubviews {
@@ -68,8 +44,8 @@ void findAndDismissAd(UIView *view) {
     static NSTimeInterval lastCheck = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     
-    // السرعة القصوى 0.1 ثانية
-    if (now - lastCheck > 0.1) {
+    // فحص الشاشة كل نصف ثانية لتوفير استهلاك البطارية وسرعة الاستجابة
+    if (now - lastCheck > 0.0) {
         lastCheck = now;
         findAndDismissAd(self);
     }
