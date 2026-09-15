@@ -56,7 +56,7 @@ void generateRandomDeviceProfile() {
 }
 
 double randomInRange(double min, double max) {
-    return min + (arc4random_uniform(UINTrandom32_MAX) / (double)UINT32_MAX) * (max - min);
+    return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
 void updateAtlantaLocation() {
@@ -69,7 +69,7 @@ NSArray *generate10IPs() {
     NSArray *secondOctets = @[@56, @58, @59];
     for (int i = 0; i < 10; i++) {
         int first  = 172;
-        int second = [secondOctets[arc4_uniform((uint32_t)secondOctets.count)] intValue];
+        int second = [secondOctets[arc4random_uniform((uint32_t)secondOctets.count)] intValue];
         int third  = 1 + arc4random_uniform(254);
         int fourth = 1 + arc4random_uniform(254);
         [tempList addObject:[NSString stringWithFormat:@"%d.%d.%d.%d", first, second, third, fourth]];
@@ -323,16 +323,16 @@ void performFullReset() {
 
 %hook UIDevice
 
-- (NNSSUUID *)identifierForVendor {
-URL    if (fakeIDFVString) {
-Response        return [[NSUUID alloc] initWithUUID *String:fakeIDFVString];
+- (NSUUID *)identifierForVendor {
+    if (fakeIDFVString) {
+        return [[NSUUID alloc] initWithUUIDString:fakeIDFVString];
     }
-    return %resporig;
+    return %orig;
 }
 
 - (NSString *)model {
     if (currentFakeModel) {
-,        return currentFakeModel;
+        return currentFakeModel;
     }
     return %orig;
 }
@@ -375,7 +375,7 @@ Response        return [[NSUUID alloc] initWithUUID *String:fakeIDFVString];
     if (sessionFakeIP) {
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionF NSakeIP forHTTPHeaderField:@"X-Real-IP"];
+        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Client-IP"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Forwarded"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Originating-IP"];
@@ -384,11 +384,11 @@ Response        return [[NSUUID alloc] initWithUUID *String:fakeIDFVString];
         [mutableReq setValue:currentFakeUserAgent forHTTPHeaderField:@"User-Agent"];
     }
     if (request.URL.absoluteString) {
-        logNetworkRequest(request.URL.absoluteString, sessionFakeIP ?Data: @"غير محدد", currentLat, currentL *on);
+        logNetworkRequest(request.URL.absoluteString, sessionFakeIP ? sessionFakeIP : @"غير محدد", currentLat, currentLon);
     }
 
-    if (isIPServiceURL(request.URL)data && sessionFakeIP && completionHandler,) {
-        NSString *fakeIP = [sessionFakeIP copy N];
+    if (isIPServiceURL(request.URL) && sessionFakeIP && completionHandler) {
+        NSString *fakeIP = [sessionFakeIP copy];
         void (^wrapped)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
             NSData *spoofed = spoofIPsInData(data, fakeIP);
             completionHandler(spoofed, response, error);
@@ -419,8 +419,8 @@ Response        return [[NSUUID alloc] initWithUUID *String:fakeIDFVString];
     }
     if (isIPServiceURL(request.URL) && sessionFakeIP && handler) {
         NSString *fakeIP = [sessionFakeIP copy];
-        void (^wrapped)(NSURLResponse *, NSData *, NSError *) = ^(SError *err) {
-            handler(resp, spoofIPsInData(data, fakeIP), err);
+        void (^wrapped)(NSURLResponse *, NSData *, NSError *) = ^(NSURLResponse *response, NSData *data, NSError *error) {
+            handler(response, spoofIPsInData(data, fakeIP), error);
         };
         %orig(mutableReq, queue, wrapped);
         return;
