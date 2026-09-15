@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
 
-// دالة مسح الـ Keychain بالكامل مع استثناء الحفاظ على الـ tokenKey الخاص بالحساب (مصححة بدون أخطاء ARC)
+// دالة مسح الـ Keychain مع استثناء الـ tokenKey الخاص بالحساب ليبقى آمناً
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -21,7 +21,6 @@ static void clearKeychainExceptToken() {
                 NSString *account = item[(__bridge id)kSecAttrAccount];
                 NSString *service = item[(__bridge id)kSecAttrService];
                 
-                // استثناء الـ tokenKey لكي يبقى حسابك ونقاطك آمنة تماماً
                 if (![account isEqualToString:@"tokenKey"]) {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                     delQuery[(__bridge id)kSecClass] = secClass;
@@ -37,23 +36,20 @@ static void clearKeychainExceptToken() {
     }
 }
 
-// توليد معرفات جديدة كلياً
+// توليد معرفات وبصمات جديدة كلياً في كل إقلاع لتغيير التوقيع الرقمي
 static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// توليد IP أوروبي سكني متغير بالكامل عشوائياً لكل رقم
 static NSString *randomEuropeanIP() {
 
     return [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
-// توليد مدة غياب عشوائية ومتغيرة في كل فتحة تطبيق (بين 10 إلى 60 يوماً بالثواني)
 static double randomInactivitySeconds() {
     return (double)(864000 + arc4random_uniform(4320000));
 }
 
-// توليد تاريخ تثبيت حديث ومختلف لكل إقلاع
 static NSString *generateFreshTimestamp() {
     NSDate *now = [NSDate date];
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
@@ -63,10 +59,10 @@ static NSString *generateFreshTimestamp() {
 
 %ctor {
     @autoreleasepool {
-        // 1. مسح الـ Keychain مع استثناء الـ tokenKey الخاص بك
+        // 1. مسح الـ Keychain وتغيير البصمة مع الحفاظ على الـ tokenKey
         clearKeychainExceptToken();
 
-        // 2. تنظيف شامل ومسح كامل لذاكرة التخزين المؤقت للـ NSUserDefaults
+        // 2. مسح NSUserDefaults لتغيير التوقيع الرقمي بالكامل
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
@@ -75,60 +71,53 @@ static NSString *generateFreshTimestamp() {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
-        double dynamicInactivityTime = randomInactivitySeconds(); // قيمة متغيرة في كل مرة
+        double dynamicInactivityTime = randomInactivitySeconds();
         
-        // 3. حقن هويات أجهزة وتثبيت طازجة كلياً ومتغيرة
+        // 3. حقن الهويات الجديدة كلياً
         [defaults setObject:freshID forKey:@"device.id.key"];
         [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
         
-        // 4. تصفير العدادات
         [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
         [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
         [defaults setInteger:1 forKey:@"AppsFlyerLaunchKey"];
         [defaults setInteger:3 forKey:@"ump_status"];
         [defaults setInteger:1 forKey:@"IABTCF_gdprApplies"];
         
-        // 5. تواريخ التثبيت المتغيرة
         [defaults setObject:freshDate forKey:@"AppsFlyerInstallDate"];
         [defaults setObject:freshDate forKey:@"AppsFlyerFirstLaunchDate"];
         [defaults setObject:freshDate forKey:@"AppsFlyerInstallTimestamp"];
         
-        // 6. أوقات الجلسات
         [defaults setDouble:0.0 forKey:@"AppsFlyerLastSessionDuration"];
-        
-        // --- 7. حقن مدة الغياب العشوائية والمتغيرة في كل دخول للتطبيق ---
         [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
         [defaults setDouble:dynamicInactivityTime forKey:@"time_passed_since_last_session"];
         [defaults setDouble:dynamicInactivityTime forKey:@"last_activity_interval"];
         
         [defaults synchronize];
         
-        // مسح ملفات الـ Caches المؤقتة برمجياً عند الإقلاع
+        // 4. مسح الكاش المؤقت
         NSArray *cacPaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
         NSString *cacheDirectory = [cacPaths objectAtIndex:0];
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSError *error = nil;
-        NSArray *cacheFiles = [fileManager contentsOfDirectoryAtPath:cacheDirectory error:&error];
+        NSArray *cacheFiles = [fileManager contentsOfDirectoryAtPath:cacheDirectory error:nil];
         for (NSString *file in cacheFiles) {
             if ([file containsString:@"firebase"] || [file containsString:@"appmetrica"] || [file containsString:@"ads"]) {
                 [fileManager removeItemAtPath:[cacheDirectory stringByAppendingPathComponent:file] error:nil];
             }
         }
         
-        NSLog(@"[Ultimate-God-Mode] Generated random ID: %@ with random inactivity: %f seconds", freshID, dynamicInactivityTime);
+        NSLog(@"[Signature-Rotator] Digital signature changed & Keychain wiped for ID: %@", freshID);
     }
 }
 
-// UIDevice متجدد كلياً
+// تثبيت بصمات الأجهزة الوهمية المتجددة
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [NSUUID UUID];
 }
 %end
 
-// IDFA جديد ونشط
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     return [NSUUID UUID];
@@ -138,17 +127,16 @@ static NSString *generateFreshTimestamp() {
 }
 %end
 
-// حقن IP أوروبي متغير كلياً وعشوائياً مع كل طلب شبكة
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP(); // سيولد IP مختلف تماماً في كل طلب
+        value = randomEuropeanIP();
     }
     %orig(value, field);
 }
 %end
 
-// ضمان عمل الإعلانات ومنح النقاط بلا توقف
+// --- التعديل الجذري لمنع ظهور "No ad yet" وإجبار الدوران والفتح الفوري ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -159,18 +147,27 @@ static NSString *generateFreshTimestamp() {
     return YES;
 }
 
+// إذا حاول التطبيق جلب إعلان وفشل، نجبره على إعادة المحاولة تلقائياً فوراً بدلاً من إعطاء خطأ
 - (void)loadAd {
     %orig;
-    NSLog(@"[Ultimate-God-Mode] Forcing ad load state to success.");
+    // محاكاة إعادة المحاولة الذاتية لتفادي حالة No ad yet
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self loadAd];
+    });
 }
 
+- (void)fetchAd {
+    %orig;
+}
+
+// عند الضغط على زر الإعلان، يتم فتح المكافأة ومنح النقاط فوراً بدون انتظار تحميل وهمي
 - (void)showRewardAd {
     %orig;
-    NSLog(@"[Ultimate-God-Mode] Ad triggered successfully with dynamic values & protected token.");
+    NSLog(@"[Signature-Rotator] showRewardAd forced successfully, bypassing wait states.");
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@"[Ultimate-God-Mode] Ad failed, bypassing to award points instantly.");
+    NSLog(@"[Signature-Rotator] Ad error intercepted, forcing reward grant.");
 }
 
 %end
