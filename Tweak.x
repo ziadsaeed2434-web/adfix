@@ -248,11 +248,10 @@ static BOOL isPreservedItem(NSDictionary *attrs) {
 
     // نحمي العنصر لو تطابق الـ Service
     if (service && [service isEqualToString:kPreservedService]) {
-        // نحن نحمي أي عنصر تحت هذا الـ service
-        // حتى لو الـ account مختلف، احتياط إضافي
         if (!account || [account isEqualToString:kPreservedAccount]) {
             return YES;
         }
+        // حتى لو الـ account مختلف، نحمي أي عنصر تحت هذا الـ service
         return YES;
     }
     return NO;
@@ -314,8 +313,8 @@ static void performKeychainCleanup(void) {
     }
 }
 
-// (اختياري) اطبع كل عناصر الـ Keychain عشان تتأكد من الأسماء
-// استخدمها مرة وحدة أول تشغيل، بعدين علّقها
+// اطبع كل عناصر الـ Keychain (للتشخيص عند الإقلاع)
+__attribute__((unused))
 static void dumpAllKeychainItems(void) {
     NSDictionary *q = @{
         (__bridge id)kSecClass:            (__bridge id)kSecClassGenericPassword,
@@ -342,8 +341,8 @@ static void dumpAllKeychainItems(void) {
 %ctor {
     if (gKeychainTimer != NULL) return;
 
-    // (اختياري) اطبع العناصر الموجودة مرة وحدة عند الإقلاع
-    // dumpAllKeychainItems();
+    // اطبع عناصر الـ Keychain مرة وحدة عند الإقلاع (للتشخيص)
+    dumpAllKeychainItems();
 
     dispatch_queue_t q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
     gKeychainTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
