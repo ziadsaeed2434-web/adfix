@@ -9,7 +9,7 @@ static NSString *randomNewIDFA() {
 
 // دالة لتوليد IP أوروبي سكني عشوائي
 static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"172.%d.%d.%d", arc4random_uniform(254) + 1, arc4random_uniform(254) + 1, arc4random_uniform(254) + 1];
+    return [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(254) + 1, arc4random_uniform(254) + 1];
 }
 
 // تنفيذ تلقائي عند كل فتحة تطبيق لإنشاء تتبع وهويّة جديدة بالكامل
