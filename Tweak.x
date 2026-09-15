@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
+#import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <objc/runtime.h>
 
 // إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
@@ -39,7 +40,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@">>> [Ultimate-Master] tokenKey safely preserved: %@", service);
+                    NSLog(@">>> [Full-Simulate] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -69,32 +70,64 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// دالة الحقن الشامل والمبكر جداً (Pre-Main) لتغيير البصمة وتصفير كافة العدادات لمنع أي قيم قديمة
-static __attribute__((constructor)) void ultimatePreMainInitialization() {
+// 2. محاكاة حذف التطبيق من الجذور وتثبيته من جديد + منع التتبع قسرياً مع كل إقلاع
+static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     @autoreleasepool {
+        // حماية التوكن أولاً في الـ Keychain
         clearKeychainExceptToken();
 
+        // مسح نطاق الـ NSUserDefaults بالكامل
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
+
+        // الوصول للمجلد الرئيسي للتطبيق (Sandbox) لمسح الملفات تماماً كأنه حذف وثبت من جديد
+        NSString *homeDir = NSHomeDirectory();
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        NSArray *subfoldersToWipe = @[@"Documents", @"Library", @"tmp"];
         
+        for (NSString *folder in subfoldersToWipe) {
+            NSString *folderPath = [homeDir stringByAppendingPathComponent:folder];
+            if ([fileManager fileExistsAtPath:folderPath]) {
+                NSArray *contents = [fileManager contentsOfDirectoryAtPath:folderPath error:nil];
+                for (NSString *item in contents) {
+                    if ([item isEqualToString:@"Caches"] || [item isEqualToString:@"Preferences"] || [item isEqualToString:@"Application Support"] || [item isEqualToString:@"tmp"]) {
+                        NSString *subPath = [folderPath stringByAppendingPathComponent:item];
+                        NSArray *subContents = [fileManager contentsOfDirectoryAtPath:subPath error:nil];
+                        for (NSString *subItem in subContents) {
+                            if (![subItem containsString:@"WebKit"] && ![subItem containsString:@"Preferences"]) {
+                                NSString *finalPath = [subPath stringByAppendingPathComponent:subItem];
+                                [fileManager removeItemAtPath:finalPath error:nil];
+                            }
+                        }
+                    } else {
+                        NSString *finalPath = [folderPath stringByAppendingPathComponent:item];
+                        [fileManager removeItemAtPath:finalPath error:nil];
+                    }
+                }
+            }
+        }
+        
+        // حقن بصمة جديدة ومعرفات نظيفة 100% كأول تثبيت
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
         double dynamicInactivityTime = randomInactivitySeconds();
         
-        // حقن القيم والهويات الجديدة كلياً قسرياً لمنع جلب أي قديم
         [defaults setObject:freshID forKey:@"device.id.key"];
         [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
         
+        // فرض حالة رفض التتبع (ATT Denied = 2) لضمان ظهور الإعلانات الفورية المضمونة
+        [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
+        [defaults setInteger:0 forKey:@"ump_status"];
+        [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
+        
         [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
         [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
         [defaults setInteger:1 forKey:@"AppsFlyerLaunchKey"];
-        [defaults setInteger:3 forKey:@"ump_status"];
-        [defaults setInteger:1 forKey:@"IABTCF_gdprApplies"];
         
         [defaults setObject:freshDate forKey:@"AppsFlyerInstallDate"];
         [defaults setObject:freshDate forKey:@"AppsFlyerFirstLaunchDate"];
@@ -107,22 +140,16 @@ static __attribute__((constructor)) void ultimatePreMainInitialization() {
         
         [defaults synchronize];
         
-        // تنظيف الكاش العميق (تم تصحيح مسار الكاش هنا لضمان العمل بنجاح تام)
-        NSArray *cacPaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-        if ([cacPaths count] > 0) {
-            NSString *cacheDirectory = [cacPaths objectAtIndex:0];
-            NSFileManager *fileManager = [NSFileManager defaultManager];
-            NSArray *cacheFiles = [fileManager contentsOfDirectoryAtPath:cacheDirectory error:nil];
-            for (NSString *file in cacheFiles) {
-                if ([file containsString:@"firebase"] || [file containsString:@"appmetrica"] || [file containsString:@"ads"] || [file containsString:@"cache"]) {
-                    [fileManager removeItemAtPath:[cacheDirectory stringByAppendingPathComponent:file] error:nil];
-                }
-            }
-        }
-        
-        NSLog(@">>> [Ultimate-Master] Pre-main signature rotation and fresh injection completed for ID: %@", freshID);
+        NSLog(@">>> [Full-Simulate] Sandbox completely wiped & fresh clean-install simulated with ID: %@", freshID);
     }
 }
+
+// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
+%hook ATTrackingManager
++ (NSUInteger)trackingAuthorizationStatus {
+    return 2; // Denied (رفض التتبع لضمان جلب الإعلان فوراً)
+}
+%end
 
 // تثبيت الهويات الوهمية للأجهزة
 %hook UIDevice
@@ -136,7 +163,7 @@ static __attribute__((constructor)) void ultimatePreMainInitialization() {
     return [NSUUID UUID];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
-    return YES;
+    return NO; // مطابقة لحالة رفض التتبع لجلب إعلانات عامة فورية
 }
 %end
 
@@ -184,14 +211,14 @@ static __attribute__((constructor)) void ultimatePreMainInitialization() {
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Ultimate-Master] showRewardAd executed successfully.");
+        NSLog(@">>> [Full-Simulate] showRewardAd executed successfully.");
     } @catch (NSException *exception) {
-        NSLog(@">>> [Ultimate-Master] Exception caught in showRewardAd, bypassing safely: %@", exception.reason);
+        NSLog(@">>> [Full-Simulate] Exception caught in showRewardAd, bypassing safely: %@", exception.reason);
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Ultimate-Master] Ad failure intercepted, forcing instant reward delivery.");
+    NSLog(@">>> [Full-Simulate] Ad failure intercepted, forcing instant reward delivery.");
     id targetSelf = self;
     if ([targetSelf respondsToSelector:@selector(grantReward)]) {
         [targetSelf grantReward];
