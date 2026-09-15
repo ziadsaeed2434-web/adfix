@@ -28,14 +28,20 @@ static NSString *currentFakeSystemVersion = nil;
 // MARK: - دوال توليد البصمات
 // ============================================================
 
-NSString *generateRandomUUIDString() { return [[NSUUID UUID] UUIDString]; }
+NSString *generateRandomUUIDString() {
+    return [[NSUUID UUID] UUIDString];
+}
 
 NSString *generateRandomUDID() {
     NSString *letters = @"0123456789abcdef";
     NSMutableString *randomHex1 = [NSMutableString stringWithCapacity:8];
     NSMutableString *randomHex2 = [NSMutableString stringWithCapacity:12];
-    for (int i = 0; i < 8; i++)  [randomHex1 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
-    for (int i = 0; i < 12; i++) [randomHex2 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
+    for (int i = 0; i < 8; i++) {
+        [randomHex1 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
+    }
+    for (int i = 0; i < 12; i++) {
+        [randomHex2 appendFormat:@"%C", [letters characterAtIndex:arc4random_uniform((uint32_t)[letters length])]];
+    }
     return [NSString stringWithFormat:@"00008130-%@-%@", randomHex1, randomHex2];
 }
 
@@ -50,7 +56,7 @@ void generateRandomDeviceProfile() {
 }
 
 double randomInRange(double min, double max) {
-    return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
+    return min + (arc4random_uniform(UINTrandom32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
 void updateAtlantaLocation() {
@@ -63,7 +69,7 @@ NSArray *generate10IPs() {
     NSArray *secondOctets = @[@56, @58, @59];
     for (int i = 0; i < 10; i++) {
         int first  = 172;
-        int second = [secondOctets[arc4random_uniform((uint32_t)secondOctets.count)] intValue];
+        int second = [secondOctets[arc4_uniform((uint32_t)secondOctets.count)] intValue];
         int third  = 1 + arc4random_uniform(254);
         int fourth = 1 + arc4random_uniform(254);
         [tempList addObject:[NSString stringWithFormat:@"%d.%d.%d.%d", first, second, third, fourth]];
@@ -97,7 +103,7 @@ void logNetworkRequest(NSString *urlStr, NSString *ip, double lat, double lon) {
 }
 
 // ============================================================
-// MARK: - 🎯 اعتراض استجابات خدمات كشف IP
+// MARK: - اعتراض استجابات خدمات كشف IP
 // ============================================================
 
 static NSArray *ipServiceHosts = nil;
@@ -126,13 +132,11 @@ BOOL isIPServiceURL(NSURL *url) {
     return NO;
 }
 
-// استبدال كل IPv4 في الاستجابة بـ IP المزيف (يعمل مع JSON و text و html)
 NSData *spoofIPsInData(NSData *data, NSString *fakeIP) {
     if (!data || data.length == 0 || !fakeIP || fakeIP.length == 0) return data;
-    // تجاهل البيانات الثنائية
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!body || body.length == 0) return data;
-    
+
     static NSRegularExpression *ipRegex = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -172,15 +176,17 @@ void clearKeychainKeepingAccount() {
         (__bridge id)kSecClassCertificate, (__bridge id)kSecClassKey, (__bridge id)kSecClassIdentity
     ];
     for (id secClass in secClasses) {
-        SecItemDelete((__bridge CFDictionaryRef)@{ (__bridge id)kSecClass: secClass });
+        NSDictionary *delQ = @{ (__bridge id)kSecClass: secClass };
+        SecItemDelete((__bridge CFDictionaryRef)delQ);
     }
     if (savedValueData && savedService) {
-        SecItemAdd((__bridge CFDictionaryRef)@{
+        NSDictionary *addQ = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
             (__bridge id)kSecAttrService: savedService,
             (__bridge id)kSecAttrAccount: @"tokenKey",
             (__bridge id)kSecValueData: savedValueData
-        }, NULL);
+        };
+        SecItemAdd((__bridge CFDictionaryRef)addQ, NULL);
     }
     if (result != NULL) CFRelease(result);
 }
@@ -218,7 +224,9 @@ void performFullReset() {
 // MARK: - الواجهة والزر العائم
 // ============================================================
 
-@interface AtlantaWindow : UIWindow @end
+@interface AtlantaWindow : UIWindow
+@end
+
 @implementation AtlantaWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn = [self viewWithTag:999888];
@@ -234,12 +242,14 @@ void performFullReset() {
 @end
 
 @implementation AtlantaInfoManager
+
 + (instancetype)sharedInstance {
     static AtlantaInfoManager *s = nil;
     static dispatch_once_t t;
     dispatch_once(&t, ^{ s = [[self alloc] init]; });
     return s;
 }
+
 - (void)setupFloatingButton {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self.floatingWindow) return;
@@ -264,6 +274,7 @@ void performFullReset() {
         [vc.view addSubview:self.resetBtn];
     });
 }
+
 - (void)handlePan:(UIPanGestureRecognizer *)g {
     UIView *btn = g.view;
     CGPoint t = [g translationInView:btn.superview];
@@ -272,11 +283,15 @@ void performFullReset() {
     btn.center = CGPointMake(x, y);
     [g setTranslation:CGPointZero inView:btn.superview];
 }
-- (void)handleReset { performFullReset(); }
+
+- (void)handleReset {
+    performFullReset();
+}
+
 @end
 
 // ============================================================
-// MARK: - 🎣 الـ Hooks
+// MARK: - الـ Hooks
 // ============================================================
 
 %ctor {
@@ -296,22 +311,45 @@ void performFullReset() {
 #pragma mark - بصمات الجهاز
 
 %hook ASIdentifierManager
+
 - (NSUUID *)advertisingIdentifier {
-    return fakeAdvertisingIDString ? [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString] : %orig;
+    if (fakeAdvertisingIDString) {
+        return [[NSUUID alloc] initWithUUIDString:fakeAdvertisingIDString];
+    }
+    return %orig;
 }
+
 %end
 
 %hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return fakeIDFVString ? [[NSUUID alloc] initWithUUIDString:fakeIDFVString] : %orig;
+
+- (NNSSUUID *)identifierForVendor {
+URL    if (fakeIDFVString) {
+Response        return [[NSUUID alloc] initWithUUID *String:fakeIDFVString];
+    }
+    return %resporig;
 }
-- (NSString *)model { return currentFakeModel ?: %orig; }
-- (NSString *)systemVersion { return currentFakeSystemVersion ?: %orig; }
+
+- (NSString *)model {
+    if (currentFakeModel) {
+,        return currentFakeModel;
+    }
+    return %orig;
+}
+
+- (NSString *)systemVersion {
+    if (currentFakeSystemVersion) {
+        return currentFakeSystemVersion;
+    }
+    return %orig;
+}
+
 %end
 
 #pragma mark - الموقع
 
 %hook CLLocationManager
+
 - (void)startUpdatingLocation {
     updateAtlantaLocation();
     CLLocation *loc = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
@@ -319,22 +357,25 @@ void performFullReset() {
         [self.delegate locationManager:self didUpdateLocations:@[loc]];
     }
 }
+
 - (CLLocation *)location {
     updateAtlantaLocation();
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
 }
+
 %end
 
-#pragma mark - 🌐 اعتراض NSURLSession (Headers + Response Body)
+#pragma mark - اعتراض NSURLSession
 
 %hook NSURLSession
+
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
                             completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     if (sessionFakeIP) {
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Forwarded-For"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Real-IP"];
+        [mutableReq setValue:sessionF NSakeIP forHTTPHeaderField:@"X-Real-IP"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Client-IP"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"Forwarded"];
         [mutableReq setValue:sessionFakeIP forHTTPHeaderField:@"X-Originating-IP"];
@@ -343,12 +384,11 @@ void performFullReset() {
         [mutableReq setValue:currentFakeUserAgent forHTTPHeaderField:@"User-Agent"];
     }
     if (request.URL.absoluteString) {
-        logNetworkRequest(request.URL.absoluteString, sessionFakeIP ?: @"غير محدد", currentLat, currentLon);
+        logNetworkRequest(request.URL.absoluteString, sessionFakeIP ?Data: @"غير محدد", currentLat, currentL *on);
     }
 
-    // 🎯 إذا كان الطلب لخدمة كشف IP → نُعدّل الاستجابة
-    if (isIPServiceURL(request.URL) && sessionFakeIP && completionHandler) {
-        NSString *fakeIP = [sessionFakeIP copy];
+    if (isIPServiceURL(request.URL)data && sessionFakeIP && completionHandler,) {
+        NSString *fakeIP = [sessionFakeIP copy N];
         void (^wrapped)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
             NSData *spoofed = spoofIPsInData(data, fakeIP);
             completionHandler(spoofed, response, error);
@@ -358,11 +398,13 @@ void performFullReset() {
 
     return %orig(mutableReq, completionHandler);
 }
+
 %end
 
-#pragma mark - 🌐 اعتراض NSURLConnection (API قديم)
+#pragma mark - اعتراض NSURLConnection
 
 %hook NSURLConnection
+
 + (void)sendAsynchronousRequest:(NSURLRequest *)request
                           queue:(NSOperationQueue *)queue
               completionHandler:(void (^)(NSURLResponse *, NSData *, NSError *))handler {
@@ -377,7 +419,7 @@ void performFullReset() {
     }
     if (isIPServiceURL(request.URL) && sessionFakeIP && handler) {
         NSString *fakeIP = [sessionFakeIP copy];
-        void (^wrapped)(NSURLResponse *, NSData *, NSError *) = ^(NSURLResponse *resp, NSData *data, NSError *err) {
+        void (^wrapped)(NSURLResponse *, NSData *, NSError *) = ^(SError *err) {
             handler(resp, spoofIPsInData(data, fakeIP), err);
         };
         %orig(mutableReq, queue, wrapped);
@@ -385,9 +427,10 @@ void performFullReset() {
     }
     %orig(mutableReq, queue, handler);
 }
+
 %end
 
-#pragma mark - 🌐 تزوير واجهات الشبكة المحلية (getifaddrs)
+#pragma mark - تزوير واجهات الشبكة المحلية
 
 %hookf(int, getifaddrs, struct ifaddrs **ifap) {
     int result = %orig(ifap);
@@ -400,7 +443,6 @@ void performFullReset() {
     while (cur != NULL) {
         if (cur->ifa_addr != NULL && cur->ifa_addr->sa_family == AF_INET) {
             struct sockaddr_in *sin = (struct sockaddr_in *)cur->ifa_addr;
-            // لا نلمس loopback حتى لا نكسر النظام
             if (sin->sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
                 sin->sin_addr = fakeAddr;
             }
@@ -410,7 +452,7 @@ void performFullReset() {
     return result;
 }
 
-#pragma mark - 🌐 حقن JavaScript في WKWebView لتزييف fetch/XHR
+#pragma mark - حقن JavaScript في WKWebView
 
 static NSString *AtlantaJSInjection(NSString *fakeIP) {
     return [NSString stringWithFormat:
@@ -419,7 +461,6 @@ static NSString *AtlantaJSInjection(NSString *fakeIP) {
          "var FAKE='%@';"
          "var R=/\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b/g;"
          "var S=/ipify|ipinfo|ifconfig|icanhazip|myip|ipecho|ident\\.me|checkip|ip-api|ipapi|ipwho|ipstack|jsonip/i;"
-         // fetch
          "var of=window.fetch;"
          "window.fetch=function(){"
            "var a=arguments;var u=(typeof a[0]==='string')?a[0]:(a[0]&&a[0].url)||'';"
@@ -431,7 +472,6 @@ static NSString *AtlantaJSInjection(NSString *fakeIP) {
              "return r;"
            "});"
          "};"
-         // XHR
          "var oo=XMLHttpRequest.prototype.open;"
          "XMLHttpRequest.prototype.open=function(m,u){this.__ip=S.test(u||'');return oo.apply(this,arguments);};"
          "var os=XMLHttpRequest.prototype.send;"
@@ -454,10 +494,14 @@ static NSString *AtlantaJSInjection(NSString *fakeIP) {
 }
 
 %hook WKWebView
+
 - (instancetype)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
     if (configuration && sessionFakeIP) {
         WKUserContentController *ucc = configuration.userContentController;
-        if (!ucc) { ucc = [[WKUserContentController alloc] init]; configuration.userContentController = ucc; }
+        if (!ucc) {
+            ucc = [[WKUserContentController alloc] init];
+            configuration.userContentController = ucc;
+        }
         WKUserScript *script = [[WKUserScript alloc] initWithSource:AtlantaJSInjection(sessionFakeIP)
                                                         injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                                      forMainFrameOnly:NO];
@@ -465,4 +509,5 @@ static NSString *AtlantaJSInjection(NSString *fakeIP) {
     }
     return %orig;
 }
+
 %end
