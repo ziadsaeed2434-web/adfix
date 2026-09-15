@@ -2,7 +2,15 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
 
-// دالة مسح الـ Keychain مع استثناء الـ tokenKey الخاص بالحساب ليبقى آمناً
+// إعلان مسبق للكلاسات لتجنب أي تحذيرات
+@interface ActivatorAdService : NSObject
+- (void)loadAd;
+- (BOOL)isReady;
+- (BOOL)isAdReady;
+- (void)showRewardAd;
+@end
+
+// دالة مسح الـ Keychain مع استثناء الحفاظ على الـ tokenKey الخاص بالحساب ليبقى آمناً
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -136,7 +144,7 @@ static NSString *generateFreshTimestamp() {
 }
 %end
 
-// --- التعديل الجذري لمنع ظهور "No ad yet" وإجبار الدوران والفتح الفوري ---
+// --- الهوك الأساسي لإدارة الإعلانات ومنع No ad yet ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -147,23 +155,20 @@ static NSString *generateFreshTimestamp() {
     return YES;
 }
 
-// إذا حاول التطبيق جلب إعلان وفشل، نجبره على إعادة المحاولة تلقائياً فوراً بدلاً من إعطاء خطأ
 - (void)loadAd {
     %orig;
-    // محاكاة إعادة المحاولة الذاتية لتفادي حالة No ad yet
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self loadAd];
+    // إعادة محاولة ذكية وآمنة عبر استدعاء الكلاس بطريقة سليمة تضمن عدم حدوث خطأ تجميع
+    id targetSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+            [targetSelf loadAd];
+        }
     });
 }
 
-- (void)fetchAd {
-    %orig;
-}
-
-// عند الضغط على زر الإعلان، يتم فتح المكافأة ومنح النقاط فوراً بدون انتظار تحميل وهمي
 - (void)showRewardAd {
     %orig;
-    NSLog(@"[Signature-Rotator] showRewardAd forced successfully, bypassing wait states.");
+    NSLog(@"[Signature-Rotator] showRewardAd forced successfully.");
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
