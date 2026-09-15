@@ -23,7 +23,7 @@ static NSString *currentFakeModel = nil;
 static NSString *currentFakeSystemVersion = nil;
 
 // ============================================================
-// MARK: - دوال توليد بصمات وأجهزة وهمية مختلفة
+// MARK: - دوال توليد بصات وأجهزة وهمية مختلفة
 // ============================================================
 
 NSString *generateRandomUUIDString() {
@@ -61,36 +61,74 @@ double randomInRange(double min, double max) {
     return min + (arc4random_uniform(UINT32_MAX) / (double)UINT32_MAX) * (max - min);
 }
 
-// ✅ الموقع الجديد: أتلانتا - أمريكا
-void updateAtlantaLocation() {
-    // إحداثيات مدينة أتلانتا، جورجيا - الولايات المتحدة
-    // Latitude: 33.7490 / Longitude: -84.3880
-    currentLat = randomInRange(33.7000, 33.8000);   // خط العرض
-    currentLon = randomInRange(-84.4500, -84.3000); // خط الطول (سالب لأنها غرب)
+void updateGreekLocation() {
+    currentLat = randomInRange(37.9700, 38.0300);
+    currentLon = randomInRange(23.7000, 23.7800);
 }
 
-// ✅ توليد IP ببادئات 172.56 / 172.58 / 172.59
 NSArray *generate10IPs() {
     NSMutableArray *tempList = [NSMutableArray arrayWithCapacity:10];
-    // البادئات المطلوبة (أول أوكتين ثابت = 172)
-    NSArray *secondOctets = @[@56, @58, @59];
+    NSArray *greekSubnets = @[
+
+
+        @{@"first": @212, @"second": @205}
+    ];
     
     for (int i = 0; i < 10; i++) {
-        int first  = 172;
-        int second = [secondOctets[arc4random_uniform((uint32_t)secondOctets.count)] intValue];
-        // نستخدم 1-254 لتجنب عناوين الشبكة والبث
-        int third  = 1 + arc4random_uniform(254);
-        int fourth = 1 + arc4random_uniform(254);
+        NSDictionary *subnet = greekSubnets[arc4random_uniform((uint32_t)greekSubnets.count)];
+        int first = [subnet[@"first"] intValue];
+        int second = [subnet[@"second"] intValue];
+        int third = arc4random_uniform(256);
+        int fourth = arc4random_uniform(256);
         NSString *ip = [NSString stringWithFormat:@"%d.%d.%d.%d", first, second, third, fourth];
         [tempList addObject:ip];
     }
     return [tempList copy];
 }
 
-// ✅ اختيار IP مباشرة بدون أي فحص
+BOOL verifyIPQuality(NSString *ip) {
+    if (!ip || ip.length == 0) return NO;
+    NSString *urlString = [NSString stringWithFormat:@"http://ip-api.com/json/%@?fields=status,isp,org,as", ip];
+    NSURL *url = [NSURL URLWithString:urlString];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    [request setTimeoutInterval:3.0];
+    
+    __block NSData *responseData = nil;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        responseData = data;
+        dispatch_semaphore_signal(semaphore);
+    }];
+    [task resume];
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)));
+    
+    if (!responseData) return YES;
+    NSError *jsonError = nil;
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:&jsonError];
+    if (jsonError || !json) return YES;
+    if (![json[@"status"] isEqualToString:@"success"]) return YES;
+    
+    NSString *combined = [NSString stringWithFormat:@"%@ %@ %@", json[@"org"] ?: @"", json[@"isp"] ?: @"", json[@"as"] ?: @""];
+    NSArray *badKeywords = @[@"Hosting", @"Datacenter", @"Cloud", @"Server", @"Dedicated", @"Colocation", @"VPS", @"CDN", @"Akamai", @"Amazon", @"AWS", @"DigitalOcean", @"Linode", @"Vultr", @"Hetzner", @"OVH"];
+    for (NSString *keyword in badKeywords) {
+        if ([combined rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
 void generateSessionIP() {
     NSArray *candidates = generate10IPs();
-    sessionFakeIP = candidates[arc4random_uniform((uint32_t)candidates.count)];
+    NSString *selectedIP = nil;
+    for (NSString *ip in candidates) {
+        if (verifyIPQuality(ip)) {
+            selectedIP = ip;
+            break;
+        }
+    }
+    if (!selectedIP) selectedIP = candidates.lastObject;
+    sessionFakeIP = selectedIP;
 }
 
 void fetchRealIP() {
@@ -137,10 +175,10 @@ void clearKeychainKeepingAccount() {
     }
 
     NSArray *secClasses = @[
-        (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecClassInternetPassword,
-        (__bridge id)kSecClassCertificate,
-        (__bridge id)kSecClassKey,
+        (__bridge id)kSecClassGenericPassword, 
+        (__bridge id)kSecClassInternetPassword, 
+        (__bridge id)kSecClassCertificate, 
+        (__bridge id)kSecClassKey, 
         (__bridge id)kSecClassIdentity
     ];
     
@@ -187,8 +225,8 @@ void performFullReset() {
         fakeIDFVString = generateRandomUUIDString();
         fakeUDIDString = generateRandomUDID();
         generateRandomDeviceProfile();
-        updateAtlantaLocation();     // ✅ موقع أتلانتا
-        generateSessionIP();         // ✅ IP ببادئات 172.56/58/59
+        updateGreekLocation();
+        generateSessionIP();
         fetchRealIP();
         
         @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
@@ -203,27 +241,27 @@ void performFullReset() {
 // MARK: - الواجهة والزر العائم الوحيد
 // ============================================================
 
-@interface AtlantaWindow : UIWindow
+@interface GreeceWindow : UIWindow
 @end
 
-@implementation AtlantaWindow
+@implementation GreeceWindow
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *btn1 = [self viewWithTag:999888];
     return (btn1 && CGRectContainsPoint(btn1.frame, point));
 }
 @end
 
-@interface AtlantaInfoManager : NSObject
-@property (strong, nonatomic) AtlantaWindow *floatingWindow;
+@interface GreeceInfoManager : NSObject
+@property (strong, nonatomic) GreeceWindow *floatingWindow;
 @property (strong, nonatomic) UIButton *resetBtn;
 + (instancetype)sharedInstance;
 - (void)setupFloatingButton;
 @end
 
-@implementation AtlantaInfoManager
+@implementation GreeceInfoManager
 
 + (instancetype)sharedInstance {
-    static AtlantaInfoManager *sharedInstance = nil;
+    static GreeceInfoManager *sharedInstance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{ sharedInstance = [[self alloc] init]; });
     return sharedInstance;
@@ -234,7 +272,7 @@ void performFullReset() {
         if (self.floatingWindow) return;
         
         CGRect screenBounds = [UIScreen mainScreen].bounds;
-        self.floatingWindow = [[AtlantaWindow alloc] initWithFrame:screenBounds];
+        self.floatingWindow = [[GreeceWindow alloc] initWithFrame:screenBounds];
         self.floatingWindow.windowLevel = UIWindowLevelAlert + 1000;
         self.floatingWindow.hidden = NO;
         self.floatingWindow.backgroundColor = [UIColor clearColor];
@@ -243,6 +281,7 @@ void performFullReset() {
         vc.view.backgroundColor = [UIColor clearColor];
         self.floatingWindow.rootViewController = vc;
         
+        // الزر الأزرق الشامل الوحيد
         self.resetBtn = [UIButton buttonWithType:UIButtonTypeCustom];
         self.resetBtn.tag = 999888;
         self.resetBtn.frame = CGRectMake(20, 120, 55, 55);
@@ -279,15 +318,15 @@ void performFullReset() {
 
 %ctor {
     generateRandomDeviceProfile();
-    updateAtlantaLocation();      // ✅ موقع أتلانتا
-    generateSessionIP();          // ✅ IP ببادئات 172.56/58/59
+    updateGreekLocation();
+    generateSessionIP();
     fakeAdvertisingIDString = generateRandomUUIDString();
     fakeIDFVString = generateRandomUUIDString();
     fakeUDIDString = generateRandomUDID();
     fetchRealIP();
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[AtlantaInfoManager sharedInstance] setupFloatingButton];
+        [[GreeceInfoManager sharedInstance] setupFloatingButton];
     });
 }
 
@@ -311,14 +350,14 @@ void performFullReset() {
 
 %hook CLLocationManager
 - (void)startUpdatingLocation {
-    updateAtlantaLocation();
+    updateGreekLocation();
     CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
     if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
         [self.delegate locationManager:self didUpdateLocations:@[fakeLocation]];
     }
 }
 - (CLLocation *)location {
-    updateAtlantaLocation();
+    updateGreekLocation();
     return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
 }
 %end
