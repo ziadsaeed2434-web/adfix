@@ -1,8 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
+#import <objc/runtime.h>
 
-// إعلان مسبق للكلاسات لتجنب أي تحذيرات
+// إعلان مسبق للكلاسات
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -10,7 +11,7 @@
 - (void)showRewardAd;
 @end
 
-// دالة مسح الـ Keychain مع استثناء الحفاظ على الـ tokenKey الخاص بالحساب ليبقى آمناً
+// 1. تنظيف الـ Keychain مع الحفاظ التام على الـ tokenKey
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -34,7 +35,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@"[Protected-Keychain] tokenKey preserved securely: %@", service);
+                    NSLog(@">>> [Pre-Main] tokenKey preserved securely: %@", service);
                 }
             }
             if (result) {
@@ -44,7 +45,6 @@ static void clearKeychainExceptToken() {
     }
 }
 
-// توليد معرفات وبصمات جديدة كلياً في كل إقلاع لتغيير التوقيع الرقمي
 static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
@@ -65,23 +65,25 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-%ctor {
+// دالة الحقن الفوري والسبق المطلق قبل أي شيء
+static __attribute__((constructor)) void preMainInitialization() {
     @autoreleasepool {
-        // 1. مسح الـ Keychain وتغيير البصمة مع الحفاظ على الـ tokenKey
+        // الخطوة 1: تنظيف الكيين تشين بالكامل ما عدا التوكن قبل قراءة أي بيانات
         clearKeychainExceptToken();
 
-        // 2. مسح NSUserDefaults لتغيير التوقيع الرقمي بالكامل
+        // الخطوة 2: مسح نطاق الـ NSUserDefaults للملفات القديمة
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
         
+        // الخطوة 3: توليد الحقن والهويات الجديدة كلياً
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
         double dynamicInactivityTime = randomInactivitySeconds();
         
-        // 3. حقن الهويات الجديدة كلياً
+        // الخطوة 4: كتابة البصمة الجديدة قبل تشغيل خيوط التطبيق
         [defaults setObject:freshID forKey:@"device.id.key"];
         [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
@@ -104,22 +106,22 @@ static NSString *generateFreshTimestamp() {
         
         [defaults synchronize];
         
-        // 4. مسح الكاش المؤقت
+        // الخطوة 5: تدمير أي كاش مؤقت للإعلانات أو التحليلات
         NSArray *cacPaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
         NSString *cacheDirectory = [cacPaths objectAtIndex:0];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSArray *cacheFiles = [fileManager contentsOfDirectoryAtPath:cacheDirectory error:nil];
         for (NSString *file in cacheFiles) {
-            if ([file containsString:@"firebase"] || [file containsString:@"appmetrica"] || [file containsString:@"ads"]) {
+            if ([file containsString:@"firebase"] || [file containsString:@"appmetrica"] || [file containsString:@"ads"] || [file containsString:@"cache"]) {
                 [fileManager removeItemAtPath:[cacheDirectory stringByAppendingPathComponent:file] error:nil];
             }
         }
         
-        NSLog(@"[Signature-Rotator] Digital signature changed & Keychain wiped for ID: %@", freshID);
+        NSLog(@">>> [Pre-Main] Absolute early injection completed successfully with ID: %@", freshID);
     }
 }
 
-// تثبيت بصمات الأجهزة الوهمية المتجددة
+// تثبيت الهويات الوهمية للأجهزة
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [NSUUID UUID];
@@ -135,6 +137,7 @@ static NSString *generateFreshTimestamp() {
 }
 %end
 
+// حقن الـ IP الأوروبي المتغير مع طلبات الشبكة
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
@@ -144,7 +147,7 @@ static NSString *generateFreshTimestamp() {
 }
 %end
 
-// --- الهوك الأساسي لإدارة الإعلانات ومنع No ad yet ---
+// إدارة الإعلانات ومنع رسالة No ad yet نهائياً
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -157,9 +160,8 @@ static NSString *generateFreshTimestamp() {
 
 - (void)loadAd {
     %orig;
-    // إعادة محاولة ذكية وآمنة عبر استدعاء الكلاس بطريقة سليمة تضمن عدم حدوث خطأ تجميع
     id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
             [targetSelf loadAd];
         }
@@ -168,11 +170,11 @@ static NSString *generateFreshTimestamp() {
 
 - (void)showRewardAd {
     %orig;
-    NSLog(@"[Signature-Rotator] showRewardAd forced successfully.");
+    NSLog(@">>> [Pre-Main] showRewardAd forced successfully.");
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@"[Signature-Rotator] Ad error intercepted, forcing reward grant.");
+    NSLog(@">>> [Pre-Main] Ad error bypassed, granting reward instantly.");
 }
 
 %end
