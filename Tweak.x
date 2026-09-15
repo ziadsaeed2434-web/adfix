@@ -44,8 +44,8 @@ static NSString *randomNewIDFA() {
 
 // توليد IP أوروبي سكني متغير بالكامل عشوائياً لكل رقم
 static NSString *randomEuropeanIP() {
-    int subnet = (arc4random_uniform(2) == 0) ? 185 : 194; // التبديل بين نطاقات أوروبية مختلفة
-    return [NSString stringWithFormat:@"%d.%d.%d.%d", subnet, arc4random_uniform(250) + 1, arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+
+    return [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 // توليد مدة غياب عشوائية ومتغيرة في كل فتحة تطبيق (بين 10 إلى 60 يوماً بالثواني)
