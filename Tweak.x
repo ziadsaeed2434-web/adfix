@@ -3,9 +3,6 @@
 #import <AdSupport/ASIdentifierManager.h>
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
-#include <ifaddrs.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
 
 // ============================================================
 // MARK: - المتغيرات العامة
@@ -84,9 +81,11 @@ void generateSessionIP() {
 
 void fetchRealIP() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
-        NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
-        currentRealIP = (ip && ip.length > 0) ? ip : @"غير قادر على الجلب";
+        @autoreleasepool {
+            NSURL *url = [NSURL URLWithString:@"https://api.ipify.org"];
+            NSString *ip = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
+            currentRealIP = (ip && ip.length > 0) ? ip : @"غير قادر على الجلب";
+        }
     });
 }
 
@@ -134,6 +133,7 @@ BOOL isIPServiceURL(NSURL *url) {
 
 NSData *spoofIPsInData(NSData *data, NSString *fakeIP) {
     if (!data || data.length == 0 || !fakeIP || fakeIP.length == 0) return data;
+    if (data.length > 256 * 1024) return data; // تجاهل الردود الكبيرة
     NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!body || body.length == 0) return data;
 
@@ -149,6 +149,19 @@ NSData *spoofIPsInData(NSData *data, NSString *fakeIP) {
                                                      withTemplate:fakeIP];
     NSData *newData = [newBody dataUsingEncoding:NSUTF8StringEncoding];
     return newData ?: data;
+}
+
+// ============================================================
+// MARK: - بناء CLLocation صحيح (بدون هذا التطبيق يعلق)
+// ============================================================
+
+CLLocation *buildFakeLocation(void) {
+    updateAtlantaLocation();
+    return [[CLLocation alloc] initWithCoordinate:CLLocationCoordinate2DMake(currentLat, currentLon)
+                                         altitude:10.0
+                               horizontalAccuracy:5.0
+                                 verticalAccuracy:5.0
+                                        timestamp:[NSDate date]];
 }
 
 // ============================================================
@@ -193,30 +206,32 @@ void clearKeychainKeepingAccount() {
 
 void performFullReset() {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        clearKeychainKeepingAccount();
-        NSHTTPCookieStorage *cs = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-        for (NSHTTPCookie *c in [cs cookies]) [cs deleteCookie:c];
-        [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes]
-                                                  modifiedSince:[NSDate distantPast] completionHandler:^{}];
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleID) {
-            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
-            [[NSUserDefaults standardUserDefaults] synchronize];
+        @autoreleasepool {
+            clearKeychainKeepingAccount();
+            NSHTTPCookieStorage *cs = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+            for (NSHTTPCookie *c in [cs cookies]) [cs deleteCookie:c];
+            [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:[WKWebsiteDataStore allWebsiteDataTypes]
+                                                      modifiedSince:[NSDate distantPast] completionHandler:^{}];
+            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+            if (bundleID) {
+                [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleID];
+                [[NSUserDefaults standardUserDefaults] synchronize];
+            }
+            [[NSURLCache sharedURLCache] removeAllCachedResponses];
+
+            fakeAdvertisingIDString = generateRandomUUIDString();
+            fakeIDFVString = generateRandomUUIDString();
+            fakeUDIDString = generateRandomUDID();
+            generateRandomDeviceProfile();
+            updateAtlantaLocation();
+            generateSessionIP();
+            fetchRealIP();
+            @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
+
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                exit(0);
+            });
         }
-        [[NSURLCache sharedURLCache] removeAllCachedResponses];
-
-        fakeAdvertisingIDString = generateRandomUUIDString();
-        fakeIDFVString = generateRandomUUIDString();
-        fakeUDIDString = generateRandomUDID();
-        generateRandomDeviceProfile();
-        updateAtlantaLocation();
-        generateSessionIP();
-        fetchRealIP();
-        @synchronized(networkLogs) { [networkLogs removeAllObjects]; }
-
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            exit(0);
-        });
     });
 }
 
@@ -295,13 +310,15 @@ void performFullReset() {
 // ============================================================
 
 %ctor {
-    generateRandomDeviceProfile();
-    updateAtlantaLocation();
-    generateSessionIP();
-    fakeAdvertisingIDString = generateRandomUUIDString();
-    fakeIDFVString = generateRandomUUIDString();
-    fakeUDIDString = generateRandomUDID();
-    fetchRealIP();
+    @autoreleasepool {
+        generateRandomDeviceProfile();
+        updateAtlantaLocation();
+        generateSessionIP();
+        fakeAdvertisingIDString = generateRandomUUIDString();
+        fakeIDFVString = generateRandomUUIDString();
+        fakeUDIDString = generateRandomUDID();
+        fetchRealIP();
+    }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AtlantaInfoManager sharedInstance] setupFloatingButton];
@@ -330,20 +347,6 @@ void performFullReset() {
     return %orig;
 }
 
-- (NSString *)model {
-    if (currentFakeModel) {
-        return currentFakeModel;
-    }
-    return %orig;
-}
-
-- (NSString *)systemVersion {
-    if (currentFakeSystemVersion) {
-        return currentFakeSystemVersion;
-    }
-    return %orig;
-}
-
 %end
 
 #pragma mark - الموقع
@@ -351,16 +354,27 @@ void performFullReset() {
 %hook CLLocationManager
 
 - (void)startUpdatingLocation {
-    updateAtlantaLocation();
-    CLLocation *loc = [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
-    if ([self.delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-        [self.delegate locationManager:self didUpdateLocations:@[loc]];
+    CLLocation *loc = buildFakeLocation();
+    id<CLLocationManagerDelegate> d = self.delegate;
+    if (d && [d respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [d locationManager:self didUpdateLocations:@[loc]];
+        });
     }
 }
 
 - (CLLocation *)location {
-    updateAtlantaLocation();
-    return [[CLLocation alloc] initWithLatitude:currentLat longitude:currentLon];
+    return buildFakeLocation();
+}
+
+- (void)requestLocation {
+    CLLocation *loc = buildFakeLocation();
+    id<CLLocationManagerDelegate> d = self.delegate;
+    if (d && [d respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [d locationManager:self didUpdateLocations:@[loc]];
+        });
+    }
 }
 
 %end
@@ -382,9 +396,6 @@ void performFullReset() {
     }
     if (currentFakeUserAgent) {
         [mutableReq setValue:currentFakeUserAgent forHTTPHeaderField:@"User-Agent"];
-    }
-    if (request.URL.absoluteString) {
-        logNetworkRequest(request.URL.absoluteString, sessionFakeIP ? sessionFakeIP : @"غير محدد", currentLat, currentLon);
     }
 
     if (isIPServiceURL(request.URL) && sessionFakeIP && completionHandler) {
@@ -429,28 +440,6 @@ void performFullReset() {
 }
 
 %end
-
-#pragma mark - تزوير واجهات الشبكة المحلية
-
-%hookf(int, getifaddrs, struct ifaddrs **ifap) {
-    int result = %orig(ifap);
-    if (result != 0 || !ifap || !*ifap || !sessionFakeIP || sessionFakeIP.length == 0) return result;
-
-    struct in_addr fakeAddr;
-    if (inet_aton([sessionFakeIP UTF8String], &fakeAddr) != 1) return result;
-
-    struct ifaddrs *cur = *ifap;
-    while (cur != NULL) {
-        if (cur->ifa_addr != NULL && cur->ifa_addr->sa_family == AF_INET) {
-            struct sockaddr_in *sin = (struct sockaddr_in *)cur->ifa_addr;
-            if (sin->sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
-                sin->sin_addr = fakeAddr;
-            }
-        }
-        cur = cur->ifa_next;
-    }
-    return result;
-}
 
 #pragma mark - حقن JavaScript في WKWebView
 
