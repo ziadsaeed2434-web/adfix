@@ -1,6 +1,7 @@
 // Tweak.xm
 // iOS Tweak: Auto IP Injection (172.59.x.x), IDFA Spoofing,
-// Keychain Cleanup with Preservation of app.getsmscode/tokenKey
+// Keychain Cleanup with SAFE preservation of app.getsmscode/tokenKey
+// (العنصر المحفوظ لا يُلمس إطلاقاً - لا حذف ولا استعادة)
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -232,62 +233,105 @@ static void injectSpoofedHeaders(NSMutableURLRequest *req) {
 %end
 
 // ==================================================================
-// 7. KEYCHAIN CLEANUP كل 5 ثواني مع الحفاظ على tokenKey
+// 7. KEYCHAIN CLEANUP كل 5 ثواني - بدون لمس العنصر المحفوظ
 // ==================================================================
 
 static NSString *const kPreservedService = @"app.getsmscode";
 static NSString *const kPreservedAccount = @"tokenKey";
 static dispatch_source_t gKeychainTimer = NULL;
 
-// نسخة احتياطية للعنصر المطلوب الحفاظ عليه
-static NSDictionary *backupPreservedItem(void) {
-    NSDictionary *query = @{
-        (__bridge id)kSecClass:            (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecAttrService:      kPreservedService,
-        (__bridge id)kSecAttrAccount:      kPreservedAccount,
-        (__bridge id)kSecReturnData:       @YES,
-        (__bridge id)kSecReturnAttributes: @YES,
-    };
-    CFTypeRef result = NULL;
-    OSStatus s = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
-    if (s == errSecSuccess && result != NULL) {
-        NSDictionary *dict = (__bridge NSDictionary *)result;
-        CFRelease(result); // تحرير يدوي لأننا في non-ARC
-        return dict;
+// هل هذا العنصر هو اللي لازم نحميه؟
+static BOOL isPreservedItem(NSDictionary *attrs) {
+    if (!attrs) return NO;
+    NSString *service = attrs[(__bridge id)kSecAttrService];
+    NSString *account = attrs[(__bridge id)kSecAttrAccount];
+
+    // نحمي العنصر لو تطابق الـ Service
+    if (service && [service isEqualToString:kPreservedService]) {
+        // نحن نحمي أي عنصر تحت هذا الـ service
+        // حتى لو الـ account مختلف، احتياط إضافي
+        if (!account || [account isEqualToString:kPreservedAccount]) {
+            return YES;
+        }
+        return YES;
     }
-    return nil;
+    return NO;
 }
 
-// استعادة العنصر المحفوظ
-static void restorePreservedItem(NSDictionary *backup) {
-    if (!backup) return;
-    NSMutableDictionary *add = [backup mutableCopy];
-    add[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
-    // نحذف أي نسخة قديمة (احتياطي) ثم نضيف
-    SecItemDelete((__bridge CFDictionaryRef)add);
-    OSStatus s = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
-    if (s != errSecSuccess) {
-        NSLog(@"[Tweak] restorePreservedItem failed: %d", (int)s);
-    }
-}
-
-// الدالة الكاملة للتنظيف
 static void performKeychainCleanup(void) {
     @autoreleasepool {
-        // 1. نسخ احتياطي للعنصر المطلوب
-        NSDictionary *backup = backupPreservedItem();
-
-        // 2. حذف كل عناصر generic password
-        NSDictionary *del = @{
-            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword
+        // 1) نجلب كل عناصر generic password مع الـ attributes
+        NSDictionary *query = @{
+            (__bridge id)kSecClass:            (__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecMatchLimit:       (__bridge id)kSecMatchLimitAll,
+            (__bridge id)kSecReturnAttributes: @YES,
         };
-        OSStatus ds = SecItemDelete((__bridge CFDictionaryRef)del);
-        if (ds != errSecSuccess && ds != errSecItemNotFound) {
-            NSLog(@"[Tweak] bulk delete returned: %d", (int)ds);
+
+        CFTypeRef result = NULL;
+        OSStatus s = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+
+        if (s != errSecSuccess || result == NULL) {
+            if (result) CFRelease(result);
+            return;
         }
 
-        // 3. استعادة العنصر فوراً
-        restorePreservedItem(backup);
+        NSArray *items = (__bridge NSArray *)result;
+
+        // 2) نمر على كل عنصر ونحذف فقط اللي مو محفوظ
+        for (NSDictionary *attrs in items) {
+            @autoreleasepool {
+                // تخطّى العنصر المحفوظ — لا يُلمس إطلاقاً
+                if (isPreservedItem(attrs)) {
+                    NSLog(@"[Tweak] Preserving keychain item: service=%@, account=%@",
+                          attrs[(__bridge id)kSecAttrService],
+                          attrs[(__bridge id)kSecAttrAccount]);
+                    continue;
+                }
+
+                // نبني استعلام حذف دقيق لهذا العنصر فقط
+                NSMutableDictionary *delQuery = [NSMutableDictionary dictionary];
+                delQuery[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
+
+                id service     = attrs[(__bridge id)kSecAttrService];
+                id account     = attrs[(__bridge id)kSecAttrAccount];
+                id accessGroup = attrs[(__bridge id)kSecAttrAccessGroup];
+                id generic     = attrs[(__bridge id)kSecAttrGeneric];
+
+                if (service)     delQuery[(__bridge id)kSecAttrService]     = service;
+                if (account)     delQuery[(__bridge id)kSecAttrAccount]     = account;
+                if (accessGroup) delQuery[(__bridge id)kSecAttrAccessGroup] = accessGroup;
+                if (generic)     delQuery[(__bridge id)kSecAttrGeneric]     = generic;
+
+                OSStatus ds = SecItemDelete((__bridge CFDictionaryRef)delQuery);
+                if (ds != errSecSuccess && ds != errSecItemNotFound) {
+                    NSLog(@"[Tweak] delete item failed: %d for service=%@ account=%@",
+                          (int)ds, service, account);
+                }
+            }
+        }
+
+        CFRelease(result);
+    }
+}
+
+// (اختياري) اطبع كل عناصر الـ Keychain عشان تتأكد من الأسماء
+// استخدمها مرة وحدة أول تشغيل، بعدين علّقها
+static void dumpAllKeychainItems(void) {
+    NSDictionary *q = @{
+        (__bridge id)kSecClass:            (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecMatchLimit:       (__bridge id)kSecMatchLimitAll,
+        (__bridge id)kSecReturnAttributes: @YES,
+    };
+    CFTypeRef r = NULL;
+    if (SecItemCopyMatching((__bridge CFDictionaryRef)q, &r) == errSecSuccess && r) {
+        NSArray *items = (__bridge NSArray *)r;
+        for (NSDictionary *a in items) {
+            NSLog(@"[Tweak][DUMP] service=%@ | account=%@ | group=%@",
+                  a[(__bridge id)kSecAttrService],
+                  a[(__bridge id)kSecAttrAccount],
+                  a[(__bridge id)kSecAttrAccessGroup]);
+        }
+        CFRelease(r);
     }
 }
 
@@ -297,6 +341,9 @@ static void performKeychainCleanup(void) {
 
 %ctor {
     if (gKeychainTimer != NULL) return;
+
+    // (اختياري) اطبع العناصر الموجودة مرة وحدة عند الإقلاع
+    // dumpAllKeychainItems();
 
     dispatch_queue_t q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
     gKeychainTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
