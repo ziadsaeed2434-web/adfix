@@ -1,7 +1,4 @@
-// Tweak.xm
-// Target: iOS tweak that adds a floating button which applies
-// IP / IDFA / Location spoofing + safe cache & defaults cleanup.
-
+// Tweak.xm  — non-ARC safe, no warnings, no crashes
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <AdSupport/ASIdentifierManager.h>
@@ -9,24 +6,28 @@
 #import <Security/Security.h>
 #import <objc/runtime.h>
 
-#pragma mark - Global Spoofing State
+#pragma mark - Forward declarations
 
-static NSString *gSpoofedIP          = nil;
-static NSUUID   *gSpoofedIDFA        = nil;
-static double    gSpoofedLatitude    = 0.0;
-static double    gSpoofedLongitude   = 0.0;
+@interface UIWindow (SpoofTweak)
+- (void)installFloatingButtonIfNeeded;
+@end
+
+#pragma mark - Global state (guarded by gStateLock)
+
+static NSString *gSpoofedIP           = nil;
+static NSUUID   *gSpoofedIDFA         = nil;
+static double    gSpoofedLatitude     = 0.0;
+static double    gSpoofedLongitude    = 0.0;
 static BOOL      gLocationSpoofActive = NO;
-
-// Protect state mutation from concurrent access
-static dispatch_queue_t gStateQueue;
+static NSObject *gStateLock           = nil;
 
 #pragma mark - Helpers
 
 static NSString *generateRandomIP(void) {
-    NSArray<NSString *> *subnets = @[@"172.56", @"172.57", @"172.59"];
-    NSString *subnet = subnets[arc4random_uniform((uint32_t)subnets.count)];
-    uint32_t third  = arc4random_uniform(256);
-    uint32_t fourth = arc4random_uniform(256);
+    NSArray *subnets = @[@"172.56", @"172.57", @"172.59"];
+    NSString *subnet = [subnets objectAtIndex:arc4random_uniform((uint32_t)[subnets count])];
+    uint32_t third   = arc4random_uniform(256);
+    uint32_t fourth  = arc4random_uniform(256);
     return [NSString stringWithFormat:@"%@.%u.%u", subnet, third, fourth];
 }
 
@@ -35,20 +36,19 @@ static NSUUID *generateRandomIDFA(void) {
 }
 
 static void generateAtlantaCoordinate(double *outLat, double *outLon) {
-    // Latitude:  33.7480 → 33.7900
-    // Longitude: -84.3880 → -84.4300
-    double lat = 33.7480 + ((double)arc4random_uniform(4200) / 10000.0);
-    double lon = -84.3880 - ((double)arc4random_uniform(4200) / 10000.0);
+    double lat = 33.7480 + ((double)arc4random_uniform(4200) / 10000.0); // 33.7480 – 33.7900
+    double lon = -84.3880 - ((double)arc4random_uniform(4200) / 10000.0); // -84.3880 – -84.4300
     if (outLat) *outLat = lat;
     if (outLon) *outLon = lon;
 }
 
+// Returns an autoreleased mutable copy, or nil.
 static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
     if (!request) return nil;
-    NSMutableURLRequest *mutableRequest = [request mutableCopy];
+    NSMutableURLRequest *mutableRequest = [[request mutableCopy] autorelease];
     NSString *ip = nil;
-    @synchronized (gStateQueue) {
-        ip = [gSpoofedIP copy];
+    @synchronized (gStateLock) {
+        ip = [[gSpoofedIP retain] autorelease];
     }
     if (ip) {
         [mutableRequest setValue:ip forHTTPHeaderField:@"X-Forwarded-For"];
@@ -58,18 +58,17 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
     return mutableRequest;
 }
 
-#pragma mark - NSURLProtocol (catches NSURLSession / NSURLConnection / WebView traffic)
+#pragma mark - NSURLProtocol
 
-@interface SpoofedIPProtocol : NSURLProtocol
+@interface SpoofedIPProtocol : NSURLProtocol <NSURLSessionDelegate, NSURLSessionDataDelegate, NSURLSessionTaskDelegate>
 @end
 
 @implementation SpoofedIPProtocol
 
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
     if (!request || !request.URL) return NO;
-    NSString *scheme = request.URL.scheme.lowercaseString;
+    NSString *scheme = [request.URL.scheme lowercaseString];
     if (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) return NO;
-    // Prevent infinite recursion
     if ([NSURLProtocol propertyForKey:@"SpoofedIPHandled" inRequest:request]) return NO;
     return YES;
 }
@@ -79,12 +78,12 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 }
 
 - (void)startLoading {
-    NSMutableURLRequest *newRequest = [self.request mutableCopy];
+    NSMutableURLRequest *newRequest = [[self.request mutableCopy] autorelease];
     [NSURLProtocol setProperty:@YES forKey:@"SpoofedIPHandled" inRequest:newRequest];
 
     NSString *ip = nil;
-    @synchronized (gStateQueue) {
-        ip = [gSpoofedIP copy];
+    @synchronized (gStateLock) {
+        ip = [[gSpoofedIP retain] autorelease];
     }
     if (ip) {
         [newRequest setValue:ip forHTTPHeaderField:@"X-Forwarded-For"];
@@ -93,21 +92,19 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
     }
 
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
-    // Disable our protocol inside the internal session so we don't loop
-    config.protocolClasses = @[];
+    config.protocolClasses = @[]; // prevent recursion
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config
                                                           delegate:self
                                                      delegateQueue:nil];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newRequest];
-    objc_setAssociatedObject(task, @selector(startLoading), session, OBJC_ASSOCIATION_RETAIN);
+    // Retain the session for the lifetime of the task.
+    objc_setAssociatedObject(task, @selector(startLoading), session, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [task resume];
 }
 
-- (void)stopLoading {
-    // No-op; session will finish naturally
-}
+- (void)stopLoading { /* no-op */ }
 
-#pragma mark - NSURLSessionDelegate (forwarding)
+#pragma mark NSURLSessionDelegate forwarding
 
 - (void)URLSession:(NSURLSession *)session
               dataTask:(NSURLSessionDataTask *)dataTask
@@ -137,36 +134,44 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 
 @end
 
-#pragma mark - NSURLSession request-level hooks (extra coverage)
+#pragma mark - NSURLSession request hooks
 
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
     return %orig(injectIPIntoRequest(request));
 }
+
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
                             completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
     return %orig(injectIPIntoRequest(request), handler);
 }
+
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url {
-    NSURLRequest *req = url ? [NSURLRequest requestWithURL:url] : nil;
-    return %orig(injectIPIntoRequest(req));
+    if (!url) return %orig(url);
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    return [self dataTaskWithRequest:req];   // hits our hooked version above
 }
+
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url
                         completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
-    NSURLRequest *req = url ? [NSURLRequest requestWithURL:url] : nil;
-    return %orig(injectIPIntoRequest(req), handler);
+    if (!url) return %orig(url, handler);
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    return [self dataTaskWithRequest:req completionHandler:handler];
 }
+
 - (NSURLSessionUploadTask *)uploadTaskWithRequest:(NSURLRequest *)request fromData:(NSData *)body {
     return %orig(injectIPIntoRequest(request), body);
 }
-- (NSURLSessionUploadTask *)uploadTaskWithRequest:(NSURLRequest *)request
-                                         fromFile:(NSURL *)fileURL {
+
+- (NSURLSessionUploadTask *)uploadTaskWithRequest:(NSURLRequest *)request fromFile:(NSURL *)fileURL {
     return %orig(injectIPIntoRequest(request), fileURL);
 }
+
 - (NSURLSessionDownloadTask *)downloadTaskWithRequest:(NSURLRequest *)request {
     return %orig(injectIPIntoRequest(request));
 }
+
 - (NSURLSessionDownloadTask *)downloadTaskWithRequest:(NSURLRequest *)request
                                     completionHandler:(void (^)(NSURL *, NSURLResponse *, NSError *))handler {
     return %orig(injectIPIntoRequest(request), handler);
@@ -180,15 +185,14 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 
 - (NSUUID *)advertisingIdentifier {
     NSUUID *idfa = nil;
-    @synchronized (gStateQueue) {
-        idfa = [gSpoofedIDFA copy];
+    @synchronized (gStateLock) {
+        idfa = [[gSpoofedIDFA retain] autorelease];
     }
     if (idfa) return idfa;
     return %orig;
 }
 
 - (BOOL)isAdvertisingTrackingEnabled {
-    // Force-enable so SDKs pick up our spoofed IDFA
     return YES;
 }
 
@@ -200,8 +204,8 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 
 - (CLLocation *)location {
     if (gLocationSpoofActive) {
-        return [[CLLocation alloc] initWithLatitude:gSpoofedLatitude
-                                          longitude:gSpoofedLongitude];
+        return [[[CLLocation alloc] initWithLatitude:gSpoofedLatitude
+                                           longitude:gSpoofedLongitude] autorelease];
     }
     return %orig;
 }
@@ -209,9 +213,8 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 - (void)startUpdatingLocation {
     %orig;
     if (gLocationSpoofActive) {
-        CLLocation *fake = [[CLLocation alloc] initWithLatitude:gSpoofedLatitude
-                                                     longitude:gSpoofedLongitude];
-        // Deliver asynchronously to mimic real behavior and avoid re-entrancy
+        CLLocation *fake = [[[CLLocation alloc] initWithLatitude:gSpoofedLatitude
+                                                       longitude:gSpoofedLongitude] autorelease];
         dispatch_async(dispatch_get_main_queue(), ^{
             id<CLLocationManagerDelegate> delegate = self.delegate;
             if (delegate && [delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
@@ -224,8 +227,8 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 - (void)requestLocation {
     %orig;
     if (gLocationSpoofActive) {
-        CLLocation *fake = [[CLLocation alloc] initWithLatitude:gSpoofedLatitude
-                                                     longitude:gSpoofedLongitude];
+        CLLocation *fake = [[[CLLocation alloc] initWithLatitude:gSpoofedLatitude
+                                                       longitude:gSpoofedLongitude] autorelease];
         dispatch_async(dispatch_get_main_queue(), ^{
             id<CLLocationManagerDelegate> delegate = self.delegate;
             if (delegate && [delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
@@ -237,7 +240,6 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 
 %end
 
-// Also patch the CLLocation object itself for apps that read coordinate directly.
 %hook CLLocation
 
 - (CLLocationCoordinate2D)coordinate {
@@ -249,9 +251,12 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 
 %end
 
-#pragma mark - UI: floating button
+#pragma mark - Floating button
 
 @interface SpoofFloatingButton : UIButton
++ (void)clearSafeDirectories;
++ (void)clearAppDefaults;
++ (void)clearKeychainExceptToken;
 @end
 
 @implementation SpoofFloatingButton
@@ -268,7 +273,8 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
         self.titleLabel.font = [UIFont systemFontOfSize:26 weight:UIFontWeightBold];
         [self setTitle:@"⚡" forState:UIControlStateNormal];
         [self addTarget:self action:@selector(onTap) forControlEvents:UIControlEventTouchUpInside];
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onPan:)];
+        UIPanGestureRecognizer *pan = [[[UIPanGestureRecognizer alloc] initWithTarget:self
+                                                                              action:@selector(onPan:)] autorelease];
         [self addGestureRecognizer:pan];
     }
     return self;
@@ -279,9 +285,7 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
     if (!superview) return;
     CGPoint t = [g translationInView:superview];
     CGPoint c = self.center;
-    c.x += t.x;
-    c.y += t.y;
-    // Clamp inside superview bounds
+    c.x += t.x; c.y += t.y;
     CGFloat half = self.bounds.size.width / 2.0;
     c.x = MAX(half, MIN(superview.bounds.size.width  - half, c.x));
     c.y = MAX(half, MIN(superview.bounds.size.height - half, c.y));
@@ -290,39 +294,34 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 }
 
 - (void)onTap {
-    // Run the heavy work on a background queue, UI updates on main.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        // 1. New IP
-        NSString *newIP = generateRandomIP();
-        // 2. New IDFA
-        NSUUID *newIDFA = generateRandomIDFA();
-        // 3. New Atlanta coordinate
+        NSString *newIP   = generateRandomIP();
+        NSUUID   *newIDFA = generateRandomIDFA();
         double lat = 0, lon = 0;
         generateAtlantaCoordinate(&lat, &lon);
 
-        @synchronized (gStateQueue) {
-            gSpoofedIP          = newIP;
-            gSpoofedIDFA        = newIDFA;
-            gSpoofedLatitude    = lat;
-            gSpoofedLongitude   = lon;
+        @synchronized (gStateLock) {
+            [gSpoofedIP release];
+            gSpoofedIP = [newIP copy];
+
+            [gSpoofedIDFA release];
+            gSpoofedIDFA = [newIDFA retain];
+
+            gSpoofedLatitude     = lat;
+            gSpoofedLongitude    = lon;
             gLocationSpoofActive = YES;
         }
 
-        NSLog(@"[SpoofTweak] IP=%@ IDFA=%@ Loc=(%.4f, %.4f)", newIP, newIDFA.UUIDString, lat, lon);
+        NSLog(@"[SpoofTweak] IP=%@ IDFA=%@ Loc=(%.4f, %.4f)",
+              newIP, newIDFA.UUIDString, lat, lon);
 
-        // 4. Clear Caches / tmp / Documents
         [SpoofFloatingButton clearSafeDirectories];
-
-        // 5. Clear NSUserDefaults
         [SpoofFloatingButton clearAppDefaults];
-
-        // 6. Selective Keychain cleanup
         [SpoofFloatingButton clearKeychainExceptToken];
 
-        // UI confirmation
         dispatch_async(dispatch_get_main_queue(), ^{
             UIWindow *keyWindow = nil;
-            for (UIWindow *w in UIApplication.sharedApplication.windows) {
+            for (UIWindow *w in [UIApplication sharedApplication].windows) {
                 if (w.isKeyWindow) { keyWindow = w; break; }
             }
             if (!keyWindow) return;
@@ -335,9 +334,10 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"✅ Spoof Applied"
                                                                            message:message
                                                                     preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                     style:UIAlertActionStyleDefault
+                                                   handler:nil]];
 
-            // Avoid "already presenting" crash
             UIViewController *presenter = rootVC;
             while (presenter.presentedViewController) presenter = presenter.presentedViewController;
             [presenter presentViewController:alert animated:YES completion:nil];
@@ -345,32 +345,30 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
     });
 }
 
-#pragma mark - Cleanup routines
+#pragma mark Cleanup routines
 
 + (void)clearSafeDirectories {
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    NSMutableArray *paths = [NSMutableArray array];
 
     NSArray *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-    if (caches.firstObject) [paths addObject:caches.firstObject];
+    if ([caches count] > 0) [paths addObject:[caches objectAtIndex:0]];
 
     NSString *tmp = NSTemporaryDirectory();
     if (tmp) [paths addObject:tmp];
 
     NSArray *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    if (docs.firstObject) [paths addObject:docs.firstObject];
+    if ([docs count] > 0) [paths addObject:[docs objectAtIndex:0]];
 
     for (NSString *dir in paths) {
         NSError *listError = nil;
-        NSArray<NSString *> *contents = [fm contentsOfDirectoryAtPath:dir error:&listError];
+        NSArray *contents = [fm contentsOfDirectoryAtPath:dir error:&listError];
         if (listError) {
             NSLog(@"[SpoofTweak] list error %@: %@", dir, listError.localizedDescription);
             continue;
         }
         for (NSString *name in contents) {
-            // Skip hidden dot files (often used by the OS)
             if ([name hasPrefix:@"."]) continue;
-
             NSString *full = [dir stringByAppendingPathComponent:name];
             NSError *rmError = nil;
             if (![fm removeItemAtPath:full error:&rmError]) {
@@ -381,35 +379,42 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 }
 
 + (void)clearAppDefaults {
-    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (!bundleID) return;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     [defaults removePersistentDomainForName:bundleID];
     [defaults synchronize];
-    NSLog(@"[SpoofTweak] NSUserDefaults domain cleared: %@", bundleID);
+    NSLog(@"[SpoofTweak] NSUserDefaults cleared for %@", bundleID);
 }
 
 + (void)clearKeychainExceptToken {
-    NSMutableDictionary *query = [NSMutableDictionary dictionary];
-    query[(__bridge id)kSecClass]       = (__bridge id)kSecClassGenericPassword;
-    query[(__bridge id)kSecMatchLimit]  = (__bridge id)kSecMatchLimitAll;
-    query[(__bridge id)kSecReturnAttributes] = @YES;
+    // Work directly with CF types so this compiles cleanly in ARC and non-ARC.
+    CFMutableDictionaryRef query = CFDictionaryCreateMutable(NULL, 0,
+                                                              &kCFTypeDictionaryKeyCallBacks,
+                                                              &kCFTypeDictionaryValueCallBacks);
+    CFDictionarySetValue(query, kSecClass,       kSecClassGenericPassword);
+    CFDictionarySetValue(query, kSecMatchLimit,  kSecMatchLimitAll);
+    CFDictionarySetValue(query, kSecReturnAttributes, kCFBooleanTrue);
 
-    CFTypeRef result = NULL;
-    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
-    if (status != errSecSuccess || !result) {
+    CFArrayRef cfItems = NULL;
+    OSStatus status = SecItemCopyMatching(query, (CFTypeRef *)&cfItems);
+    CFRelease(query);
+
+    if (status != errSecSuccess || cfItems == NULL) {
         if (status != errSecItemNotFound) {
             NSLog(@"[SpoofTweak] keychain query status=%d", (int)status);
         }
+        if (cfItems) CFRelease(cfItems);
         return;
     }
 
-    NSArray *items = (__bridge_transfer NSArray *)result;
-    for (NSDictionary *item in items) {
+    CFIndex count = CFArrayGetCount(cfItems);
+    for (CFIndex i = 0; i < count; i++) {
+        NSDictionary *item = (NSDictionary *)CFArrayGetValueAtIndex(cfItems, i);
         if (![item isKindOfClass:[NSDictionary class]]) continue;
 
-        NSString *service = item[(__bridge id)kSecAttrService];
-        NSString *account = item[(__bridge id)kSecAttrAccount];
+        NSString *service = [item objectForKey:(__bridge id)kSecAttrService];
+        NSString *account = [item objectForKey:(__bridge id)kSecAttrAccount];
 
         // ----- PRESERVE THIS ITEM -----
         if ([service isEqualToString:@"app.getsmscode"] &&
@@ -419,39 +424,35 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
         }
         // ------------------------------
 
-        NSMutableDictionary *del = [NSMutableDictionary dictionary];
-        del[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
-        if (service) del[(__bridge id)kSecAttrService] = service;
-        if (account) del[(__bridge id)kSecAttrAccount] = account;
+        CFMutableDictionaryRef del = CFDictionaryCreateMutable(NULL, 0,
+                                                               &kCFTypeDictionaryKeyCallBacks,
+                                                               &kCFTypeDictionaryValueCallBacks);
+        CFDictionarySetValue(del, kSecClass, kSecClassGenericPassword);
+        if (service) CFDictionarySetValue(del, kSecAttrService, (__bridge const void *)service);
+        if (account) CFDictionarySetValue(del, kSecAttrAccount, (__bridge const void *)account);
 
-        OSStatus delStatus = SecItemDelete((__bridge CFDictionaryRef)del);
+        OSStatus delStatus = SecItemDelete(del);
+        CFRelease(del);
+
         if (delStatus == errSecSuccess) {
             NSLog(@"[SpoofTweak] deleted keychain item %@/%@", service, account);
         } else if (delStatus != errSecItemNotFound) {
             NSLog(@"[SpoofTweak] delete failed (%d) for %@/%@", (int)delStatus, service, account);
         }
     }
+
+    CFRelease(cfItems);
 }
 
 @end
 
-#pragma mark - Hook UIWindow to install the button
+#pragma mark - UIWindow hook
 
 %hook UIWindow
 
-- (void)makeKeyAndVisible {
-    %orig;
-    // Ensure UI work on main thread
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [self installFloatingButtonIfNeeded]; });
-    } else {
-        [self installFloatingButtonIfNeeded];
-    }
-}
-
 - (void)installFloatingButtonIfNeeded {
     if (!self.rootViewController) return;
-    if ([self viewWithTag:0xF10A7]) return; // already installed
+    if ([self viewWithTag:0xF10A7]) return;   // already installed
 
     CGFloat size = 58.0;
     CGFloat margin = 20.0;
@@ -459,11 +460,20 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
                               margin + 60.0,
                               size, size);
 
-    SpoofFloatingButton *btn = [[SpoofFloatingButton alloc] initWithFrame:frame];
+    SpoofFloatingButton *btn = [[[SpoofFloatingButton alloc] initWithFrame:frame] autorelease];
     btn.tag = 0xF10A7;
     btn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
     [self addSubview:btn];
     [self bringSubviewToFront:btn];
+}
+
+- (void)makeKeyAndVisible {
+    %orig;
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self installFloatingButtonIfNeeded]; });
+    } else {
+        [self installFloatingButtonIfNeeded];
+    }
 }
 
 %end
@@ -471,7 +481,7 @@ static NSMutableURLRequest *injectIPIntoRequest(NSURLRequest *request) {
 #pragma mark - Constructor
 
 %ctor {
-    gStateQueue = dispatch_queue_create("com.spooftweak.state", DISPATCH_QUEUE_SERIAL);
+    gStateLock = [[NSObject alloc] init];
     @try {
         [NSURLProtocol registerClass:[SpoofedIPProtocol class]];
         NSLog(@"[SpoofTweak] loaded, SpoofedIPProtocol registered");
