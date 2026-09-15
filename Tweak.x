@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
 
-// دالة مسح الـ Keychain بالكامل مع استثناء الحفاظ على الـ tokenKey الخاص بالحساب
+// دالة مسح الـ Keychain بالكامل مع استثناء الحفاظ على الـ tokenKey الخاص بالحساب (مصححة بدون أخطاء ARC)
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -16,7 +16,7 @@ static void clearKeychainExceptToken() {
         NSDictionary *spec = @{(__bridge id)kSecClass: secClass};
         CFArrayRef result = NULL;
         if (SecItemCopyMatching((__bridge CFDictionaryRef)spec, (CFTypeRef *)&result) == errSecSuccess) {
-            NSArray *items = (__bridge_transfer NSArray *)result;
+            NSArray *items = (__bridge NSArray *)result;
             for (NSDictionary *item in items) {
                 NSString *account = item[(__bridge id)kSecAttrAccount];
                 NSString *service = item[(__bridge id)kSecAttrService];
@@ -29,6 +29,9 @@ static void clearKeychainExceptToken() {
                 } else {
                     NSLog(@"[Protected-Keychain] tokenKey preserved securely: %@", service);
                 }
+            }
+            if (result) {
+                CFRelease(result);
             }
         }
     }
