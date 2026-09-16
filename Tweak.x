@@ -92,7 +92,7 @@ static void simulateFreshAppReinstallation() {
                         NSString *subPath = [folderPath stringByAppendingPathComponent:item];
                         NSArray *subContents = [fileManager contentsOfDirectoryAtPath:subPath error:nil];
                         for (NSString *subItem in subContents) {
-                            if (![subItem containsString:@"WebKit"] && ![:subItem containsString:@"Preferences"]) {
+                            if (![subItem containsString:@"WebKit"] && ![subItem containsString:@"Preferences"]) {
                                 NSString *finalPath = [subPath stringByAppendingPathComponent:subItem];
                                 [fileManager removeItemAtPath:finalPath error:nil];
                             }
@@ -139,7 +139,6 @@ static void simulateFreshAppReinstallation() {
 }
 
 // 3. تطبيق الـ Runtime Hooks لدوال النظام ومدير الإعلانات بدون جلبريك
-// تنفيذ الدوال المستبدلة
 static NSUInteger replacement_trackingAuthorizationStatus(id self, SEL _cmd) {
     return 2; // Denied
 }
@@ -162,11 +161,9 @@ static BOOL replacement_canShowAd(id self, SEL _cmd) { return YES; }
 static BOOL replacement_hasAdLoaded(id self, SEL _cmd) { return YES; }
 
 static void replacement_loadAd(id self, SEL _cmd) {
-    // استدعاء الدالة الأصلية إن أمكن أو تجاهلها وتطبيق اللوجيك الخاص بك
     id targetSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:NSSelectorFromString(@"loadAd")]) {
-            // تجنب التكرار اللانهائي المباشر بدون فحص دقيق، هنا اكتفينا بالتأخير
         }
     });
 }
@@ -182,24 +179,20 @@ static void replacement_showRewardAd(id self, SEL _cmd) {
 // نقطة الدخول الرئيسية للحقن المباشر عبر eSign
 __attribute__((constructor)) static void initializer() {
     @autoreleasepool {
-        // تنفيذ مسح البيئة أولاً
         simulateFreshAppReinstallation();
         
-        // تبديل دوال ATTTrackingManager (Class methods)
         Class attClass = objc_getClass("ATTrackingManager");
         if (attClass) {
             Method m = class_getClassMethod(attClass, @selector(trackingAuthorizationStatus));
             if (m) method_setImplementation(m, (IMP)replacement_trackingAuthorizationStatus);
         }
         
-        // تبديل دوال UIDevice
         Class uiDevClass = objc_getClass("UIDevice");
         if (uiDevClass) {
             Method m = class_getInstanceMethod(uiDevClass, @selector(identifierForVendor));
             if (m) method_setImplementation(m, (IMP)replacement_identifierForVendor);
         }
         
-        // تبديل دوال ASIdentifierManager
         Class asIdClass = objc_getClass("ASIdentifierManager");
         if (asIdClass) {
             Method m = class_getInstanceMethod(asIdClass, @selector(advertisingIdentifier));
@@ -208,7 +201,6 @@ __attribute__((constructor)) static void initializer() {
             if (m2) method_setImplementation(m2, (IMP)replacement_isAdvertisingTrackingEnabled);
         }
         
-        // تبديل دوال ActivatorAdService إذا كانت موجودة وقت التشغيل
         Class adServiceClass = objc_getClass("ActivatorAdService");
         if (adServiceClass) {
             SEL selectors[] = {
