@@ -23,7 +23,7 @@
 - (void)showRewardAd;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 - (void)forceReloadAdsDirectly;
-- (void)triggerMassiveAdFetch; // تم إضافة الدالة هنا لتعريفها للمترجم
+- (void)triggerMassiveAdFetch;
 end
 
 @interface ExtendedPolymorphicEngine : NSObject
