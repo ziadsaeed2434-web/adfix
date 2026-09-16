@@ -51,7 +51,7 @@
 - (void)bootstrapPolymorphicCore {
     self.isEngineActive = YES;
     self.executionCounter = 0;
-    [self logDiagnosticInfo:@"ExtendedPolymorphicEngine core initialized with random days absence and 20-attempt loop."];
+    [self logDiagnosticInfo:@"ExtendedPolymorphicEngine core initialized with 100-attempt aggressive multi-fetch loop."];
     [self rotateNetworkParametersAndIdentity];
 }
 
@@ -69,7 +69,7 @@
     self.currentDynamicIP = [NSString stringWithFormat:@"%@%d", selectedPrefix, randomSuffix];
     self.currentDynamicUUID = [[NSUUID UUID] UUIDString];
     
-    // توليد عدد أيام غياب عشوائي مختلف في كل مرة (بين 15 إلى 90 يوماً في الماضي)
+    // توليد أيام غياب عشوائية مختلفة (بين 15 إلى 90 يوماً في الماضي)
     int randomDaysAgo = arc4random_uniform(76) + 15; 
     NSTimeInterval randomSecondsAgo = -((double)randomDaysAgo * 24 * 60 * 60);
     self.fakeLastLaunchDate = [NSDate dateWithTimeIntervalSinceNow:randomSecondsAgo];
@@ -206,7 +206,7 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 %end
 
 // ============================================================================
-// 5. السيطرة الهندسية المتقدمة على مدير الإعلانات (20-Attempt Loop + Random Days Absence)
+// 5. السيطرة الهندسية المتقدمة على مدير الإعلانات (100-Attempt Aggressive Loop)
 // ============================================================================
 %hook ActivatorAdService
 
@@ -216,27 +216,27 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 - (BOOL)hasAdLoaded { return YES; }
 - (BOOL)isAdAvailable { return YES; }
 
+// دالة لتوليد وجدولة 100 محاولة طلب إعلان متتالية وسريعة
+- (void)triggerMassiveAdFetch {
+    id targetSelf = self;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        for (int i = 0; i < 100; i++) {
+            // توزيع 100 محاولة على أوقات متقاربة جداً (تبدأ من 0.03 ثانية وتتدرج حتى ~10 ثوانٍ)
+            double delay = 0.03 + (i * 0.1);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+                    [targetSelf fetchAdContent];
+                    [targetSelf requestRewardBasedVideo];
+                }
+            });
+        }
+    });
+}
+
 - (void)loadAd {
     %orig;
-    id targetSelf = self;
-    
-    NSLog(@">>> [ActivatorAdService] 20-attempt aggressive multi-fetch triggered with random days absence profile.");
-    
-    double attempts[20] = {
-        0.05, 0.12, 0.20, 0.30, 0.42, 
-        0.55, 0.70, 0.88, 1.08, 1.30, 
-        1.55, 1.83, 2.14, 2.48, 2.85, 
-        3.25, 3.68, 4.14, 4.63, 5.15
-    };
-    
-    for (int i = 0; i < 20; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(attempts[i] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-                [targetSelf fetchAdContent];
-                [targetSelf requestRewardBasedVideo];
-            }
-        });
-    }
+    NSLog(@">>> [ActivatorAdService] 100-attempt massive fetch initiated.");
+    [self triggerMassiveAdFetch];
 }
 
 - (void)fetchAdContent {
@@ -256,15 +256,11 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [ActivatorAdService] Reward ad presented successfully. Re-triggering 20-attempt loop.");
-        if ([self respondsToSelector:@selector(loadAd)]) {
-            [self loadAd];
-        }
+        NSLog(@">>> [ActivatorAdService] Reward ad presented successfully. Re-triggering 100-attempt loop.");
+        [self triggerMassiveAdFetch];
     } @catch (NSException *exception) {
         NSLog(@">>> [ActivatorAdService] Exception in showRewardAd: %@.", exception.reason);
-        if ([self respondsToSelector:@selector(loadAd)]) {
-            [self loadAd];
-        }
+        [self triggerMassiveAdFetch];
     }
 }
 
@@ -277,23 +273,13 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [ActivatorAdService] Ad presentation handled. Forcing 20-attempt reload sequence.");
-    id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    });
+    NSLog(@">>> [ActivatorAdService] Ad presentation handled. Forcing 100-attempt reload sequence.");
+    [self triggerMassiveAdFetch];
 }
 
 - (void)rewardBasedVideoAd:(id)arg1 didFailToLoadWithError:(NSError *)error {
-    NSLog(@">>> [ActivatorAdService] Ad load event intercepted. Forcing 20-attempt reload sequence.");
-    id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    });
+    NSLog(@">>> [ActivatorAdService] Ad load event intercepted. Forcing 100-attempt reload sequence.");
+    [self triggerMassiveAdFetch];
 }
 
 %end
