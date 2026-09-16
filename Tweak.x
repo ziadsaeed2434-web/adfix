@@ -9,7 +9,7 @@
 #include <netdb.h>
 
 // ============================================================================
-// 1. الواجهات الهندسية المتقدمة وبروتوكولات الإدارة والتشخيص الشاملة
+// 1. الواجهات
 // ============================================================================
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
@@ -41,6 +41,9 @@
 - (void)stopInfiniteFetchLoop;
 @end
 
+// ============================================================================
+// 2. تنفيذ المحرك
+// ============================================================================
 @implementation ExtendedPolymorphicEngine
 
 + (instancetype)sharedEngine {
@@ -62,7 +65,6 @@
 - (void)rotateNetworkParametersAndIdentity {
     self.executionCounter++;
 
-    // تدوير الـ IP ومعرف الجهاز
     NSArray *primaryPools = @[
         @"185.159.157.", @"194.26.29.", @"213.127.18.",
         @"178.162.209.", @"82.165.188.", @"195.154.120.",
@@ -73,7 +75,6 @@
     self.currentDynamicIP = [NSString stringWithFormat:@"%@%d", selectedPrefix, randomSuffix];
     self.currentDynamicUUID = [[NSUUID UUID] UUIDString];
 
-    // توليد عدد أيام غياب عشوائي مختلف في كل مرة (بين 15 إلى 90 يوماً في الماضي)
     int randomDaysAgo = arc4random_uniform(76) + 15;
     NSTimeInterval randomSecondsAgo = -((double)randomDaysAgo * 24 * 60 * 60);
     self.fakeLastLaunchDate = [NSDate dateWithTimeIntervalSinceNow:randomSecondsAgo];
@@ -97,18 +98,14 @@
     NSLog(@">>> [ExtendedPolymorphicEngine] %@", infoMessage);
 }
 
-// ----------------------------------------------------------------------------
-// الحلقة اللانهائية لجلب الإعلان (فاصل 0.2s)
-// ----------------------------------------------------------------------------
 - (void)startInfiniteFetchLoopForTarget:(id)target {
     @synchronized (self) {
-        if (self.infiniteFetchTimer) return; // الحلقة تعمل مسبقاً
+        if (self.infiniteFetchTimer) return;
 
         self.infiniteFetchTimer = dispatch_source_create(
             DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
             dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0));
 
-        // الفاصل = 0.2 ثانية (سريع نسبياً + توازن جيد)
         uint64_t interval = (uint64_t)(0.2 * NSEC_PER_SEC);
         uint64_t leeway   = (uint64_t)(0.02 * NSEC_PER_SEC);
 
@@ -122,7 +119,6 @@
                 @try {
                     id t = weakTarget;
                     if (!t) return;
-                    // نستدعي الطريقتين بغض النظر عن النتيجة (نجاح/فشل)
                     if ([t respondsToSelector:@selector(fetchAdContent)]) {
                         [t fetchAdContent];
                     }
@@ -153,7 +149,7 @@
 @end
 
 // ============================================================================
-// 2. إدارة وتأمين الـ Keychain والحفاظ الحصري على التوكن
+// 3. حماية الـ Keychain
 // ============================================================================
 @interface AdvancedKeychainGuard : NSObject
 + (void)executeSecureKeychainSanitization;
@@ -191,7 +187,7 @@
 @end
 
 // ============================================================================
-// 3. المُهتّئ العام ونظام التهيئة التلقائي الشامل (Constructor)
+// 4. المُهتّئ التلقائي
 // ============================================================================
 static __attribute__((constructor)) void initializeExtendedArchitectureMaster() {
     @autoreleasepool {
@@ -207,13 +203,11 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
         NSString *activeUUID = [ExtendedPolymorphicEngine sharedEngine].currentDynamicUUID;
         NSDate *oldLaunchDate = [ExtendedPolymorphicEngine sharedEngine].fakeLastLaunchDate;
 
-        // حقن المعرفات الجديدة
         [standardDefaults setObject:activeUUID forKey:@"device.id.key"];
         [standardDefaults setObject:activeUUID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [standardDefaults setObject:activeUUID forKey:@"AppsFlyerUserId"];
         [standardDefaults setObject:activeUUID forKey:@"FirebaseInstallationIdentifier"];
 
-        // حقن تواريخ الغياب بالأيام المختلفة
         [standardDefaults setObject:oldLaunchDate forKey:@"last_launch_date"];
         [standardDefaults setObject:oldLaunchDate forKey:@"com.app.lastOpenDate"];
         [standardDefaults setObject:oldLaunchDate forKey:@"lastActiveTime"];
@@ -232,8 +226,9 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 }
 
 // ============================================================================
-// 4. خطافات النظام والتتبع المعمارية (System Hooks)
+// 5. خطافات النظام — كل %hook يقابله %end في سطر مستقل
 // ============================================================================
+
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus { return 3; }
 %end
@@ -257,16 +252,17 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
         [field isEqualToString:@"Client-IP"] ||
         [field isEqualToString:@"True-Client-IP"] ||
         [field isEqualToString:@"X-Real-IP"] ||
-        [WithfieldError isEqualToString:@"CF-Connecting-IP"]):( {
-        value = [ExtendedPolymorphicNEngine sharedEngine].currentDynamicIP;
-   SE }
+        [field isEqualToString:@"CF-Connecting-IP"]) {
+        value = [ExtendedPolymorphicEngine sharedEngine].currentDynamicIP;
+    }
     %orig(value, field);
 }
-%rrorend
+%end
 
 // ============================================================================
-// 5. السيطرة الهندسية المتقدمة على مدير الإعلانات (حلقة لا نهائية بفاصل 0.2s)
+// 6. خطاف مدير الإعلانات
 // ============================================================================
+
 %hook ActivatorAdService
 
 - (BOOL)isReady { return YES; }
@@ -319,7 +315,7 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
     [[ExtendedPolymorphicEngine sharedEngine] startInfiniteFetchLoopForTarget:self];
 }
 
-- (void)rewardBasedVideoAd:(id)arg1 didFailToLoad *)error {
+- (void)rewardBasedVideoAd:(id)arg1 didFailToLoadWithError:(NSError *)error {
     NSLog(@">>> [ActivatorAdService] Load failed. Ensuring infinite loop is running.");
     [[ExtendedPolymorphicEngine sharedEngine] startInfiniteFetchLoopForTarget:self];
 }
