@@ -3,6 +3,7 @@
 #import <AdSupport/AdSupport.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 // إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
 @interface ActivatorAdService : NSObject
@@ -54,6 +55,7 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
+// دالة الـ IP الوهمي التي طلبت عدم حذفها
 static NSString *randomEuropeanIP() {
     return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
@@ -138,7 +140,7 @@ static void simulateFreshAppReinstallation() {
     }
 }
 
-// 3. تطبيق الـ Runtime Hooks لدوال النظام ومدير الإعلانات بدون جلبريك
+// 3. تطبيق الـ Runtime Hooks للدوال النظامية ومدير الإعلانات
 static NSUInteger replacement_trackingAuthorizationStatus(id self, SEL _cmd) {
     return 2; // Denied
 }
@@ -155,6 +157,17 @@ static BOOL replacement_isAdvertisingTrackingEnabled(id self, SEL _cmd) {
     return NO;
 }
 
+// Hook لـ NSMutableURLRequest لتزوير الهيدر والـ IP الوهمي
+static void (*original_setValue_forHTTPHeaderField)(id, SEL, NSString *, NSString *);
+static void replacement_setValue_forHTTPHeaderField(id self, SEL _cmd, NSString *value, NSString *field) {
+    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
+        value = randomEuropeanIP();
+    }
+    if (original_setValue_forHTTPHeaderField) {
+        original_setValue_forHTTPHeaderField(self, _cmd, value, field);
+    }
+}
+
 static BOOL replacement_isReady(id self, SEL _cmd) { return YES; }
 static BOOL replacement_isAdReady(id self, SEL _cmd) { return YES; }
 static BOOL replacement_canShowAd(id self, SEL _cmd) { return YES; }
@@ -164,6 +177,7 @@ static void replacement_loadAd(id self, SEL _cmd) {
     id targetSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:NSSelectorFromString(@"loadAd")]) {
+            NSLog(@">>> [Full-Simulate] loadAd triggered safely.");
         }
     });
 }
@@ -201,6 +215,16 @@ __attribute__((constructor)) static void initializer() {
             if (m2) method_setImplementation(m2, (IMP)replacement_isAdvertisingTrackingEnabled);
         }
         
+        // تفعيل الـ Hook لـ NSMutableURLRequest مع استخدام دالة الـ IP الوهمي
+        Class reqClass = objc_getClass("NSMutableURLRequest");
+        if (reqClass) {
+            Method m = class_getInstanceMethod(reqClass, @selector(setValue:forHTTPHeaderField:));
+            if (m) {
+                original_setValue_forHTTPHeaderField = (void(*)(id, SEL, NSString *, NSString *))method_getImplementation(m);
+                method_setImplementation(m, (IMP)replacement_setValue_forHTTPHeaderField);
+            }
+        }
+        
         Class adServiceClass = objc_getClass("ActivatorAdService");
         if (adServiceClass) {
             SEL selectors[] = {
@@ -208,6 +232,7 @@ __attribute__((constructor)) static void initializer() {
                 @selector(isAdReady),
                 @selector(canShowAd),
                 @selector(hasAdLoaded),
+                @selector(loadAd),
                 @selector(showRewardAd)
             };
             
@@ -216,10 +241,11 @@ __attribute__((constructor)) static void initializer() {
                 (IMP)replacement_isAdReady,
                 (IMP)replacement_canShowAd,
                 (IMP)replacement_hasAdLoaded,
+                (IMP)replacement_loadAd,
                 (IMP)replacement_showRewardAd
             };
             
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 6; i++) {
                 Method m = class_getInstanceMethod(adServiceClass, selectors[i]);
                 if (m) {
                     method_setImplementation(m, implementations[i]);
@@ -227,6 +253,6 @@ __attribute__((constructor)) static void initializer() {
             }
         }
         
-        NSLog(@">>> [Non-Jailbroken dylib] Successfully loaded and hooked via eSign!");
+        NSLog(@">>> [Non-Jailbroken dylib] Successfully loaded, IP spoofed & hooked via eSign!");
     }
 }
