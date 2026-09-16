@@ -115,7 +115,6 @@
                 NSArray *items = (__bridge NSArray *)result;
                 for (NSDictionary *item in items) {
                     NSString *account = item[(__bridge id)kSecAttrAccount];
-                    NSString *service = item[(__bridge id)kSecAttrService];
                     
                     // الحفاظ الحصري على التوكن لكي لا يتم تسجيل خروج المستخدم تحت أي ظرف
                     if (account && [account rangeOfString:@"token" options:NSCaseInsensitiveSearch].location == NSNotFound) {
