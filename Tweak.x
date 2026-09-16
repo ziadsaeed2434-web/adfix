@@ -18,7 +18,7 @@
 @end
 
 // ==========================================
-// نظام توليد الـ IPs (النطاقين المطلوبين حصرياً: 82.92 و 80.152)
+// نظام توليد النطاقات السكنية الهولندية الموثوقة حصرياً
 // ==========================================
 
 static void clearKeychainExceptToken() {
@@ -55,14 +55,17 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-static NSString *randomSpecificEuropeanIP() {
-    NSArray *allowedSubnets = @[
-        @[@82, @92],
-        @[@80, @152]
+// توليد IPs حصرياً من نطاقات سكنية هولندية موثوقة (KPN, Ziggo, Odido/T-Mobile NL)
+static NSString *randomDutchResidentialIP() {
+    NSArray *dutchResidentialSubnets = @[
+        @[@84, @241], // KPN Residential
+        @[@94, @212], // Ziggo Residential
+        @[@213, @46], // T-Mobile / Odido Netherlands
+        @[@62, @194]  // VodafoneZiggo NL
     ];
     
-    int selectedIndex = arc4random_uniform((uint32_t)[allowedSubnets count]);
-    NSArray *subnet = allowedSubnets[selectedIndex];
+    int selectedIndex = arc4random_uniform((uint32_t)[dutchResidentialSubnets count]);
+    NSArray *subnet = dutchResidentialSubnets[selectedIndex];
     
     int p1 = [subnet[0] intValue];
     int p2 = [subnet[1] intValue];
@@ -137,19 +140,18 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
         [defaults synchronize];
         
-        NSLog(@">>> [Strict-IP-Engine] Sandbox wiped & Target IPs active.");
+        NSLog(@">>> [Dutch-IP-Engine] Sandbox wiped & Trusted Netherlands Residential IPs active.");
     }
 }
 
 // ==========================================
-// شبكة الحماية الشاملة واعتراض كل الطلبات بلا استثناء
+// الحقن المطلق والشامل لجميع طبقات الشبكة
 // ==========================================
 
-// 1. اعتراض الطلبات القابلة للتعديل
 %hook NSMutableURLRequest
 
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    NSString *targetIP = randomSpecificEuropeanIP();
+    NSString *targetIP = randomDutchResidentialIP();
     
     if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
         [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
@@ -172,7 +174,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         mutableFields = [NSMutableDictionary dictionary];
     }
     
-    NSString *targetIP = randomSpecificEuropeanIP();
+    NSString *targetIP = randomDutchResidentialIP();
     mutableFields[@"X-Forwarded-For"] = targetIP;
     mutableFields[@"X-Real-IP"] = targetIP;
     mutableFields[@"Client-IP"] = targetIP;
@@ -184,25 +186,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %end
 
-// 2. اعتراض الطلبات الثابتة
-%hook NSURLRequest
-
-- (NSDictionary<NSString *,NSString *> *)allHTTPHeaderFields {
-    NSDictionary *originalFields = %orig;
-    NSMutableDictionary *mutableFields = originalFields ? [originalFields mutableCopy] : [NSMutableDictionary dictionary];
-    
-    NSString *targetIP = randomSpecificEuropeanIP();
-    mutableFields[@"X-Forwarded-For"] = targetIP;
-    mutableFields[@"X-Real-IP"] = targetIP;
-    mutableFields[@"Client-IP"] = targetIP;
-    mutableFields[@"User-Agent"] = randomEuropeanUserAgent();
-    
-    return [mutableFields copy];
-}
-
-%end
-
-// 3. اعتراض جلسات الشبكة وصياغتها بالشكل السليم للـ Theos
+// اعتراض جوهري على مستوى مهام الـ NSURLSessionTask لتغطية Firebase و AppsFlyer بالكامل
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -210,10 +194,11 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     if (!mutableReq) {
         mutableReq = [[NSMutableURLRequest alloc] initWithURL:request.URL];
     }
-    NSString *targetIP = randomSpecificEuropeanIP();
+    NSString *targetIP = randomDutchResidentialIP();
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"True-Client-IP"];
     [mutableReq setValue:randomEuropeanUserAgent() forHTTPHeaderField:@"User-Agent"];
     
     return %orig(mutableReq, completionHandler);
@@ -224,13 +209,29 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     if (!mutableReq) {
         mutableReq = [[NSMutableURLRequest alloc] initWithURL:request.URL];
     }
-    NSString *targetIP = randomSpecificEuropeanIP();
+    NSString *targetIP = randomDutchResidentialIP();
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"True-Client-IP"];
     [mutableReq setValue:randomEuropeanUserAgent() forHTTPHeaderField:@"User-Agent"];
     
     return %orig(mutableReq);
+}
+
+- (NSURLSessionUploadTask *)uploadTaskWithRequest:(NSURLRequest *)request fromData:(NSData *)bodyData completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    if (!mutableReq) {
+        mutableReq = [[NSMutableURLRequest alloc] initWithURL:request.URL];
+    }
+    NSString *targetIP = randomDutchResidentialIP();
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"True-Client-IP"];
+    [mutableReq setValue:randomEuropeanUserAgent() forHTTPHeaderField:@"User-Agent"];
+    
+    return %orig(mutableReq, bodyData, completionHandler);
 }
 
 %end
