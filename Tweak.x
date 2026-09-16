@@ -57,7 +57,7 @@ static NSString *randomNewIDFA() {
 
 // دالة الـ IP الوهمي التي طلبت عدم حذفها
 static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+    return [NSString stringWithFormat:@"80.152.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 static double randomInactivitySeconds() {
