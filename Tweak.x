@@ -100,7 +100,7 @@
 
 - (void)startInfiniteFetchLoopForTarget:(id)target {
     @synchronized (self) {
-        if (self.infiniteFetchTimer) return;
+        if (self.infiniteFetchTimer) return; // الحلقة تعمل مسبقاً
 
         self.infiniteFetchTimer = dispatch_source_create(
             DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
@@ -113,17 +113,18 @@
                                   dispatch_time(DISPATCH_TIME_NOW, 0),
                                   interval, leeway);
 
-        __weak id weakTarget = target;
+        // بديل __weak في MRR: التقاط قوي عادي
+        id capturedTarget = target;
+
         dispatch_source_set_event_handler(self.infiniteFetchTimer, ^{
             @autoreleasepool {
                 @try {
-                    id t = weakTarget;
-                    if (!t) return;
-                    if ([t respondsToSelector:@selector(fetchAdContent)]) {
-                        [t fetchAdContent];
+                    if (!capturedTarget) return;
+                    if ([capturedTarget respondsToSelector:@selector(fetchAdContent)]) {
+                        [capturedTarget fetchAdContent];
                     }
-                    if ([t respondsToSelector:@selector(requestRewardBasedVideo)]) {
-                        [t requestRewardBasedVideo];
+                    if ([capturedTarget respondsToSelector:@selector(requestRewardBasedVideo)]) {
+                        [capturedTarget requestRewardBasedVideo];
                     }
                 } @catch (NSException *e) {
                     NSLog(@">>> [InfiniteLoop] Exception: %@", e.reason);
@@ -226,7 +227,7 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 }
 
 // ============================================================================
-// 5. خطافات النظام — كل %hook يقابله %end في سطر مستقل
+// 5. خطافات النظام
 // ============================================================================
 
 %hook ATTrackingManager
