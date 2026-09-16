@@ -55,7 +55,7 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// توليد IPs حصرياً من نطاقات سكنية هولندية موثوقة (KPN, Ziggo, Odido/T-Mobile NL)
+// توليد IPs حصرياً من نطاقات سكنية هولندية موثوقة (KPN, Ziggo, Odido)
 static NSString *randomDutchResidentialIP() {
     NSArray *dutchResidentialSubnets = @[
         @[@84, @241], // KPN Residential
@@ -95,13 +95,17 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// محاكاة التثبيت النظيف من الجذور مع كل إقلاع
+// محاكاة التثبيت النظيف من الجذور وتطهير الـ NSUserDefaults تماماً مع كل إقلاع
 static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     @autoreleasepool {
         clearKeychainExceptToken();
 
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
+            NSUserDefaults *def = [[NSUserDefaults alloc] initWithSuiteName:bundleIdentifier];
+            for (NSString *key in [def dictionaryRepresentation]) {
+                [def removeObjectForKey:key];
+            }
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
 
@@ -127,20 +131,24 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         NSString *freshDate = generateFreshTimestamp();
         double dynamicInactivityTime = randomInactivitySeconds();
         
+        // حقن هويات جديدة كلياً
         [defaults setObject:freshID forKey:@"device.id.key"];
         [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         
-        [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
-        [defaults setInteger:0 forKey:@"ump_status"];
+        // إبقاء حالة التتبع مفعلة (Authorized = 3) وتجاوز موافقة UMP لمنح الإعلانات بشكل كامل
+        [defaults setInteger:3 forKey:@"ATT_Tracking_Status"];
+        [defaults setInteger:1 forKey:@"ump_status"];
+        [defaults setInteger:3 forKey:@"ump_rq_st"];
+        [defaults setObject:@"1" forKey:@"IABTCF_gdprApplies"];
+        [defaults setObject:@"1111111111" forKey:@"IABTCF_PurposeConsents"];
         
         [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
         [defaults setObject:freshDate forKey:@"AppsFlyerInstallDate"];
-        
         [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
         [defaults synchronize];
         
-        NSLog(@">>> [Dutch-IP-Engine] Sandbox wiped & Trusted Netherlands Residential IPs active.");
+        NSLog(@">>> [Tracking-Active-Engine] Sandbox wiped & Tracking Authorized.");
     }
 }
 
@@ -186,7 +194,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %end
 
-// اعتراض جوهري على مستوى مهام الـ NSURLSessionTask لتغطية Firebase و AppsFlyer بالكامل
+// اعتراض جوهري على مستوى مهام الـ NSURLSessionTask
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -236,10 +244,10 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %end
 
-// تجاوز حالة التتبع قسرياً
+// إبقاء حالة التتبع مفعلة (Authorized) لمنح التطبيق أقصى صلاحيات الإعلانات
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 2; // Denied
+    return 3; // Authorized (مفعل)
 }
 %end
 
@@ -254,7 +262,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     return [NSUUID UUID];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
-    return NO;
+    return YES; // تفعيل تتبع الإعلانات
 }
 %end
 
