@@ -40,7 +40,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@">>> [iPhone15PM-26.6.1] tokenKey safely preserved: %@", service);
+                    NSLog(@">>> [Optimized-Fix] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -134,19 +134,20 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         
         [defaults synchronize];
         
-        NSLog(@">>> [iPhone15PM-26.6.1] Sandbox wiped & simulated successfully.");
+        NSLog(@">>> [Optimized-Fix] Sandbox wiped & simulated successfully.");
     }
 }
 
-// 3. خداع الجهاز ليصبح آيفون 15 برو ماكس وإصدار النظام 26.6.1
+// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
+%hook ATTrackingManager
++ (NSUInteger)trackingAuthorizationStatus {
+    return 2; // Denied
+}
+%end
+
+// تثبيت الهويات الوهمية للأجهزة
 %hook UIDevice
-- (NSString *)systemVersion {
-    return @"26.6.1";
-}
 - (NSString *)model {
-    return @"iPhone";
-}
-- (NSString *)localizedModel {
     return @"iPhone";
 }
 - (NSString *)systemName {
@@ -157,40 +158,25 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 }
 %end
 
-// خداع قيم النظام وطراز الجهاز عبر الـ sysctl إذا طلبتها بعض المكتبات الداخلية
-%hook NSObject
-
-- (NSString *)machine {
-    return @"iPhone16,2"; // كود طراز آيفون 15 برو ماكس
-}
-
-%end
-
-// تزوير الـ User-Agent و الهيدرز في كل طلب شبكة ليمثل آيفون 15 برو ماكس بنظام 26.6.1
-%hook NSMutableURLRequest
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP();
-    }
-    if ([field isEqualToString:@"User-Agent"]) {
-        value = @"Mozilla/5.0 (iPhone16,2; CPU iPhone OS 26_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
-    }
-    %orig(value, field);
-}
-%end
-
-%hook ATTrackingManager
-+ (NSUInteger)trackingAuthorizationStatus {
-    return 2; // Denied
-}
-%end
-
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
     return [NSUUID UUID];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
     return NO;
+}
+%end
+
+// تزوير الـ IP والـ User-Agent وجميع الهيدرز الخاصة بالشبكة لتجاوز فحص الأجهزة
+%hook NSMutableURLRequest
+- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
+    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
+        value = randomEuropeanIP();
+    }
+    if ([field isEqualToString:@"User-Agent"]) {
+        value = @"Mozilla/5.0 (iPhone16,2; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+    }
+    %orig(value, field);
 }
 %end
 
@@ -226,14 +212,14 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [iPhone15PM-26.6.1] showRewardAd executed successfully.");
+        NSLog(@">>> [Optimized-Fix] showRewardAd executed successfully.");
     } @catch (NSException *exception) {
-        NSLog(@">>> [iPhone15PM-26.6.1] Exception caught in showRewardAd, bypassing safely: %@", exception.reason);
+        NSLog(@">>> [Optimized-Fix] Exception caught in showRewardAd: %@", exception.reason);
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [iPhone15PM-26.6.1] Ad failure intercepted, forcing instant reward delivery.");
+    NSLog(@">>> [Optimized-Fix] Ad failure intercepted, forcing instant reward delivery.");
     id targetSelf = self;
     if ([targetSelf respondsToSelector:@selector(grantReward)]) {
         [targetSelf grantReward];
