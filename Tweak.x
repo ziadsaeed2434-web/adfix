@@ -4,7 +4,7 @@
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <objc/runtime.h>
 
-// إعلان مسبق شامل لدوال الإعلانات مع إضافة دالة الحلقة لتجنب أخطاء المترجم
+// إعلان مسبق شامل لدوال الإعلانات
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -18,7 +18,7 @@
 @end
 
 // ==========================================
-// نظام توليد الـ IPs الأوروبية السكنية (Residential IPs)
+// نظام توليد الـ IPs الأوروبية (النطاقين المطلوبين حصرياً)
 // ==========================================
 
 static void clearKeychainExceptToken() {
@@ -55,20 +55,15 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-static NSString *randomEuropeanResidentialIP() {
-    NSArray *europeanResidentialSubnets = @[
-        @[@79, @200],  // Deutsche Telekom (ألمانيا)
-        @[@84, @115],  // Vodafone (ألمانيا)
-        @[@90, @85],   // Orange (فرنسا)
-        @[@78, @119],  // Free SAS (فرنسا)
-        @[@82, @132],  // BT / EE (بريطانيا)
-        @[@86, @150],  // Virgin Media (بريطانيا)
-        @[@84, @241],  // KPN (هولندا)
-        @[@94, @212]   // Ziggo (هولندا)
+// توليد IPs حصرياً من النطاقين المطلوبين: 82.92.x.x و 80.152.x.x
+static NSString *randomSpecificEuropeanIP() {
+    NSArray *allowedSubnets = @[
+        @[@82, @92],
+        @[@80, @152]
     ];
     
-    int selectedIndex = arc4random_uniform((uint32_t)[europeanResidentialSubnets count]);
-    NSArray *subnet = europeanResidentialSubnets[selectedIndex];
+    int selectedIndex = arc4random_uniform((uint32_t)[allowedSubnets count]);
+    NSArray *subnet = allowedSubnets[selectedIndex];
     
     int p1 = [subnet[0] intValue];
     int p2 = [subnet[1] intValue];
@@ -98,7 +93,7 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// محاكاة التثبيت النظيف من الجذور
+// محاكاة التثبيت النظيف من الجذور مع كل إقلاع
 static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     @autoreleasepool {
         clearKeychainExceptToken();
@@ -143,25 +138,27 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
         [defaults synchronize];
         
-        NSLog(@">>> [EU-Residential-Engine] Sandbox wiped & European Residential IP system active.");
+        NSLog(@">>> [Strict-IP-Engine] Sandbox wiped & Target IPs (82.92 / 80.152) active.");
     }
 }
 
 // ==========================================
-// حقن الـ IPs والترويسات الأوروبية السكنية في كل الطلبات
+// شبكة الحماية الشاملة واعتراض كل الطلبات بلا استثناء
 // ==========================================
 
+// 1. اعتراض الطلبات القابلة للتعديل (NSMutableURLRequest) وحقن الـ IP في كل ترويسة
 %hook NSMutableURLRequest
 
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    NSString *residentialIP = randomEuropeanResidentialIP();
+    NSString *targetIP = randomSpecificEuropeanIP();
     
     if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
         [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
         [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame ||
         [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame ||
-        [field caseInsensitiveCompare:@"Via"] == NSOrderedSame) {
-        value = residentialIP;
+        [field caseInsensitiveCompare:@"Via"] == NSOrderedSame ||
+        [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame) {
+        value = targetIP;
     }
     
     if ([field caseInsensitiveCompare:@"User-Agent"] == NSOrderedSame) {
@@ -177,13 +174,60 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         mutableFields = [NSMutableDictionary dictionary];
     }
     
-    NSString *residentialIP = randomEuropeanResidentialIP();
-    mutableFields[@"X-Forwarded-For"] = residentialIP;
-    mutableFields[@"X-Real-IP"] = residentialIP;
-    mutableFields[@"Client-IP"] = residentialIP;
+    NSString *targetIP = randomSpecificEuropeanIP();
+    mutableFields[@"X-Forwarded-For"] = targetIP;
+    mutableFields[@"X-Real-IP"] = targetIP;
+    mutableFields[@"Client-IP"] = targetIP;
+    mutableFields[@"True-Client-IP"] = targetIP;
     mutableFields[@"User-Agent"] = randomEuropeanUserAgent();
     
     %orig(mutableFields);
+}
+
+%end
+
+// 2. اعتراض حتى الطلبات الثابتة (NSURLRequest) وإجبارها على تمرير الـ IP عبر تهيئة الطلب
+%hook NSURLRequest
+
+- (NSDictionary<NSString *,NSString *> *)allHTTPHeaderFields {
+    NSDictionary *originalFields = %orig;
+    NSMutableDictionary *mutableFields = originalFields ? [originalFields mutableCopy] : [NSMutableDictionary dictionary];
+    
+    NSString *targetIP = randomSpecificEuropeanIP();
+    mutableFields[@"X-Forwarded-For"] = targetIP;
+    mutableFields[@"X-Real-IP"] = targetIP;
+    mutableFields[@"Client-IP"] = targetIP;
+    mutableFields[@"User-Agent"] = randomEuropeanUserAgent();
+    
+    return [mutableFields copy];
+}
+
+%end
+
+// 3. اعتراض جلسات الشبكة (NSURLSession) لمنع أي طلب من الإفلات دون حقن
+%hook NSURLSession
+
+- NSURLSessionDataTask *dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    // إنشاء طلب معدل يضمن حقن الـ IP في الطلبات المنشأة عبر الـ Session
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    NSString *targetIP = randomSpecificEuropeanIP();
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:randomEuropeanUserAgent() forHTTPHeaderField:@"User-Agent"];
+    
+    return %orig(mutableReq, completionHandler);
+}
+
+- NSURLSessionDataTask *dataTaskWithRequest:(NSURLRequest *)request {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    NSString *targetIP = randomSpecificEuropeanIP();
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
+    [mutableReq setValue:targetIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:randomEuropeanUserAgent() forHTTPHeaderField:@"User-Agent"];
+    
+    return %orig(mutableReq);
 }
 
 %end
