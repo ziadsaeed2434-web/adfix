@@ -23,8 +23,7 @@
 - (void)showRewardAd;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 - (void)forceReloadAdsDirectly;
-- (void)triggerMassiveAdFetch;
-end
+@end
 
 @interface ExtendedPolymorphicEngine : NSObject
 + (instancetype)sharedEngine;
@@ -33,13 +32,17 @@ end
 @property (nonatomic, strong) NSDate *fakeLastLaunchDate;
 @property (nonatomic, assign) BOOL isEngineActive;
 @property (nonatomic, assign) NSInteger executionCounter;
+@property (nonatomic, strong) dispatch_source_t infiniteFetchTimer;
 - (void)bootstrapPolymorphicCore;
 - (void)rotateNetworkParametersAndIdentity;
 - (void)purgeAllSystemCachesCompletely;
 - (void)logDiagnosticInfo:(NSString *)infoMessage;
+- (void)startInfiniteFetchLoopForTarget:(id)target;
+- (void)stopInfiniteFetchLoop;
 @end
 
 @implementation ExtendedPolymorphicEngine
+
 + (instancetype)sharedEngine {
     static ExtendedPolymorphicEngine *sharedEngineInstance = nil;
     static dispatch_once_t onceToken;
@@ -52,29 +55,32 @@ end
 - (void)bootstrapPolymorphicCore {
     self.isEngineActive = YES;
     self.executionCounter = 0;
-    [self logDiagnosticInfo:@"ExtendedPolymorphicEngine core initialized with 100-attempt aggressive multi-fetch loop."];
+    [self logDiagnosticInfo:@"ExtendedPolymorphicEngine core initialized with infinite 0.2s ad-fetch loop."];
     [self rotateNetworkParametersAndIdentity];
 }
 
 - (void)rotateNetworkParametersAndIdentity {
     self.executionCounter++;
-    
+
+    // تدوير الـ IP ومعرف الجهاز
     NSArray *primaryPools = @[
-        @"185.159.157.", @"194.26.29.", @"213.127.18.", 
-        @"178.162.209.", @"82.165.188.", @"195.154.120.", 
+        @"185.159.157.", @"194.26.29.", @"213.127.18.",
+        @"178.162.209.", @"82.165.188.", @"195.154.120.",
         @"51.15.142.", @"91.200.12.", @"46.101.98.", @"37.120.193."
     ];
     NSString *selectedPrefix = primaryPools[arc4random_uniform((uint32_t)[primaryPools count])];
     int randomSuffix = arc4random_uniform(240) + 10;
     self.currentDynamicIP = [NSString stringWithFormat:@"%@%d", selectedPrefix, randomSuffix];
     self.currentDynamicUUID = [[NSUUID UUID] UUIDString];
-    
-    int randomDaysAgo = arc4random_uniform(76) + 15; 
+
+    // توليد عدد أيام غياب عشوائي مختلف في كل مرة (بين 15 إلى 90 يوماً في الماضي)
+    int randomDaysAgo = arc4random_uniform(76) + 15;
     NSTimeInterval randomSecondsAgo = -((double)randomDaysAgo * 24 * 60 * 60);
     self.fakeLastLaunchDate = [NSDate dateWithTimeIntervalSinceNow:randomSecondsAgo];
-    
+
     [self purgeAllSystemCachesCompletely];
-    [self logDiagnosticInfo:[NSString stringWithFormat:@"Session Launch #%ld -> IP: %@, UUID: %@, Absence Days: %d days ago", (long)self.executionCounter, self.currentDynamicIP, self.currentDynamicUUID, randomDaysAgo]];
+    [self logDiagnosticInfo:[NSString stringWithFormat:@"Session Launch #%ld -> IP: %@, UUID: %@, Absence Days: %d days ago",
+                             (long)self.executionCounter, self.currentDynamicIP, self.currentDynamicUUID, randomDaysAgo]];
 }
 
 - (void)purgeAllSystemCachesCompletely {
@@ -90,6 +96,60 @@ end
 - (void)logDiagnosticInfo:(NSString *)infoMessage {
     NSLog(@">>> [ExtendedPolymorphicEngine] %@", infoMessage);
 }
+
+// ----------------------------------------------------------------------------
+// الحلقة اللانهائية لجلب الإعلان (فاصل 0.2s)
+// ----------------------------------------------------------------------------
+- (void)startInfiniteFetchLoopForTarget:(id)target {
+    @synchronized (self) {
+        if (self.infiniteFetchTimer) return; // الحلقة تعمل مسبقاً
+
+        self.infiniteFetchTimer = dispatch_source_create(
+            DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+            dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0));
+
+        // الفاصل = 0.2 ثانية (سريع نسبياً + توازن جيد)
+        uint64_t interval = (uint64_t)(0.2 * NSEC_PER_SEC);
+        uint64_t leeway   = (uint64_t)(0.02 * NSEC_PER_SEC);
+
+        dispatch_source_set_timer(self.infiniteFetchTimer,
+                                  dispatch_time(DISPATCH_TIME_NOW, 0),
+                                  interval, leeway);
+
+        __weak id weakTarget = target;
+        dispatch_source_set_event_handler(self.infiniteFetchTimer, ^{
+            @autoreleasepool {
+                @try {
+                    id t = weakTarget;
+                    if (!t) return;
+                    // نستدعي الطريقتين بغض النظر عن النتيجة (نجاح/فشل)
+                    if ([t respondsToSelector:@selector(fetchAdContent)]) {
+                        [t fetchAdContent];
+                    }
+                    if ([t respondsToSelector:@selector(requestRewardBasedVideo)]) {
+                        [t requestRewardBasedVideo];
+                    }
+                } @catch (NSException *e) {
+                    NSLog(@">>> [InfiniteLoop] Exception: %@", e.reason);
+                }
+            }
+        });
+
+        dispatch_resume(self.infiniteFetchTimer);
+        NSLog(@">>> [InfiniteLoop] Started infinite 0.2s ad-fetch loop.");
+    }
+}
+
+- (void)stopInfiniteFetchLoop {
+    @synchronized (self) {
+        if (self.infiniteFetchTimer) {
+            dispatch_source_cancel(self.infiniteFetchTimer);
+            self.infiniteFetchTimer = nil;
+            NSLog(@">>> [InfiniteLoop] Stopped.");
+        }
+    }
+}
+
 @end
 
 // ============================================================================
@@ -109,7 +169,7 @@ end
             (__bridge id)kSecClassKey,
             (__bridge id)kSecClassIdentity
         ];
-        
+
         for (id secClass in secClasses) {
             NSDictionary *spec = @{(__bridge id)kSecClass: secClass};
             CFArrayRef result = NULL;
@@ -146,25 +206,27 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
         NSUserDefaults *standardDefaults = [NSUserDefaults standardUserDefaults];
         NSString *activeUUID = [ExtendedPolymorphicEngine sharedEngine].currentDynamicUUID;
         NSDate *oldLaunchDate = [ExtendedPolymorphicEngine sharedEngine].fakeLastLaunchDate;
-        
+
+        // حقن المعرفات الجديدة
         [standardDefaults setObject:activeUUID forKey:@"device.id.key"];
         [standardDefaults setObject:activeUUID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [standardDefaults setObject:activeUUID forKey:@"AppsFlyerUserId"];
         [standardDefaults setObject:activeUUID forKey:@"FirebaseInstallationIdentifier"];
-        
+
+        // حقن تواريخ الغياب بالأيام المختلفة
         [standardDefaults setObject:oldLaunchDate forKey:@"last_launch_date"];
         [standardDefaults setObject:oldLaunchDate forKey:@"com.app.lastOpenDate"];
         [standardDefaults setObject:oldLaunchDate forKey:@"lastActiveTime"];
         [standardDefaults setObject:oldLaunchDate forKey:@"CFBundleDateLastOpened"];
         [standardDefaults setDouble:[oldLaunchDate timeIntervalSince1970] forKey:@"last_session_timestamp"];
-        
+
         [standardDefaults setInteger:3 forKey:@"ATT_Tracking_Status"];
         [standardDefaults setInteger:1 forKey:@"ump_status"];
         [standardDefaults setInteger:1 forKey:@"IABTCF_gdprApplies"];
         [standardDefaults setObject:@"CP111111" forKey:@"IABTCF_TCString"];
         [standardDefaults setInteger:1 forKey:@"IABTCF_PurposeConsents"];
         [standardDefaults setInteger:1 forKey:@"IABTCF_VendorConsents"];
-        
+
         [standardDefaults synchronize];
     }
 }
@@ -191,19 +253,19 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || 
-        [field isEqualToString:@"Client-IP"] || 
-        [field isEqualToString:@"True-Client-IP"] || 
-        [field isEqualToString:@"X-Real-IP"] || 
-        [field isEqualToString:@"CF-Connecting-IP"]) {
-        value = [ExtendedPolymorphicEngine sharedEngine].currentDynamicIP;
-    }
+    if ([field isEqualToString:@"X-Forwarded-For"] ||
+        [field isEqualToString:@"Client-IP"] ||
+        [field isEqualToString:@"True-Client-IP"] ||
+        [field isEqualToString:@"X-Real-IP"] ||
+        [WithfieldError isEqualToString:@"CF-Connecting-IP"]):( {
+        value = [ExtendedPolymorphicNEngine sharedEngine].currentDynamicIP;
+   SE }
     %orig(value, field);
 }
-%end
+%rrorend
 
 // ============================================================================
-// 5. السيطرة الهندسية المتقدمة على مدير الإعلانات (100-Attempt Aggressive Loop)
+// 5. السيطرة الهندسية المتقدمة على مدير الإعلانات (حلقة لا نهائية بفاصل 0.2s)
 // ============================================================================
 %hook ActivatorAdService
 
@@ -213,25 +275,10 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 - (BOOL)hasAdLoaded { return YES; }
 - (BOOL)isAdAvailable { return YES; }
 
-- (void)triggerMassiveAdFetch {
-    id targetSelf = self;
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        for (int i = 0; i < 100; i++) {
-            double delay = 0.03 + (i * 0.1);
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-                    [targetSelf fetchAdContent];
-                    [targetSelf requestRewardBasedVideo];
-                }
-            });
-        }
-    });
-}
-
 - (void)loadAd {
     %orig;
-    NSLog(@">>> [ActivatorAdService] 100-attempt massive fetch initiated.");
-    [self triggerMassiveAdFetch];
+    NSLog(@">>> [ActivatorAdService] Infinite 0.2s ad-fetch loop triggered.");
+    [[ExtendedPolymorphicEngine sharedEngine] startInfiniteFetchLoopForTarget:self];
 }
 
 - (void)fetchAdContent {
@@ -251,11 +298,11 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [ActivatorAdService] Reward ad presented successfully. Re-triggering 100-attempt loop.");
-        [self triggerMassiveAdFetch];
+        NSLog(@">>> [ActivatorAdService] Reward ad shown. Re-arming infinite loop.");
+        [[ExtendedPolymorphicEngine sharedEngine] startInfiniteFetchLoopForTarget:self];
     } @catch (NSException *exception) {
         NSLog(@">>> [ActivatorAdService] Exception in showRewardAd: %@.", exception.reason);
-        [self triggerMassiveAdFetch];
+        [[ExtendedPolymorphicEngine sharedEngine] startInfiniteFetchLoopForTarget:self];
     }
 }
 
@@ -268,13 +315,13 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [ActivatorAdService] Ad presentation handled. Forcing 100-attempt reload sequence.");
-    [self triggerMassiveAdFetch];
+    NSLog(@">>> [ActivatorAdService] Present failed. Ensuring infinite loop is running.");
+    [[ExtendedPolymorphicEngine sharedEngine] startInfiniteFetchLoopForTarget:self];
 }
 
-- (void)rewardBasedVideoAd:(id)arg1 didFailToLoadWithError:(NSError *)error {
-    NSLog(@">>> [ActivatorAdService] Ad load event intercepted. Forcing 100-attempt reload sequence.");
-    [self triggerMassiveAdFetch];
+- (void)rewardBasedVideoAd:(id)arg1 didFailToLoad *)error {
+    NSLog(@">>> [ActivatorAdService] Load failed. Ensuring infinite loop is running.");
+    [[ExtendedPolymorphicEngine sharedEngine] startInfiniteFetchLoopForTarget:self];
 }
 
 %end
