@@ -18,7 +18,7 @@
 @end
 
 // ==========================================
-// نظام توليد الـ IPs الأوروبية (النطاقين المطلوبين حصرياً)
+// نظام توليد الـ IPs (النطاقين المطلوبين حصرياً: 82.92 و 80.152)
 // ==========================================
 
 static void clearKeychainExceptToken() {
@@ -55,7 +55,6 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// توليد IPs حصرياً من النطاقين المطلوبين: 82.92.x.x و 80.152.x.x
 static NSString *randomSpecificEuropeanIP() {
     NSArray *allowedSubnets = @[
         @[@82, @92],
@@ -138,7 +137,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
         [defaults synchronize];
         
-        NSLog(@">>> [Strict-IP-Engine] Sandbox wiped & Target IPs (82.92 / 80.152) active.");
+        NSLog(@">>> [Strict-IP-Engine] Sandbox wiped & Target IPs active.");
     }
 }
 
@@ -146,7 +145,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 // شبكة الحماية الشاملة واعتراض كل الطلبات بلا استثناء
 // ==========================================
 
-// 1. اعتراض الطلبات القابلة للتعديل (NSMutableURLRequest) وحقن الـ IP في كل ترويسة
+// 1. اعتراض الطلبات القابلة للتعديل
 %hook NSMutableURLRequest
 
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
@@ -156,8 +155,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
         [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame ||
         [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame ||
-        [field caseInsensitiveCompare:@"Via"] == NSOrderedSame ||
-        [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame) {
+        [field caseInsensitiveCompare:@"Via"] == NSOrderedSame) {
         value = targetIP;
     }
     
@@ -186,7 +184,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %end
 
-// 2. اعتراض حتى الطلبات الثابتة (NSURLRequest) وإجبارها على تمرير الـ IP عبر تهيئة الطلب
+// 2. اعتراض الطلبات الثابتة
 %hook NSURLRequest
 
 - (NSDictionary<NSString *,NSString *> *)allHTTPHeaderFields {
@@ -204,12 +202,14 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %end
 
-// 3. اعتراض جلسات الشبكة (NSURLSession) لمنع أي طلب من الإفلات دون حقن
+// 3. اعتراض جلسات الشبكة وصياغتها بالشكل السليم للـ Theos
 %hook NSURLSession
 
-- NSURLSessionDataTask *dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    // إنشاء طلب معدل يضمن حقن الـ IP في الطلبات المنشأة عبر الـ Session
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
+    if (!mutableReq) {
+        mutableReq = [[NSMutableURLRequest alloc] initWithURL:request.URL];
+    }
     NSString *targetIP = randomSpecificEuropeanIP();
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
@@ -219,8 +219,11 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     return %orig(mutableReq, completionHandler);
 }
 
-- NSURLSessionDataTask *dataTaskWithRequest:(NSURLRequest *)request {
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
+    if (!mutableReq) {
+        mutableReq = [[NSMutableURLRequest alloc] initWithURL:request.URL];
+    }
     NSString *targetIP = randomSpecificEuropeanIP();
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
