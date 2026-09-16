@@ -29,6 +29,7 @@
 + (instancetype)sharedEngine;
 @property (nonatomic, strong) NSString *currentDynamicIP;
 @property (nonatomic, strong) NSString *currentDynamicUUID;
+@property (nonatomic, strong) NSDate *fakeLastLaunchDate;
 @property (nonatomic, assign) BOOL isEngineActive;
 @property (nonatomic, assign) NSInteger executionCounter;
 - (void)bootstrapPolymorphicCore;
@@ -50,34 +51,31 @@
 - (void)bootstrapPolymorphicCore {
     self.isEngineActive = YES;
     self.executionCounter = 0;
-    [self logDiagnosticInfo:@"ExtendedPolymorphicEngine core initialized with targeted ad pools."];
+    [self logDiagnosticInfo:@"ExtendedPolymorphicEngine core initialized with random days absence and 20-attempt loop."];
     [self rotateNetworkParametersAndIdentity];
 }
 
 - (void)rotateNetworkParametersAndIdentity {
     self.executionCounter++;
     
-    // نطاقات IP مركزية قوية ومخصصة لجلب إعلانات التطبيقات والخدمات الأمريكية (مثل Fanytel وأمثالها) بنسبة نجاح 100%
-    NSArray *targetedAdPools = @[
-        @"8.24.125.",   // نطاقات أمريكية سريعة الاستجابة لشبكات إعلانات جوجل
-        @"23.102.135.", // نطاقات سحابية تدعم إعلانات التطبيقات الخدمية
-        @"104.196.20.", // نطاقات Google Cloud المخصصة للمحتوى الإعلاني النشط
-        @"192.178.6.",  // نطاقات مباشرة تابعة لسيرفرات إعلانات AdMob
-        @"142.250.190.",// نطاقات خدمات جوجل الكبرى لتوافر الإعلانات
-        @"34.120.110.", // نطاقات أمريكية لجلب إعلانات الـ Virtual Numbers والخدمات
-        @"54.239.28.",  // نطاقات عالمية قوية لعدم ظهور خطأ No-Fill
-        @"151.101.65."  // نطاقات شبكات تسليم محتوى إعلاني نشطة
+    // تدوير الـ IP ومعرف الجهاز
+    NSArray *primaryPools = @[
+        @"185.159.157.", @"194.26.29.", @"213.127.18.", 
+        @"178.162.209.", @"82.165.188.", @"195.154.120.", 
+        @"51.15.142.", @"91.200.12.", @"46.101.98.", @"37.120.193."
     ];
-    
-    NSString *selectedPrefix = targetedAdPools[arc4random_uniform((uint32_t)[targetedAdPools count])];
-    int randomSuffix = arc4random_uniform(220) + 15;
+    NSString *selectedPrefix = primaryPools[arc4random_uniform((uint32_t)[primaryPools count])];
+    int randomSuffix = arc4random_uniform(240) + 10;
     self.currentDynamicIP = [NSString stringWithFormat:@"%@%d", selectedPrefix, randomSuffix];
-    
-    // توليد معرف فريد جديد بالكامل لكل إقلاع ودخول للتطبيق
     self.currentDynamicUUID = [[NSUUID UUID] UUIDString];
     
+    // توليد عدد أيام غياب عشوائي مختلف في كل مرة (بين 15 إلى 90 يوماً في الماضي)
+    int randomDaysAgo = arc4random_uniform(76) + 15; 
+    NSTimeInterval randomSecondsAgo = -((double)randomDaysAgo * 24 * 60 * 60);
+    self.fakeLastLaunchDate = [NSDate dateWithTimeIntervalSinceNow:randomSecondsAgo];
+    
     [self purgeAllSystemCachesCompletely];
-    [self logDiagnosticInfo:[NSString stringWithFormat:@"Targeted Rotation cycle #%ld completed. New IP: %@, New UUID: %@", (long)self.executionCounter, self.currentDynamicIP, self.currentDynamicUUID]];
+    [self logDiagnosticInfo:[NSString stringWithFormat:@"Session Launch #%ld -> IP: %@, UUID: %@, Absence Days: %d days ago", (long)self.executionCounter, self.currentDynamicIP, self.currentDynamicUUID, randomDaysAgo]];
 }
 
 - (void)purgeAllSystemCachesCompletely {
@@ -87,12 +85,11 @@
         for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
             [cookieStorage deleteCookie:cookie];
         }
-        [self logDiagnosticInfo:@"URL caches, session cookies, and network storages successfully purged."];
     }
 }
 
 - (void)logDiagnosticInfo:(NSString *)infoMessage {
-    NSLog(@">>> [TargetedPolymorphicEngine] %@", infoMessage);
+    NSLog(@">>> [ExtendedPolymorphicEngine] %@", infoMessage);
 }
 @end
 
@@ -121,22 +118,15 @@
                 NSArray *items = (__bridge NSArray *)result;
                 for (NSDictionary *item in items) {
                     NSString *account = item[(__bridge id)kSecAttrAccount];
-                    
-                    // الحفاظ الحصري على التوكن لكي لا يتم تسجيل خروج المستخدم تحت أي ظرف
                     if (account && [account rangeOfString:@"token" options:NSCaseInsensitiveSearch].location == NSNotFound) {
                         NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                         delQuery[(__bridge id)kSecClass] = secClass;
                         SecItemDelete((__bridge CFDictionaryRef)delQuery);
-                    } else {
-                        NSLog(@">>> [AdvancedKeychainGuard] Critical token protected safely: %@", account);
                     }
                 }
-                if (result) { 
-                    CFRelease(result); 
-                }
+                if (result) { CFRelease(result); }
             }
         }
-        NSLog(@");>> [AdvancedKeychainGuard] Keychain sanitized with token preservation protocol.");
     }
 }
 @end
@@ -156,15 +146,22 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 
         NSUserDefaults *standardDefaults = [NSUserDefaults standardUserDefaults];
         NSString *activeUUID = [ExtendedPolymorphicEngine sharedEngine].currentDynamicUUID;
+        NSDate *oldLaunchDate = [ExtendedPolymorphicEngine sharedEngine].fakeLastLaunchDate;
         
-        // حقن المعرفات الجديدة المتغيرة بالكامل لرضا أنظمة الحماية لشركات جوجل وأبس فلاير
+        // حقن المعرفات الجديدة
         [standardDefaults setObject:activeUUID forKey:@"device.id.key"];
         [standardDefaults setObject:activeUUID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [standardDefaults setObject:activeUUID forKey:@"AppsFlyerUserId"];
         [standardDefaults setObject:activeUUID forKey:@"FirebaseInstallationIdentifier"];
         
-        // ضبط موافقة التتبع والخصوصية لتجنب حجب الإعلانات (CMP / TCF)
-        [standardDefaults setInteger:3 forKey:@"ATT_Tracking_Status"]; // Authorized
+        // حقن تواريخ الغياب بالأيام المختلفة
+        [standardDefaults setObject:oldLaunchDate forKey:@"last_launch_date"];
+        [standardDefaults setObject:oldLaunchDate forKey:@"com.app.lastOpenDate"];
+        [standardDefaults setObject:oldLaunchDate forKey:@"lastActiveTime"];
+        [standardDefaults setObject:oldLaunchDate forKey:@"CFBundleDateLastOpened"];
+        [standardDefaults setDouble:[oldLaunchDate timeIntervalSince1970] forKey:@"last_session_timestamp"];
+        
+        [standardDefaults setInteger:3 forKey:@"ATT_Tracking_Status"];
         [standardDefaults setInteger:1 forKey:@"ump_status"];
         [standardDefaults setInteger:1 forKey:@"IABTCF_gdprApplies"];
         [standardDefaults setObject:@"CP111111" forKey:@"IABTCF_TCString"];
@@ -172,7 +169,6 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
         [standardDefaults setInteger:1 forKey:@"IABTCF_VendorConsents"];
         
         [standardDefaults synchronize];
-        NSLog(@">>> [ArchitectureMaster] Environment fully primed for targeted ad delivery.");
     }
 }
 
@@ -180,9 +176,7 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 // 4. خطافات النظام والتتبع المعمارية (System Hooks)
 // ============================================================================
 %hook ATTrackingManager
-+ (NSUInteger)trackingAuthorizationStatus {
-    return 3; // Authorized دائماً لرضا شبكات القياس
-}
++ (NSUInteger)trackingAuthorizationStatus { return 3; }
 %end
 
 %hook UIDevice
@@ -195,12 +189,9 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 - (NSUUID *)advertisingIdentifier {
     return [[NSUUID alloc] initWithUUIDString:[ExtendedPolymorphicEngine sharedEngine].currentDynamicUUID] ?: [NSUUID UUID];
 }
-- (BOOL)isAdvertisingTrackingEnabled {
-    return YES;
-}
+- (BOOL)isAdvertisingTrackingEnabled { return YES; }
 %end
 
-// تزوير ترويسات الشبكة لحقن الـ IP المستهدف النظيف في كل طلب HTTP صادر
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || 
@@ -215,7 +206,7 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 %end
 
 // ============================================================================
-// 5. السيطرة الهندسية المتقدمة على مدير الإعلانات (ActivatorAdService)
+// 5. السيطرة الهندسية المتقدمة على مدير الإعلانات (20-Attempt Loop + Random Days Absence)
 // ============================================================================
 %hook ActivatorAdService
 
@@ -225,34 +216,27 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 - (BOOL)hasAdLoaded { return YES; }
 - (BOOL)isAdAvailable { return YES; }
 
-// دالة تحميل متطورة مع جدولة زمنية متعددة المراحل لجلب الإعلانات الخدمية (مثل Fanytel) فوراً
 - (void)loadAd {
     %orig;
-    [[ExtendedPolymorphicEngine sharedEngine] purgeAllSystemCachesCompletely];
-    
     id targetSelf = self;
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        } else if ([targetSelf respondsToSelector:@selector(fetchAdContent)]) {
-            [targetSelf fetchAdContent];
-        }
-    });
+    NSLog(@">>> [ActivatorAdService] 20-attempt aggressive multi-fetch triggered with random days absence profile.");
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(requestRewardBasedVideo)]) {
-            [targetSelf requestRewardBasedVideo];
-        } else if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    });
+    double attempts[20] = {
+        0.05, 0.12, 0.20, 0.30, 0.42, 
+        0.55, 0.70, 0.88, 1.08, 1.30, 
+        1.55, 1.83, 2.14, 2.48, 2.85, 
+        3.25, 3.68, 4.14, 4.63, 5.15
+    };
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    });
+    for (int i = 0; i < 20; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(attempts[i] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+                [targetSelf fetchAdContent];
+                [targetSelf requestRewardBasedVideo];
+            }
+        });
+    }
 }
 
 - (void)fetchAdContent {
@@ -272,7 +256,12 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 - (void)showRewardAd {
     @try {
         %orig;
+        NSLog(@">>> [ActivatorAdService] Reward ad presented successfully. Re-triggering 20-attempt loop.");
+        if ([self respondsToSelector:@selector(loadAd)]) {
+            [self loadAd];
+        }
     } @catch (NSException *exception) {
+        NSLog(@">>> [ActivatorAdService] Exception in showRewardAd: %@.", exception.reason);
         if ([self respondsToSelector:@selector(loadAd)]) {
             [self loadAd];
         }
@@ -283,16 +272,14 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
     @try {
         %orig;
     } @catch (NSException *exception) {
-        // Handle exception safely
+        NSLog(@">>> [ActivatorAdService] Exception in presentAdFromViewController: %@", exception.reason);
     }
 }
 
-// معالجة أخطاء No-Fill بتدوير النطاقات المستهدفة فوراً لجلب إعلان مماثل
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    [[ExtendedPolymorphicEngine sharedEngine] rotateNetworkParametersAndIdentity];
-    
+    NSLog(@">>> [ActivatorAdService] Ad presentation handled. Forcing 20-attempt reload sequence.");
     id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
             [targetSelf loadAd];
         }
@@ -300,10 +287,9 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 }
 
 - (void)rewardBasedVideoAd:(id)arg1 didFailToLoadWithError:(NSError *)error {
-    [[ExtendedPolymorphicEngine sharedEngine] rotateNetworkParametersAndIdentity];
-    
+    NSLog(@">>> [ActivatorAdService] Ad load event intercepted. Forcing 20-attempt reload sequence.");
     id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
             [targetSelf loadAd];
         }
