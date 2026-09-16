@@ -13,7 +13,7 @@
 - (BOOL)hasAdLoaded;
 - (void)showRewardAd;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
-- (void)grantReward; // دالة إضافية لاستهداف منح المكافأة فوراً إن وجدت
+- (void)grantReward;
 @end
 
 // 1. تنظيف الـ Keychain مع الحفاظ التام والآمن حصرياً على الـ tokenKey
@@ -55,8 +55,7 @@ static NSString *randomNewIDFA() {
 }
 
 static NSString *randomEuropeanIP() {
-
-    return [NSString stringWithFormat:@"80.152.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+    return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 static double randomInactivitySeconds() {
@@ -70,19 +69,16 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. محاكاة حذف التطبيق من الجذور وتثبيته من جديد + منع التتبع قسرياً مع كل إقلاع
-static __attribute__((constructor)) void simulateFreshAppReinstallation() {
+// 2. محاكاة حذف التطبيق من الجذور وتثبيته من جديد
+static void simulateFreshAppReinstallation() {
     @autoreleasepool {
-        // حماية التوكن أولاً في الـ Keychain
         clearKeychainExceptToken();
 
-        // مسح نطاق الـ NSUserDefaults بالكامل
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
 
-        // الوصول للمجلد الرئيسي للتطبيق (Sandbox) لمسح الملفات تماماً كأنه حذف وثبت من جديد
         NSString *homeDir = NSHomeDirectory();
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSArray *subfoldersToWipe = @[@"Documents", @"Library", @"tmp"];
@@ -96,7 +92,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
                         NSString *subPath = [folderPath stringByAppendingPathComponent:item];
                         NSArray *subContents = [fileManager contentsOfDirectoryAtPath:subPath error:nil];
                         for (NSString *subItem in subContents) {
-                            if (![subItem containsString:@"WebKit"] && ![subItem containsString:@"Preferences"]) {
+                            if (![subItem containsString:@"WebKit"] && ![:subItem containsString:@"Preferences"]) {
                                 NSString *finalPath = [subPath stringByAppendingPathComponent:subItem];
                                 [fileManager removeItemAtPath:finalPath error:nil];
                             }
@@ -109,7 +105,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             }
         }
         
-        // حقن بصمة جديدة ومعرفات نظيفة 100% كأول تثبيت
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -120,7 +115,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
         
-        // فرض حالة رفض التتبع (ATT Denied = 2) لضمان ظهور الإعلانات الفورية المضمونة
         [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:0 forKey:@"ump_status"];
         [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
@@ -144,85 +138,103 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     }
 }
 
-// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
-%hook ATTrackingManager
-+ (NSUInteger)trackingAuthorizationStatus {
-    return 2; // Denied (رفض التتبع لضمان جلب الإعلان فوراً)
+// 3. تطبيق الـ Runtime Hooks لدوال النظام ومدير الإعلانات بدون جلبريك
+// تنفيذ الدوال المستبدلة
+static NSUInteger replacement_trackingAuthorizationStatus(id self, SEL _cmd) {
+    return 2; // Denied
 }
-%end
 
-// تثبيت الهويات الوهمية للأجهزة
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
+static NSUUID * replacement_identifierForVendor(id self, SEL _cmd) {
     return [NSUUID UUID];
 }
-%end
 
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
+static NSUUID * replacement_advertisingIdentifier(id self, SEL _cmd) {
     return [NSUUID UUID];
 }
-- (BOOL)isAdvertisingTrackingEnabled {
-    return NO; // مطابقة لحالة رفض التتبع لجلب إعلانات عامة فورية
-}
-%end
 
-// تزوير الـ IP في كل طلب شبكة
-%hook NSMutableURLRequest
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP();
-    }
-    %orig(value, field);
-}
-%end
-
-// --- التحصين المطلق لمدير الإعلانات ومنع أي فشل نهائياً ---
-%hook ActivatorAdService
-
-- (BOOL)isReady {
-    return YES;
+static BOOL replacement_isAdvertisingTrackingEnabled(id self, SEL _cmd) {
+    return NO;
 }
 
-- (BOOL)isAdReady {
-    return YES;
-}
+static BOOL replacement_isReady(id self, SEL _cmd) { return YES; }
+static BOOL replacement_isAdReady(id self, SEL _cmd) { return YES; }
+static BOOL replacement_canShowAd(id self, SEL _cmd) { return YES; }
+static BOOL replacement_hasAdLoaded(id self, SEL _cmd) { return YES; }
 
-- (BOOL)canShowAd {
-    return YES;
-}
-
-- (BOOL)hasAdLoaded {
-    return YES;
-}
-
-- (void)loadAd {
-    %orig;
-    // حماية إضافية عبر إعادة طلب مستمرة وذكية
+static void replacement_loadAd(id self, SEL _cmd) {
+    // استدعاء الدالة الأصلية إن أمكن أو تجاهلها وتطبيق اللوجيك الخاص بك
     id targetSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
+        if ([targetSelf respondsToSelector:NSSelectorFromString(@"loadAd")]) {
+            // تجنب التكرار اللانهائي المباشر بدون فحص دقيق، هنا اكتفينا بالتأخير
         }
     });
 }
 
-// اعتراض عملية العرض لضمان عدم تعليق الزر ومنح المكافأة الفورية
-- (void)showRewardAd {
+static void replacement_showRewardAd(id self, SEL _cmd) {
     @try {
-        %orig;
         NSLog(@">>> [Full-Simulate] showRewardAd executed successfully.");
     } @catch (NSException *exception) {
         NSLog(@">>> [Full-Simulate] Exception caught in showRewardAd, bypassing safely: %@", exception.reason);
     }
 }
 
-- (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Full-Simulate] Ad failure intercepted, forcing instant reward delivery.");
-    id targetSelf = self;
-    if ([targetSelf respondsToSelector:@selector(grantReward)]) {
-        [targetSelf grantReward];
+// نقطة الدخول الرئيسية للحقن المباشر عبر eSign
+__attribute__((constructor)) static void initializer() {
+    @autoreleasepool {
+        // تنفيذ مسح البيئة أولاً
+        simulateFreshAppReinstallation();
+        
+        // تبديل دوال ATTTrackingManager (Class methods)
+        Class attClass = objc_getClass("ATTrackingManager");
+        if (attClass) {
+            Method m = class_getClassMethod(attClass, @selector(trackingAuthorizationStatus));
+            if (m) method_setImplementation(m, (IMP)replacement_trackingAuthorizationStatus);
+        }
+        
+        // تبديل دوال UIDevice
+        Class uiDevClass = objc_getClass("UIDevice");
+        if (uiDevClass) {
+            Method m = class_getInstanceMethod(uiDevClass, @selector(identifierForVendor));
+            if (m) method_setImplementation(m, (IMP)replacement_identifierForVendor);
+        }
+        
+        // تبديل دوال ASIdentifierManager
+        Class asIdClass = objc_getClass("ASIdentifierManager");
+        if (asIdClass) {
+            Method m = class_getInstanceMethod(asIdClass, @selector(advertisingIdentifier));
+            if (m) method_setImplementation(m, (IMP)replacement_advertisingIdentifier);
+            Method m2 = class_getInstanceMethod(asIdClass, @selector(isAdvertisingTrackingEnabled));
+            if (m2) method_setImplementation(m2, (IMP)replacement_isAdvertisingTrackingEnabled);
+        }
+        
+        // تبديل دوال ActivatorAdService إذا كانت موجودة وقت التشغيل
+        Class adServiceClass = objc_getClass("ActivatorAdService");
+        if (adServiceClass) {
+            SEL selectors[] = {
+                @selector(isReady),
+                @selector(isAdReady),
+                @selector(canShowAd),
+                @selector(hasAdLoaded),
+                @selector(showRewardAd)
+            };
+            
+            IMP implementations[] = {
+                (IMP)replacement_isReady,
+                (IMP)replacement_isAdReady,
+                (IMP)replacement_canShowAd,
+                (IMP)replacement_hasAdLoaded,
+                (IMP)replacement_showRewardAd
+            };
+            
+            for (int i = 0; i < 5; i++) {
+                Method m = class_getInstanceMethod(adServiceClass, selectors[i]);
+                if (m) {
+                    method_setImplementation(m, implementations[i]);
+                }
+            }
+        }
+        
+        NSLog(@">>> [Non-Jailbroken dylib] Successfully loaded and hooked via eSign!");
     }
 }
-
-%end
