@@ -4,7 +4,7 @@
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <objc/runtime.h>
 
-// إعلان مسبق شامل لدوال الإعلانات
+// إعلان مسبق شامل لدوال الإعلانات مع إضافة دالة الحلقة لتجنب أخطاء المترجم
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -14,6 +14,7 @@
 - (void)showRewardAd;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 - (void)grantReward;
+- (void)triggerAggressiveAdLoop;
 @end
 
 // ==========================================
@@ -36,7 +37,6 @@ static void clearKeychainExceptToken() {
             NSArray *items = (__bridge NSArray *)result;
             for (NSDictionary *item in items) {
                 NSString *account = item[(__bridge id)kSecAttrAccount];
-                NSString *service = item[(__bridge id)kSecAttrService];
                 
                 if (![account isEqualToString:@"tokenKey"]) {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
@@ -55,21 +55,18 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// توليد IPs أوروبية سكنية حقيقية 100% (Residential) لمزودي إنترنت منزلي معتمدين في ألمانيا، فرنسا، بريطانيا وهولندا
 static NSString *randomEuropeanResidentialIP() {
-    // نطاقات سكنية حقيقية لأكبر مزودي الإنترنت في أوروبا (ISP Residential Subnets)
     NSArray *europeanResidentialSubnets = @[
-        @[@79, @200],  // Deutsche Telekom (ألمانيا - منزلي)
-        @[@84, @115],  // Vodafone / Kabel Deutschland (ألمانيا - منزلي)
-        @[@90, @85],   // Orange (فرنسا - منزلي)
-        @[@78, @119],  // Free SAS (فرنسا - منزلي)
-        @[@82, @132],  // BT / EE (بريطانيا - منزلي)
-        @[@86, @150],  // Virgin Media (بريطانيا - منزلي)
-        @[@84, @241],  // KPN (هولندا - منزلي)
-        @[@94, @212]   // Ziggo (هولندا - منزلي)
+        @[@79, @200],  // Deutsche Telekom (ألمانيا)
+        @[@84, @115],  // Vodafone (ألمانيا)
+        @[@90, @85],   // Orange (فرنسا)
+        @[@78, @119],  // Free SAS (فرنسا)
+        @[@82, @132],  // BT / EE (بريطانيا)
+        @[@86, @150],  // Virgin Media (بريطانيا)
+        @[@84, @241],  // KPN (هولندا)
+        @[@94, @212]   // Ziggo (هولندا)
     ];
     
-    // اختيار مزود عشوائي
     int selectedIndex = arc4random_uniform((uint32_t)[europeanResidentialSubnets count]);
     NSArray *subnet = europeanResidentialSubnets[selectedIndex];
     
@@ -97,7 +94,7 @@ static double randomInactivitySeconds() {
 static NSString *generateFreshTimestamp() {
     NSDate *now = [NSDate date];
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0100'"]; // توقيت وسط أوروبا CET
+    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0100'"];
     return [formatter stringFromDate:now];
 }
 
