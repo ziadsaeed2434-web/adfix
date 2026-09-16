@@ -18,7 +18,7 @@
 @end
 
 // ==========================================
-// نظام توليد النطاقات السكنية الهولندية الموثوقة حصرياً
+// نظام توليد IP واحد وثابت للجلسة من النطاق 82.92
 // ==========================================
 
 static void clearKeychainExceptToken() {
@@ -55,24 +55,16 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// توليد IPs حصرياً من نطاقات سكنية هولندية موثوقة (KPN, Ziggo, Odido)
-static NSString *randomDutchResidentialIP() {
-    NSArray *dutchResidentialSubnets = @[
-        @[@84, @241], // KPN Residential
-        @[@94, @212], // Ziggo Residential
-        @[@213, @46], // T-Mobile / Odido Netherlands
-        @[@62, @194]  // VodafoneZiggo NL
-    ];
-    
-    int selectedIndex = arc4random_uniform((uint32_t)[dutchResidentialSubnets count]);
-    NSArray *subnet = dutchResidentialSubnets[selectedIndex];
-    
-    int p1 = [subnet[0] intValue];
-    int p2 = [subnet[1] intValue];
-    int p3 = arc4random_uniform(240) + 1;
-    int p4 = arc4random_uniform(250) + 1;
-    
-    return [NSString stringWithFormat:@"%d.%d.%d.%d", p1, p2, p3, p4];
+// توليد IP واحد وثابت لكل جلسة إقلاع من النطاق المطلوب 82.92.*.*
+static NSString *getSessionResidentialIP() {
+    static NSString *cachedSessionIP = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        int p3 = arc4random_uniform(240) + 1;
+        int p4 = arc4random_uniform(250) + 1;
+        cachedSessionIP = [NSString stringWithFormat:@"82.92.%d.%d", p3, p4];
+    });
+    return cachedSessionIP;
 }
 
 static NSString *randomEuropeanUserAgent() {
@@ -95,7 +87,7 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// محاكاة التثبيت النظيف من الجذور وتطهير الـ NSUserDefaults تماماً مع كل إقلاع
+// محاكاة التثبيت النظيف وتطهير الـ NSUserDefaults تماماً مع كل إقلاع
 static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     @autoreleasepool {
         clearKeychainExceptToken();
@@ -131,12 +123,10 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         NSString *freshDate = generateFreshTimestamp();
         double dynamicInactivityTime = randomInactivitySeconds();
         
-        // حقن هويات جديدة كلياً
         [defaults setObject:freshID forKey:@"device.id.key"];
         [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         
-        // إبقاء حالة التتبع مفعلة (Authorized = 3) وتجاوز موافقة UMP لمنح الإعلانات بشكل كامل
         [defaults setInteger:3 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:1 forKey:@"ump_status"];
         [defaults setInteger:3 forKey:@"ump_rq_st"];
@@ -148,18 +138,18 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
         [defaults synchronize];
         
-        NSLog(@">>> [Tracking-Active-Engine] Sandbox wiped & Tracking Authorized.");
+        NSLog(@">>> [82.92-Engine] Active Session IP: %@", getSessionResidentialIP());
     }
 }
 
 // ==========================================
-// الحقن المطلق والشامل لجميع طبقات الشبكة
+// الحقن المطلق والشامل لجميع طلبات الشبكة
 // ==========================================
 
 %hook NSMutableURLRequest
 
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    NSString *targetIP = randomDutchResidentialIP();
+    NSString *targetIP = getSessionResidentialIP();
     
     if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
         [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
@@ -182,7 +172,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         mutableFields = [NSMutableDictionary dictionary];
     }
     
-    NSString *targetIP = randomDutchResidentialIP();
+    NSString *targetIP = getSessionResidentialIP();
     mutableFields[@"X-Forwarded-For"] = targetIP;
     mutableFields[@"X-Real-IP"] = targetIP;
     mutableFields[@"Client-IP"] = targetIP;
@@ -194,7 +184,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %end
 
-// اعتراض جوهري على مستوى مهام الـ NSURLSessionTask
+// اعتراض مهام الـ NSURLSession لتثبيت وحقن الـ IP الخاص بالجلسة
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -202,7 +192,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     if (!mutableReq) {
         mutableReq = [[NSMutableURLRequest alloc] initWithURL:request.URL];
     }
-    NSString *targetIP = randomDutchResidentialIP();
+    NSString *targetIP = getSessionResidentialIP();
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"Client-IP"];
@@ -217,7 +207,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     if (!mutableReq) {
         mutableReq = [[NSMutableURLRequest alloc] initWithURL:request.URL];
     }
-    NSString *targetIP = randomDutchResidentialIP();
+    NSString *targetIP = getSessionResidentialIP();
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"Client-IP"];
@@ -232,7 +222,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     if (!mutableReq) {
         mutableReq = [[NSMutableURLRequest alloc] initWithURL:request.URL];
     }
-    NSString *targetIP = randomDutchResidentialIP();
+    NSString *targetIP = getSessionResidentialIP();
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"X-Real-IP"];
     [mutableReq setValue:targetIP forHTTPHeaderField:@"Client-IP"];
@@ -244,10 +234,10 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %end
 
-// إبقاء حالة التتبع مفعلة (Authorized) لمنح التطبيق أقصى صلاحيات الإعلانات
+// إبقاء حالة التتبع مفعلة (Authorized)
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 3; // Authorized (مفعل)
+    return 3; // Authorized
 }
 %end
 
@@ -262,12 +252,12 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     return [NSUUID UUID];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
-    return YES; // تفعيل تتبع الإعلانات
+    return YES;
 }
 %end
 
 // ==========================================
-// محرك الإعلانات الذاتي والطلب اللانهائي المستمر
+// محرك الإعلانات الذاتي والطلب المستمر
 // ==========================================
 %hook ActivatorAdService
 
@@ -295,7 +285,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             if ([targetSelf respondsToSelector:@selector(grantReward)]) {
                 [targetSelf grantReward];
             }
-            // حلقة استدعاء متجددة لا تتوقف أبداً
             [targetSelf performSelector:@selector(triggerAggressiveAdLoop) withObject:nil afterDelay:2.0];
         }
     });
