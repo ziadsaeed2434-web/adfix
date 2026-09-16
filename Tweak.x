@@ -13,7 +13,7 @@
 - (BOOL)hasAdLoaded;
 - (void)showRewardAd;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
-- (void)grantReward; // دالة إضافية لاستهداف منح المكافأة فوراً إن وجدت
+- (void)grantReward;
 @end
 
 // 1. تنظيف الـ Keychain مع الحفاظ التام والآمن حصرياً على الـ tokenKey
@@ -40,7 +40,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@">>> [Full-Simulate] tokenKey safely preserved: %@", service);
+                    NSLog(@">>> [iPhone15PM-26.6.1] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -55,7 +55,6 @@ static NSString *randomNewIDFA() {
 }
 
 static NSString *randomEuropeanIP() {
-
     return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
@@ -73,16 +72,13 @@ static NSString *generateFreshTimestamp() {
 // 2. محاكاة حذف التطبيق من الجذور وتثبيته من جديد + منع التتبع قسرياً مع كل إقلاع
 static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     @autoreleasepool {
-        // حماية التوكن أولاً في الـ Keychain
         clearKeychainExceptToken();
 
-        // مسح نطاق الـ NSUserDefaults بالكامل
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
 
-        // الوصول للمجلد الرئيسي للتطبيق (Sandbox) لمسح الملفات تماماً كأنه حذف وثبت من جديد
         NSString *homeDir = NSHomeDirectory();
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSArray *subfoldersToWipe = @[@"Documents", @"Library", @"tmp"];
@@ -109,7 +105,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             }
         }
         
-        // حقن بصمة جديدة ومعرفات نظيفة 100% كأول تثبيت
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -120,7 +115,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
         
-        // فرض حالة رفض التتبع (ATT Denied = 2) لضمان ظهور الإعلانات الفورية المضمونة
         [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:0 forKey:@"ump_status"];
         [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
@@ -140,21 +134,54 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         
         [defaults synchronize];
         
-        NSLog(@">>> [Full-Simulate] Sandbox completely wiped & fresh clean-install simulated with ID: %@", freshID);
+        NSLog(@">>> [iPhone15PM-26.6.1] Sandbox wiped & simulated successfully.");
     }
 }
 
-// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
-%hook ATTrackingManager
-+ (NSUInteger)trackingAuthorizationStatus {
-    return 2; // Denied (رفض التتبع لضمان جلب الإعلان فوراً)
+// 3. خداع الجهاز ليصبح آيفون 15 برو ماكس وإصدار النظام 26.6.1
+%hook UIDevice
+- (NSString *)systemVersion {
+    return @"26.6.1";
+}
+- (NSString *)model {
+    return @"iPhone";
+}
+- (NSString *)localizedModel {
+    return @"iPhone";
+}
+- (NSString *)systemName {
+    return @"iOS";
+}
+- (NSUUID *)identifierForVendor {
+    return [NSUUID UUID];
 }
 %end
 
-// تثبيت الهويات الوهمية للأجهزة
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return [NSUUID UUID];
+// خداع قيم النظام وطراز الجهاز عبر الـ sysctl إذا طلبتها بعض المكتبات الداخلية
+%hook NSObject
+
+- (NSString *)machine {
+    return @"iPhone16,2"; // كود طراز آيفون 15 برو ماكس
+}
+
+%end
+
+// تزوير الـ User-Agent و الهيدرز في كل طلب شبكة ليمثل آيفون 15 برو ماكس بنظام 26.6.1
+%hook NSMutableURLRequest
+- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
+    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
+        value = randomEuropeanIP();
+    }
+    if ([field isEqualToString:@"User-Agent"]) {
+        value = @"Mozilla/5.0 (iPhone16,2; CPU iPhone OS 26_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+    }
+    %orig(value, field);
+}
+%end
+
+%hook ATTrackingManager
++ (NSUInteger)trackingAuthorizationStatus {
+    return 2; // Denied
 }
 %end
 
@@ -163,17 +190,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     return [NSUUID UUID];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
-    return NO; // مطابقة لحالة رفض التتبع لجلب إعلانات عامة فورية
-}
-%end
-
-// تزوير الـ IP في كل طلب شبكة
-%hook NSMutableURLRequest
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP();
-    }
-    %orig(value, field);
+    return NO;
 }
 %end
 
@@ -198,7 +215,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 - (void)loadAd {
     %orig;
-    // حماية إضافية عبر إعادة طلب مستمرة وذكية
     id targetSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
@@ -207,18 +223,17 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     });
 }
 
-// اعتراض عملية العرض لضمان عدم تعليق الزر ومنح المكافأة الفورية
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Full-Simulate] showRewardAd executed successfully.");
+        NSLog(@">>> [iPhone15PM-26.6.1] showRewardAd executed successfully.");
     } @catch (NSException *exception) {
-        NSLog(@">>> [Full-Simulate] Exception caught in showRewardAd, bypassing safely: %@", exception.reason);
+        NSLog(@">>> [iPhone15PM-26.6.1] Exception caught in showRewardAd, bypassing safely: %@", exception.reason);
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Full-Simulate] Ad failure intercepted, forcing instant reward delivery.");
+    NSLog(@">>> [iPhone15PM-26.6.1] Ad failure intercepted, forcing instant reward delivery.");
     id targetSelf = self;
     if ([targetSelf respondsToSelector:@selector(grantReward)]) {
         [targetSelf grantReward];
