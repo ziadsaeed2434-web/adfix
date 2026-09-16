@@ -23,7 +23,8 @@
 - (void)showRewardAd;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 - (void)forceReloadAdsDirectly;
-@end
+- (void)triggerMassiveAdFetch; // تم إضافة الدالة هنا لتعريفها للمترجم
+end
 
 @interface ExtendedPolymorphicEngine : NSObject
 + (instancetype)sharedEngine;
@@ -58,7 +59,6 @@
 - (void)rotateNetworkParametersAndIdentity {
     self.executionCounter++;
     
-    // تدوير الـ IP ومعرف الجهاز
     NSArray *primaryPools = @[
         @"185.159.157.", @"194.26.29.", @"213.127.18.", 
         @"178.162.209.", @"82.165.188.", @"195.154.120.", 
@@ -69,7 +69,6 @@
     self.currentDynamicIP = [NSString stringWithFormat:@"%@%d", selectedPrefix, randomSuffix];
     self.currentDynamicUUID = [[NSUUID UUID] UUIDString];
     
-    // توليد أيام غياب عشوائية مختلفة (بين 15 إلى 90 يوماً في الماضي)
     int randomDaysAgo = arc4random_uniform(76) + 15; 
     NSTimeInterval randomSecondsAgo = -((double)randomDaysAgo * 24 * 60 * 60);
     self.fakeLastLaunchDate = [NSDate dateWithTimeIntervalSinceNow:randomSecondsAgo];
@@ -148,13 +147,11 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
         NSString *activeUUID = [ExtendedPolymorphicEngine sharedEngine].currentDynamicUUID;
         NSDate *oldLaunchDate = [ExtendedPolymorphicEngine sharedEngine].fakeLastLaunchDate;
         
-        // حقن المعرفات الجديدة
         [standardDefaults setObject:activeUUID forKey:@"device.id.key"];
         [standardDefaults setObject:activeUUID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
         [standardDefaults setObject:activeUUID forKey:@"AppsFlyerUserId"];
         [standardDefaults setObject:activeUUID forKey:@"FirebaseInstallationIdentifier"];
         
-        // حقن تواريخ الغياب بالأيام المختلفة
         [standardDefaults setObject:oldLaunchDate forKey:@"last_launch_date"];
         [standardDefaults setObject:oldLaunchDate forKey:@"com.app.lastOpenDate"];
         [standardDefaults setObject:oldLaunchDate forKey:@"lastActiveTime"];
@@ -216,12 +213,10 @@ static __attribute__((constructor)) void initializeExtendedArchitectureMaster() 
 - (BOOL)hasAdLoaded { return YES; }
 - (BOOL)isAdAvailable { return YES; }
 
-// دالة لتوليد وجدولة 100 محاولة طلب إعلان متتالية وسريعة
 - (void)triggerMassiveAdFetch {
     id targetSelf = self;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         for (int i = 0; i < 100; i++) {
-            // توزيع 100 محاولة على أوقات متقاربة جداً (تبدأ من 0.03 ثانية وتتدرج حتى ~10 ثوانٍ)
             double delay = 0.03 + (i * 0.1);
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 if ([targetSelf respondsToSelector:@selector(loadAd)]) {
