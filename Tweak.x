@@ -91,14 +91,14 @@ static void executeFullEnvironmentRefresh() {
             NSSet *websiteDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
             NSDate *dateFrom = [NSDate distantPast];
             [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:websiteDataTypes modifiedSince:dateFrom completionHandler:^{
-                NSLog(@">>> [Dynamic-Refresh] WKWebsiteDataStore (Local Storage, Cookies, WebKit cache) wiped successfully.");
+                NSLog(@">>> [Dynamic-Refresh] WKWebsiteDataStore wiped successfully.");
             }];
         }
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *homeDir = NSHomeDirectory();
         
-        // هـ) مسح مسارات WebKit التقليدية يدوياً من الـ Sandbox لضمان عدم تبقي أي ملف مخلف
+        // هـ) مسح مسارات WebKit التقليدية يدوياً من الـ Sandbox
         NSArray *webkitSubpaths = @[
             @"Library/Caches/WebKit",
             @"Library/WebKit",
@@ -116,7 +116,6 @@ static void executeFullEnvironmentRefresh() {
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
-            // استثناءات بسيطة إذا لزم الأمر، لكن هنا نقوم بحذف الكل عدا ما تحتاجه (الـ Sandbox الافتراضي)
             NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
             [fileManager removeItemAtPath:fullPath error:&error];
         }
@@ -131,7 +130,7 @@ static void executeFullEnvironmentRefresh() {
             }
         }
 
-        // ح) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد تماماً
+        // ح) حقن هويات وبصمات جديدة بالكامل
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -165,7 +164,6 @@ static void executeFullEnvironmentRefresh() {
     }
 }
 
-// تشغيل التطهير تلقائياً مع كل إقلاع للتطبيق
 static __attribute__((constructor)) void initialAppLaunchSetup() {
     executeFullEnvironmentRefresh();
 }
@@ -201,7 +199,7 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 %end
 
-// --- التحصين المطلق: تجديد البيئة وجلب إعلانات جديدة فوراً بعد انتهاء كل إعلان ---
+// --- التصحيح هنا: السماح للـ SDK بجلب الإعلان الحقيقي مع تجاوز فحوصات الجاهزية الوهمية ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -221,13 +219,9 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 
 - (void)loadAd {
+    // الأهم: استدعاء الدالة الأصلية `%orig` لكي يقوم الـ SDK بطلب الإعلان فعلياً من السيرفر
     %orig;
-    id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    });
+    NSLog(@">>> [Dynamic-Refresh] loadAd requested from app, fetching real ad from server...");
 }
 
 - (void)showRewardAd {
@@ -235,7 +229,8 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
         %orig;
         NSLog(@">>> [Dynamic-Refresh] showRewardAd executed. Refreshing environment for the next ad.");
         
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // بعد عرض الإعلان وانتهاءه، نعطي مهلة ثانية ثم ننظف البيئة ونطلب إعلاناً جديداً
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             executeFullEnvironmentRefresh();
             
             if ([self respondsToSelector:@selector(loadAd)]) {
@@ -251,7 +246,7 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 - (void)presentAdFromViewController:(UIViewController *)viewController {
     @try {
         %orig;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             executeFullEnvironmentRefresh();
             
             if ([self respondsToSelector:@selector(loadAd)]) {
@@ -264,11 +259,11 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Dynamic-Refresh] Ad error intercepted, refreshing environment and re-loading.");
+    NSLog(@">>> [Dynamic-Refresh] Ad error intercepted: %@, refreshing and re-loading.", arg2);
     executeFullEnvironmentRefresh();
-    id targetSelf = self;
-    if ([targetSelf respondsToSelector:@selector(loadApi)]) {
-        [targetSelf loadAd];
+    
+    if ([self respondsToSelector:@selector(loadAd)]) {
+        [self loadAd];
     }
 }
 
