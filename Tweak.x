@@ -2,9 +2,10 @@
 #import <UIKit/UIKit.h>
 #import <AdSupport/AdSupport.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
+#import <WebKit/WebKit.h>
 #import <objc/runtime.h>
+#import <sys/sysctl.h>
 
-// إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -15,10 +16,30 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// متغير عام لتخزين الآيبي الخاص بالجلسة الحالية
-static NSString *currentSessionIP = nil;
+// قائمة واسعة ومتنوعة لضمان تغيير طراز الجهاز بشكل حقيقي ومختلف كلياً في كل إقلاع
+static NSArray *getSpoofableModels() {
+    return @[
+        @"iPhone13,1", @"iPhone13,2", @"iPhone13,3", @"iPhone13,4",
+        @"iPhone14,2", @"iPhone14,3", @"iPhone14,4", @"iPhone14,5",
+        @"iPhone15,2", @"iPhone15,3", @"iPhone15,4", @"iPhone15,5",
+        @"iPhone16,1", @"iPhone16,2", @"iPhone16,3", @"iPhone16,4"
+    ];
+}
 
-// 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على الـ tokenKey
+static NSArray *getSpoofableSystems() {
+    return @[@"17.1.2", @"17.2.1", @"17.4.1", @"17.5.1", @"18.0", @"18.1.1", @"18.2"];
+}
+
+static NSString *currentRandomModel = @"iPhone16,1";
+static NSString *currentRandomSystem = @"18.1.1";
+
+static void randomizeDeviceSpoofing() {
+    NSArray *models = getSpoofableModels();
+    NSArray *systems = getSpoofableSystems();
+    currentRandomModel = models[arc4random_uniform((uint32_t)[models count])];
+    currentRandomSystem = systems[arc4random_uniform((uint32_t)[systems count])];
+}
+
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -41,8 +62,6 @@ static void clearKeychainExceptToken() {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
-                } else {
-                    NSLog(@">>> [Dynamic-Refresh] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -56,34 +75,9 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// دالة لتوليد آيبي أوروبي سكني جديد لجلسة واحدة
-static NSString *generateNewEuropeanIP() {
-    NSArray *europeanResidentialPrefixes = @[
-        // Deutsche Telekom (ألمانيا)
-        @"217.91", @"87.138", @"79.200", @"91.32", @"84.160",
-        // Vodafone / Liberty Global (ألمانيا / إنجلترا)
-        @"176.198", @"88.130", @"95.112", @"82.165", @"212.185",
-        // Orange / Free (فرنسا)
-        @"90.119", @"80.12", @"176.150", @"78.112", @"86.200",
-        // Telefonica / Movistar (إسبانيا)
-        @"83.32", @"88.19", @"81.32", @"85.155", @"213.94",
-        // Telecom Italia / Fastweb (إيطاليا)
-        @"151.15", @"93.32", @"2.30", @"79.16", @"82.50",
-        // KPN / Ziggo (هولندا)
-        @"84.241", @"94.212", @"82.161", @"213.127",
-        // BT / Sky (بريطانيا)
-        @"86.128", @"90.240", @"2.120", @"79.130", @"151.224"
-    ];
-    
-    // تم تصحيح الأقواس هنا لتصبح سليمة 100%
-    NSString *randomPrefix = europeanResidentialPrefixes[arc4random_uniform((uint32_t)[europeanResidentialPrefixes count])];
-    
-    int thirdOctet = arc4random_uniform(254) + 1;
-    int fourthOctet = arc4random_uniform(254) + 1;
-    
-    return [NSString stringWithFormat:@"%@.%d.%d", randomPrefix, thirdOctet, fourthOctet];
+static NSString *randomEuropeanIP() {
+    return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
-
 
 static double randomInactivitySeconds() {
     return (double)(864000 + arc4random_uniform(4320000));
@@ -96,30 +90,37 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد + آيبي ثابت جديد للجلسة
+// التنفيذ الشامل والعميق لكل شيء فور إقلاع التطبيق
 static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
-        // توليد آيبي ثابت جديد خاص بهذه الجلسة فقط
-        currentSessionIP = generateNewEuropeanIP();
-        NSLog(@">>> [Dynamic-Refresh] New Session IP Generated: %@", currentSessionIP);
-
-        // أ) حماية التوكن في الكيشين
+        // 1. توليد بصمة جهاز ونظام جديدة كلياً
+        randomizeDeviceSpoofing();
+        
+        // 2. تنظيف الـ Keychain بالكامل مع الحفاظ على التوكن فقط
         clearKeychainExceptToken();
 
-        // ب) مسح نطاق الـ NSUserDefaults بالكامل
+        // 3. مسح جميع إعدادات الـ NSUserDefaults الخاصة بالتطبيق
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
 
-        // ج) تفريغ كاش الشبكة بالكامل
+        // 4. مسح بيانات الـ WebKit وجميع ملفات الارتباط (Cookies & LocalStorage)
+        if (@available(iOS 9.0, *)) {
+            NSSet *websiteDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+            [[WKWebsiteDataStore defaultDataStore] fetchDataRecordsOfTypes:websiteDataTypes completionHandler:^(NSArray<WKWebsiteDataRecord *> * _Nonnull records) {
+                [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:websiteDataTypes forDataRecords:records completionHandler:^{}];
+            }];
+        }
+
+        // 5. تصفير كاش الشبكة والطلبات السابقة
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
         
-        // د) مسح الـ Sandbox الرئيسي بالكامل
+        // 6. مسح مجلد الـ Sandbox بالكامل (المجلد الرئيسي للتطبيق)
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
@@ -128,7 +129,7 @@ static void executeFullEnvironmentRefresh() {
             [fileManager removeItemAtPath:fullPath error:&error];
         }
         
-        // هـ) مسح كل الـ App Groups المرتبطة
+        // 7. مسح بيانات الـ Group Containers المشتركة إن وجدت
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fileManager fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
@@ -138,7 +139,7 @@ static void executeFullEnvironmentRefresh() {
             }
         }
 
-        // و) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد تماماً
+        // 8. حقن بيانات وهويات جديدة تماماً لتبدو كأنها أول تثبيت نظيف للجهاز
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -168,118 +169,80 @@ static void executeFullEnvironmentRefresh() {
         
         [defaults synchronize];
         
-        NSLog(@">>> [Dynamic-Refresh] Full environment wiped & fresh ID spawned: %@", freshID);
+        NSLog(@">>> [Dynamic-Refresh] FULL WIPE & NEW DEVICE SPAWNED -> Model: %@, System: %@, IDFA: %@", currentRandomModel, currentRandomSystem, freshID);
     }
 }
 
-// تشغيل التطهير تلقائياً مع كل إقلاع للتطبيق
+// تنفيذ كامل للعملية فور تشغيل وبدء إقلاع التطبيق حصرياً
 static __attribute__((constructor)) void initialAppLaunchSetup() {
     executeFullEnvironmentRefresh();
 }
 
-// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
-%hook ATTrackingManager
-+ (NSUInteger)trackingAuthorizationStatus {
-    return 2;
-}
-%end
-
+// خداع دوال النظام ومعلومات الهاردوير بناءً على البصمة الجديدة للإقلاع
 %hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return [NSUUID UUID];
-}
+
+- (NSString *)model { return @"iPhone"; }
+- (NSString *)systemName { return @"iOS"; }
+- (NSString *)systemVersion { return currentRandomSystem; }
+- (NSUUID *)identifierForVendor { return [NSUUID UUID]; }
+
 %end
 
 %hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    return [NSUUID UUID];
-}
-- (BOOL)isAdvertisingTrackingEnabled {
-    return NO;
+- (NSUUID *)advertisingIdentifier { return [NSUUID UUID]; }
+- (BOOL)isAdvertisingTrackingEnabled { return NO; }
+%end
+
+%exthook sysctlbyname
+int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t *newlenp) {
+    int result = sysctlbyname(name, oldp, oldlenp, newp, newlenp);
+    if (result == 0 && name && oldp) {
+        if (strcmp(name, "hw.machine") == 0 || strcmp(name, "hw.model") == 0) {
+            const char *spoofedModel = [currentRandomModel UTF8String];
+            strlcpy(oldp, spoofedModel, *oldlenp);
+        }
+    }
+    return result;
 }
 %end
 
+// إعادة دمج توليد وحقن الـ IP الوهمي في طلبات الشبكة لتفادي الحظر من جهة السيرفر
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        // استخدام الآيبي الثابت الخاص بالجلسة الحالية لكل الطلبات الشبكية ضمن هذه الجلسة
-        if (currentSessionIP) {
-            value = currentSessionIP;
-        }
+        value = randomEuropeanIP();
     }
     %orig(value, field);
 }
 %end
 
-// --- التحصين المطلق: تجديد البيئة وجلب إعلانات جديدة فوراً بعد انتهاء كل إعلان ---
+// إدارة الإعلانات لضمان عدم توقفها
 %hook ActivatorAdService
 
-- (BOOL)isReady {
-    return YES;
-}
+- (BOOL)isReady { return YES; }
+- (BOOL)isAdReady { return YES; }
+- (BOOL)canShowAd { return YES; }
+- (BOOL)hasAdLoaded { return YES; }
 
-- (BOOL)isAdReady {
-    return YES;
-}
-
-- (BOOL)canShowAd {
-    return YES;
-}
-
-- (BOOL)hasAdLoaded {
-    return YES;
-}
-
-- (void)loadAd {
-    %orig;
-    id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    });
-}
+- (void)loadAd { %orig; }
 
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Dynamic-Refresh] showRewardAd executed. Refreshing environment and session IP for the next ad.");
-        
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            executeFullEnvironmentRefresh(); // هذا سيقوم بمسح البيئة وتوليد آيبي جلسة جديد كلياً
-            
-            if ([self respondsToSelector:@selector(loadAd)]) {
-                [self loadAd];
-            }
-        });
-        
-    } @catch (NSException *exception) {
-        NSLog(@">>> [Dynamic-Refresh] Exception in showRewardAd: %@", exception.reason);
-    }
+    } @catch (NSException *exception) {}
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
     @try {
         %orig;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            executeFullEnvironmentRefresh(); // تجديد الجلسة والآيبي هنا أيضاً
-            
-            if ([self respondsToSelector:@selector(loadAd)]) {
-                [self loadAd];
-            }
-        });
-    } @catch (NSException *exception) {
-        NSLog(@">>> [Dynamic-Refresh] Exception caught in presentAdFromViewController: %@", exception.reason);
-    }
+    } @catch (NSException *exception) {}
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Dynamic-Refresh] Ad error intercepted, refreshing environment and re-loading.");
-    executeFullEnvironmentRefresh();
     id targetSelf = self;
-    if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-        [targetSelf loadAd];
-    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([targetSelf respondsToSelector:@selector(loadAd)]) { [targetSelf loadAd]; }
+    });
 }
 
 %end
