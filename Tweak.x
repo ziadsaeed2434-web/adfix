@@ -15,6 +15,81 @@
 - (void)grantReward;
 @end
 
+// 1. IP واقعي وثابت للجلسة
+static NSString *getSessionIP() {
+    static NSString *sharedIP = nil;
+    static dispatch_once_t token;
+    dispatch_once(&token, ^{
+        sharedIP = [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+    });
+    return sharedIP;
+}
+
+// 2. معرفات مختلفة وواقعية وثابتة للجلسة
+static NSString *getSessionIDFA() {
+    static NSString *val = nil;
+    static dispatch_once_t token;
+    dispatch_once(&token, ^{ val = [[NSUUID UUID] UUIDString]; });
+    return val;
+}
+
+static NSString *getSessionIDFV() {
+    static NSString *val = nil;
+    static dispatch_once_t token;
+    dispatch_once(&token, ^{ val = [[NSUUID UUID] UUIDString]; });
+    return val;
+}
+
+static NSString *getSessionGoogleID() {
+    static NSString *val = nil;
+    static dispatch_once_t token;
+    dispatch_once(&token, ^{ val = [[NSUUID UUID] UUIDString]; });
+    return val;
+}
+
+static NSString *getSessionAppsFlyerID() {
+    static NSString *val = nil;
+    static dispatch_once_t token;
+    dispatch_once(&token, ^{
+        long long timestampMillis = (long long)([[NSDate date] timeIntervalSince1970] * 1000) - (arc4random_uniform(10000000) + 500000);
+        val = [NSString stringWithFormat:@"%lld-%u", timestampMillis, arc4random_uniform(900000000) + 100000000];
+    });
+    return val;
+}
+
+static NSString *getSessionFirebaseID() {
+    static NSString *val = nil;
+    static dispatch_once_t token;
+    dispatch_once(&token, ^{
+        val = [[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""];
+    });
+    return val;
+}
+
+// 3. تاريخ تثبيت واقعي (أقدم بيومين إلى 10 أيام من وقت التشغيل الحالي)
+static NSString *getSessionInstallDate() {
+    static NSString *val = nil;
+    static dispatch_once_t token;
+    dispatch_once(&token, ^{
+        NSTimeInterval randomPastTime = (double)(arc4random_uniform(691200) + 172800);
+        NSDate *installDate = [NSDate dateWithTimeIntervalSinceNow:-randomPastTime];
+        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0300'"];
+        val = [formatter stringFromDate:installDate];
+    });
+    return val;
+}
+
+// 4. أوقات خمول واقعية بين يومين إلى 10 أيام (بالثواني)
+static double getSessionInactivitySeconds() {
+    static double sharedTime = 0.0;
+    static dispatch_once_t token;
+    dispatch_once(&token, ^{
+        sharedTime = (double)(arc4random_uniform(691201) + 172800);
+    });
+    return sharedTime;
+}
+
 static void clearKeychainExceptToken() {
     @try {
         NSArray *secClasses = @[
@@ -45,25 +120,6 @@ static void clearKeychainExceptToken() {
             }
         }
     } @catch (NSException *exception) {}
-}
-
-static NSString *randomNewIDFA() {
-    return [[NSUUID UUID] UUIDString];
-}
-
-static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
-}
-
-static double randomInactivitySeconds() {
-    return (double)(864000 + arc4random_uniform(4320000));
-}
-
-static NSString *generateFreshTimestamp() {
-    NSDate *now = [NSDate date];
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0300'"];
-    return [formatter stringFromDate:now];
 }
 
 static __attribute__((constructor)) void simulateFreshAppReinstallation() {
@@ -97,28 +153,29 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             }
             
             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-            NSString *freshID = randomNewIDFA();
-            NSString *freshDate = generateFreshTimestamp();
-            double dynamicInactivityTime = randomInactivitySeconds();
             
-            [defaults setObject:freshID forKey:@"device.id.key"];
-            [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
-            [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
-            [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
+            [defaults setObject:getSessionIDFA() forKey:@"device.id.key"];
+            [defaults setObject:getSessionGoogleID() forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
+            [defaults setObject:getSessionAppsFlyerID() forKey:@"AppsFlyerUserId"];
+            [defaults setObject:getSessionFirebaseID() forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
+            [defaults setObject:getSessionIDFV() forKey:@"com.apple.uikit.customDeviceIdentifier"];
             
             [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
             [defaults setInteger:0 forKey:@"ump_status"];
             [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
             
-            [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
+            // جعل العدادات أصفاراً تماماً بناءً على طلبك
+            [defaults setInteger:0 forKey:@"AppsFlyerRealLaunchCounter"];
             [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
-            [defaults setInteger:1 forKey:@"AppsFlyerLaunchKey"];
+            [defaults setInteger:0 forKey:@"AppsFlyerLaunchKey"];
             [defaults setInteger:0 forKey:@"AppsFlyerCounter"];
             
-            [defaults setObject:freshDate forKey:@"AppsFlyerInstallDate"];
-            [defaults setObject:freshDate forKey:@"AppsFlyerFirstLaunchDate"];
-            [defaults setObject:freshDate forKey:@"AppsFlyerInstallTimestamp"];
+            NSString *installDateStr = getSessionInstallDate();
+            [defaults setObject:installDateStr forKey:@"AppsFlyerInstallDate"];
+            [defaults setObject:installDateStr forKey:@"AppsFlyerFirstLaunchDate"];
+            [defaults setObject:installDateStr forKey:@"AppsFlyerInstallTimestamp"];
             
+            double dynamicInactivityTime = getSessionInactivitySeconds();
             [defaults setDouble:0.0 forKey:@"AppsFlyerLastSessionDuration"];
             [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
             [defaults setDouble:dynamicInactivityTime forKey:@"time_passed_since_last_session"];
@@ -137,13 +194,13 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
-    return [NSUUID UUID];
+    return [[NSUUID alloc] initWithUUIDString:getSessionIDFV()];
 }
 %end
 
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    return [NSUUID UUID];
+    return [[NSUUID alloc] initWithUUIDString:getSessionIDFA()];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
     return NO;
@@ -172,10 +229,47 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP();
+    if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
+        [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
+        [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame ||
+        [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame) {
+        value = getSessionIP();
     }
     %orig(value, field);
+}
+
+- (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
+    if ([field caseInsensitiveCompare:@"X-Forwarded-For"] == NSOrderedSame ||
+        [field caseInsensitiveCompare:@"Client-IP"] == NSOrderedSame ||
+        [field caseInsensitiveCompare:@"True-Client-IP"] == NSOrderedSame ||
+        [field caseInsensitiveCompare:@"X-Real-IP"] == NSOrderedSame) {
+        value = getSessionIP();
+    }
+    %orig(value, field);
+}
+%end
+
+%hook NSURLSession
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    if (mutableReq) {
+        [mutableReq setValue:getSessionIP() forHTTPHeaderField:@"X-Forwarded-For"];
+        [mutableReq setValue:getSessionIP() forHTTPHeaderField:@"Client-IP"];
+        [mutableReq setValue:getSessionIP() forHTTPHeaderField:@"X-Real-IP"];
+        request = mutableReq;
+    }
+    return %orig(request, completionHandler);
+}
+
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    if (mutableReq) {
+        [mutableReq setValue:getSessionIP() forHTTPHeaderField:@"X-Forwarded-For"];
+        [mutableReq setValue:getSessionIP() forHTTPHeaderField:@"Client-IP"];
+        [mutableReq setValue:getSessionIP() forHTTPHeaderField:@"X-Real-IP"];
+        request = mutableReq;
+    }
+    return %orig(request);
 }
 %end
 
