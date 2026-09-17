@@ -1,46 +1,36 @@
 #import <UIKit/UIKit.h>
 
-// تعريف مسبق للدالة لتجنب أخطاء المترجم
-@interface UIViewController (ConsentHelper)
-- (BOOL)containsConsentText:(UIView *)view;
-@end
+%hook UIWindow
 
-%hook UIViewController
-
-- (void)presentViewController:(UIViewController *)viewControllerToPresent animated:(BOOL)flag completion:(void (^)(void))completion {
-    
-    // التحقق من محتويات الواجهة المراد عرضها لمنع نافذة الموافقة من الظهور نهائياً
-    [viewControllerToPresent loadViewIfNeeded];
-    if ([viewControllerToPresent containsConsentText:viewControllerToPresent.view]) {
-        // إلغاء عرض النافذة تماماً
-        return;
-    }
-    
-    %orig(viewControllerToPresent, flag, completion);
+- (void)makeKeyAndVisible {
+    %orig;
+    [self checkAndHideConsentWindow:self];
 }
 
-%end
-
-%hook UIViewController
+- (void)layoutSubviews {
+    %orig;
+    [self checkAndHideConsentWindow:self];
+}
 
 %new
-- (BOOL)containsConsentText:(UIView *)view {
+- (void)checkAndHideConsentWindow:(UIView *)view {
     for (UIView *subview in view.subviews) {
         if ([subview isKindOfClass:[UILabel class]]) {
             UILabel *label = (UILabel *)subview;
+            // فحص النصوص الموجودة في صورتك لإخفاء النافذة فوراً
             if ([label.text containsString:@"personal data"] || 
                 [label.text containsString:@"consent"] || 
                 [label.text containsString:@"advertising and content"]) {
-                return YES;
+                
+                // إخفاء النافذة بالكامل من على الشاشة
+                self.hidden = YES;
+                self.alpha = 0.0;
+                [self setUserInteractionEnabled:NO];
+                break;
             }
         }
-        if ([subview.subviews count] > 0) {
-            if ([self containsConsentText:subview]) {
-                return YES;
-            }
-        }
+        [self checkAndHideConsentWindow:subview];
     }
-    return NO;
 }
 
 %end
