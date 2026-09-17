@@ -13,7 +13,6 @@
 - (BOOL)hasAdLoaded;
 - (void)showRewardAd;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
-- (void)grantReward;
 @end
 
 // 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على الـ tokenKey
@@ -40,7 +39,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@">>> [Full-Wipe] tokenKey safely preserved: %@", service);
+                    NSLog(@">>> [Every-Launch-Wipe] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -69,10 +68,10 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. محاكاة تثبيت نظيف 100% مع مسح جذري للـ Sandbox، الـ App Groups، وكاش الشبكة
-static __attribute__((constructor)) void simulateFreshAppReinstallation() {
+// 2. التنفيذ في كل إقلاع للتطبيق (Constructor يعمل مع كل فتحه جديدة)
+static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaunch() {
     @autoreleasepool {
-        // أ) حماية التوكن أولاً في الـ Keychain
+        // أ) حماية التوكن في الكيشين
         clearKeychainExceptToken();
 
         // ب) مسح نطاق الـ NSUserDefaults بالكامل
@@ -81,14 +80,14 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
 
-        // ج) تفريغ ومسح كاش الشبكة بالكامل (URL Cache)
+        // ج) تفريغ كاش الشبكة بالكامل
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
         
-        // د) مسح الـ Sandbox الرئيسي بالكامل (كل الملفات والمجلدات بلا استثناء)
+        // د) مسح الـ Sandbox الرئيسي بالكامل في كل إقلاع
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
@@ -97,7 +96,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             [fileManager removeItemAtPath:fullPath error:&error];
         }
         
-        // هـ) مسح كل الـ App Groups وأي ملفات مرتبطة بها جذرياً
+        // هـ) مسح كل الـ App Groups المرتبطة في كل إقلاع
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fileManager fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
@@ -107,7 +106,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             }
         }
 
-        // و) حقن بصمة جديدة ومعرفات نظيفة كأنه جهاز وتثبيت جديد كلياً
+        // و) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد مع كل إقلاع
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -118,7 +117,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
         
-        // فرض حالة رفض التتبع (ATT Denied = 2) لضمان ظهور الإعلانات الفورية
         [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:0 forKey:@"ump_status"];
         [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
@@ -138,18 +136,17 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         
         [defaults synchronize];
         
-        NSLog(@">>> [Full-Wipe] Sandbox, App Groups, & Network Caches completely destroyed. Fresh environment spawned with ID: %@", freshID);
+        NSLog(@">>> [Every-Launch-Wipe] Sandbox, App Groups & Caches wiped successfully. Fresh environment spawned with ID: %@", freshID);
     }
 }
 
 // 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 2; // Denied
+    return 2;
 }
 %end
 
-// تثبيت الهويات الوهمية للأجهزة
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [NSUUID UUID];
@@ -165,7 +162,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 }
 %end
 
-// تزوير الـ IP في كل طلب شبكة
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
@@ -175,7 +171,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 }
 %end
 
-// --- التحصين المطلق لمدير الإعلانات ومنع أي فشل نهائياً ---
+// --- التحصين المطلق لإعلانات مضمونة ولا نهائية في كل إقلاع ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -197,7 +193,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 - (void)loadAd {
     %orig;
     id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
             [targetSelf loadAd];
         }
@@ -207,17 +203,33 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Full-Wipe] showRewardAd executed successfully.");
+        NSLog(@">>> [Every-Launch-Ads] showRewardAd executed. Pre-fetching next ad instantly.");
+        
+        id targetSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+                [targetSelf loadAd];
+            }
+        });
+        
     } @catch (NSException *exception) {
-        NSLog(@">>> [Full-Wipe] Exception caught in showRewardAd, bypassing safely: %@", exception.reason);
+        NSLog(@">>> [Every-Launch-Ads] Exception in showRewardAd: %@", exception.reason);
+    }
+}
+
+- (void)presentAdFromViewController:(UIViewController *)viewController {
+    @try {
+        %orig;
+    } @catch (NSException *exception) {
+        NSLog(@">>> [Every-Launch-Ads] Exception caught in presentAdFromViewController: %@", exception.reason);
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Full-Wipe] Ad failure intercepted, forcing instant reward delivery.");
+    NSLog(@">>> [Every-Launch-Ads] Ad error intercepted, forcing instant re-load.");
     id targetSelf = self;
-    if ([targetSelf respondsToSelector:@selector(grantReward)]) {
-        [targetSelf grantReward];
+    if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+        [targetSelf loadAd];
     }
 }
 
