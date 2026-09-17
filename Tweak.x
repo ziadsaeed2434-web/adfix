@@ -1,5 +1,10 @@
 #import <UIKit/UIKit.h>
 
+// تصريح مسبق للدالة لتجنب أخطاء المترجم
+@interface UIWindow (ConsentHider)
+- (void)checkAndHideConsentWindow:(UIView *)view;
+@end
+
 %hook UIWindow
 
 - (void)makeKeyAndVisible {
@@ -12,17 +17,19 @@
     [self checkAndHideConsentWindow:self];
 }
 
+%end
+
+%hook UIWindow
+
 %new
 - (void)checkAndHideConsentWindow:(UIView *)view {
     for (UIView *subview in view.subviews) {
         if ([subview isKindOfClass:[UILabel class]]) {
             UILabel *label = (UILabel *)subview;
-            // فحص النصوص الموجودة في صورتك لإخفاء النافذة فوراً
             if ([label.text containsString:@"personal data"] || 
                 [label.text containsString:@"consent"] || 
                 [label.text containsString:@"advertising and content"]) {
                 
-                // إخفاء النافذة بالكامل من على الشاشة
                 self.hidden = YES;
                 self.alpha = 0.0;
                 [self setUserInteractionEnabled:NO];
