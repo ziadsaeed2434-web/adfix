@@ -75,12 +75,15 @@ static NSString *generateNewEuropeanIP() {
         @"86.128", @"90.240", @"2.120", @"79.130", @"151.224"
     ];
     
-    NSString *randomPrefix = europeanResidentialPrefixes[arc4random_uniform((uint32_t)[europeanResidentialPrefixes count]);];
+    // تم تصحيح الأقواس هنا لتصبح سليمة 100%
+    NSString *randomPrefix = europeanResidentialPrefixes[arc4random_uniform((uint32_t)[europeanResidentialPrefixes count])];
+    
     int thirdOctet = arc4random_uniform(254) + 1;
     int fourthOctet = arc4random_uniform(254) + 1;
     
     return [NSString stringWithFormat:@"%@.%d.%d", randomPrefix, thirdOctet, fourthOctet];
 }
+
 
 static double randomInactivitySeconds() {
     return (double)(864000 + arc4random_uniform(4320000));
