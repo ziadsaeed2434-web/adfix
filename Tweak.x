@@ -4,7 +4,6 @@
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <objc/runtime.h>
 
-// إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -16,7 +15,6 @@
 - (void)grantReward;
 @end
 
-// 1. تنظيف الـ Keychain مع الحفاظ التام والآمن حصرياً على الـ tokenKey
 static void clearKeychainExceptToken() {
     @try {
         NSArray *secClasses = @[
@@ -40,8 +38,6 @@ static void clearKeychainExceptToken() {
                         NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                         delQuery[(__bridge id)kSecClass] = secClass;
                         SecItemDelete((__bridge CFDictionaryRef)delQuery);
-                    } else {
-                        NSLog(@">>> [Full-Simulate] tokenKey safely preserved: %@", service);
                     }
                 }
                 if (result) {
@@ -49,9 +45,7 @@ static void clearKeychainExceptToken() {
                 }
             }
         }
-    } @catch (NSException *exception) {
-        NSLog(@">>> Keychain cleanup exception: %@", exception.reason);
-    }
+    } @catch (NSException *exception) {}
 }
 
 static NSString *randomNewIDFA() {
@@ -73,20 +67,17 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. مسح جذري وشامل لكل محتويات الـ Sandbox بلا استثناء، مع حماية ضد الكراش
+// تصفير البصمة والـ Sandbox بالكامل في كل مرة يفتح فيها التطبيق لضمان صفحة نظيفة
 static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     @autoreleasepool {
         @try {
-            // حماية التوكن أولاً في الـ Keychain
             clearKeychainExceptToken();
 
-            // مسح نطاق الـ NSUserDefaults بالكامل
             NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
             if (bundleIdentifier) {
                 [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
             }
 
-            // الوصول للمجلد الرئيسي للتطبيق (Sandbox) وحذف كل محتوياته جذرياً وبلا استثناء
             NSString *homeDir = NSHomeDirectory();
             NSFileManager *fileManager = [NSFileManager defaultManager];
             NSArray *subfoldersToWipe = @[@"Documents", @"Library", @"tmp", @"SystemData"];
@@ -101,15 +92,12 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
                             @try {
                                 NSString *finalPath = [folderPath stringByAppendingPathComponent:item];
                                 [fileManager removeItemAtPath:finalPath error:nil];
-                            } @catch (NSException *innerEx) {
-                                // تجاهل أي خطأ لفرد ملف معين لضمان استمرار الحذف الكامل بدون توقف
-                            }
+                            } @catch (NSException *innerEx) {}
                         }
                     }
                 }
             }
             
-            // حقن بصمة جديدة تماماً وتصفير كافة العدادات
             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
             NSString *freshID = randomNewIDFA();
             NSString *freshDate = generateFreshTimestamp();
@@ -139,15 +127,10 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             [defaults setDouble:dynamicInactivityTime forKey:@"last_activity_interval"];
             
             [defaults synchronize];
-            
-            NSLog(@">>> [Full-Simulate] Sandbox completely wiped completely without ANY exceptions and safely protected from crashes!");
-        } @catch (NSException *exception) {
-            NSLog(@">>> SimulateFreshAppReinstallation Exception: %@", exception.reason);
-        }
+        } @catch (NSException *exception) {}
     }
 }
 
-// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
     return 2;
@@ -169,6 +152,27 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 }
 %end
 
+// تعديل روابط الشبكة لتجاوز قيود التكرار وإعطاء بيانات وهمية متجددة
+%hook NSURLRequest
++ (instancetype)requestWithURL:(NSURL *)URL {
+    NSString *urlString = [URL absoluteString];
+    if ([urlString containsString:@"googleads.g.doubleclick.net/mads/gma"]) {
+        if (![urlString containsString:@"custom_retry="]) {
+            NSString *separator = [urlString containsString:@"?"] ? @"&" : @"?";
+            NSString *modifiedString = [NSString stringWithFormat:@"%@%@custom_retry=%d", urlString, separator, arc4random_uniform(999999)];
+            URL = [NSURL URLWithString:modifiedString];
+        }
+    } else if ([urlString containsString:@"app-analytics-services.com/config/app"]) {
+        if (![urlString containsString:@"rnd="]) {
+            NSString *separator = [urlString containsString:@"?"] ? @"&" : @"?";
+            NSString *modifiedString = [NSString stringWithFormat:@"%@%@rnd=%d", urlString, separator, arc4random_uniform(999999)];
+            URL = [NSURL URLWithString:modifiedString];
+        }
+    }
+    return %orig(URL);
+}
+%end
+
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
@@ -178,7 +182,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 }
 %end
 
-// --- التحصين المطلق وتجهيز الإعلان كل ثانية في الخلفية بلا كراش ---
+// السيطرة التامة على مدير الإعلانات لضمان ظهور الإعلان واستمرار جهوزيته
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -197,44 +201,39 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     return YES;
 }
 
-// إعادة طلب وتجهيز الإعلان كل ثانية بشكل متواصل وآمن
 - (void)loadAd {
     @try {
         %orig;
-        id targetSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            @try {
-                if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-                    [targetSelf loadAd];
-                }
-            } @catch (NSException *ex) {}
-        });
     } @catch (NSException *exception) {}
 }
 
+// ضمان تنفيذ واستعراض الإعلان بسلاسة تامة دون أخطاء
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Full-Simulate] showRewardAd executed successfully by user interaction.");
+        NSLog(@">>> [Full-Simulate] Ad is showing successfully for user interaction.");
     } @catch (NSException *exception) {
-        NSLog(@">>> [Full-Simulate] Exception caught in showRewardAd: %@", exception.reason);
+        @try {
+            if ([self respondsToSelector:@selector(grantReward)]) {
+                [self grantReward];
+            }
+        } @catch (e) {}
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Full-Simulate] Ad failure intercepted, forcing instant reward delivery.");
     @try {
-        id targetSelf = self;
-        if ([targetSelf respondsToSelector:@selector(grantReward)]) {
-            [targetSelf grantReward];
+        if ([self respondsToSelector:@selector(grantReward)]) {
+            [self grantReward];
         }
-    } @catch (NSException *e) {}
+    } @catch (e) {}
 }
 
 - (instancetype)init {
     id targetSelf = %orig;
     @try {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // محاولة جلب وإعداد الإعلان فور فتح التطبيق مباشرة دون أي تأخير
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             @try {
                 if ([targetSelf respondsToSelector:@selector(loadAd)]) {
                     [targetSelf loadAd];
