@@ -32,7 +32,6 @@ static void clearKeychainExceptToken() {
                 NSArray *items = (__bridge NSArray *)result;
                 for (NSDictionary *item in items) {
                     NSString *account = item[(__bridge id)kSecAttrAccount];
-                    NSString *service = item[(__bridge id)kSecAttrService];
                     
                     if (![account isEqualToString:@"tokenKey"]) {
                         NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
@@ -53,7 +52,7 @@ static NSString *randomNewIDFA() {
 }
 
 static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+    return [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 static double randomInactivitySeconds() {
@@ -67,7 +66,6 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// تصفير البصمة والـ Sandbox بالكامل في كل مرة يفتح فيها التطبيق لضمان صفحة نظيفة
 static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     @autoreleasepool {
         @try {
@@ -152,7 +150,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 }
 %end
 
-// تعديل روابط الشبكة لتجاوز قيود التكرار وإعطاء بيانات وهمية متجددة
 %hook NSURLRequest
 + (instancetype)requestWithURL:(NSURL *)URL {
     NSString *urlString = [URL absoluteString];
@@ -182,7 +179,6 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
 }
 %end
 
-// السيطرة التامة على مدير الإعلانات لضمان ظهور الإعلان واستمرار جهوزيته
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -207,17 +203,15 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     } @catch (NSException *exception) {}
 }
 
-// ضمان تنفيذ واستعراض الإعلان بسلاسة تامة دون أخطاء
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Full-Simulate] Ad is showing successfully for user interaction.");
     } @catch (NSException *exception) {
         @try {
             if ([self respondsToSelector:@selector(grantReward)]) {
                 [self grantReward];
             }
-        } @catch (e) {}
+        } @catch (NSException *ex) {}
     }
 }
 
@@ -226,13 +220,12 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
         if ([self respondsToSelector:@selector(grantReward)]) {
             [self grantReward];
         }
-    } @catch (e) {}
+    } @catch (NSException *exception) {}
 }
 
 - (instancetype)init {
     id targetSelf = %orig;
     @try {
-        // محاولة جلب وإعداد الإعلان فور فتح التطبيق مباشرة دون أي تأخير
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             @try {
                 if ([targetSelf respondsToSelector:@selector(loadAd)]) {
