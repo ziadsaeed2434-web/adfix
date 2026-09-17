@@ -15,6 +15,9 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
+// متغير عام لتخزين الآيبي الخاص بالجلسة الحالية
+static NSString *currentSessionIP = nil;
+
 // 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على الـ tokenKey
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
@@ -53,8 +56,30 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"84.115.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+// دالة لتوليد آيبي أوروبي سكني جديد لجلسة واحدة
+static NSString *generateNewEuropeanIP() {
+    NSArray *europeanResidentialPrefixes = @[
+        // Deutsche Telekom (ألمانيا)
+        @"217.91", @"87.138", @"79.200", @"91.32", @"84.160",
+        // Vodafone / Liberty Global (ألمانيا / إنجلترا)
+        @"176.198", @"88.130", @"95.112", @"82.165", @"212.185",
+        // Orange / Free (فرنسا)
+        @"90.119", @"80.12", @"176.150", @"78.112", @"86.200",
+        // Telefonica / Movistar (إسبانيا)
+        @"83.32", @"88.19", @"81.32", @"85.155", @"213.94",
+        // Telecom Italia / Fastweb (إيطاليا)
+        @"151.15", @"93.32", @"2.30", @"79.16", @"82.50",
+        // KPN / Ziggo (هولندا)
+        @"84.241", @"94.212", @"82.161", @"213.127",
+        // BT / Sky (بريطانيا)
+        @"86.128", @"90.240", @"2.120", @"79.130", @"151.224"
+    ];
+    
+    NSString *randomPrefix = europeanResidentialPrefixes[arc4random_uniform((uint32_t)[europeanResidentialPrefixes count]);];
+    int thirdOctet = arc4random_uniform(254) + 1;
+    int fourthOctet = arc4random_uniform(254) + 1;
+    
+    return [NSString stringWithFormat:@"%@.%d.%d", randomPrefix, thirdOctet, fourthOctet];
 }
 
 static double randomInactivitySeconds() {
@@ -68,9 +93,13 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد (تُستعمل للإقلاع وعند انتهاء كل إعلان)
+// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد + آيبي ثابت جديد للجلسة
 static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
+        // توليد آيبي ثابت جديد خاص بهذه الجلسة فقط
+        currentSessionIP = generateNewEuropeanIP();
+        NSLog(@">>> [Dynamic-Refresh] New Session IP Generated: %@", currentSessionIP);
+
         // أ) حماية التوكن في الكيشين
         clearKeychainExceptToken();
 
@@ -170,7 +199,10 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP();
+        // استخدام الآيبي الثابت الخاص بالجلسة الحالية لكل الطلبات الشبكية ضمن هذه الجلسة
+        if (currentSessionIP) {
+            value = currentSessionIP;
+        }
     }
     %orig(value, field);
 }
@@ -208,12 +240,10 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Dynamic-Refresh] showRewardAd executed. Refreshing environment for the next ad.");
+        NSLog(@">>> [Dynamic-Refresh] showRewardAd executed. Refreshing environment and session IP for the next ad.");
         
-        // بمجرد انتهاء عرض الإعلان الحالي، نقوم فوراً بتنفيذ عملية تجديد البيئة بالكامل (مسح الكاش، توليد IDFA جديد)
-        // ثم طلب إعلان جديد ليكون جاهزاً بشكل فوري وبدون الحاجة للخروج من التطبيق
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            executeFullEnvironmentRefresh();
+            executeFullEnvironmentRefresh(); // هذا سيقوم بمسح البيئة وتوليد آيبي جلسة جديد كلياً
             
             if ([self respondsToSelector:@selector(loadAd)]) {
                 [self loadAd];
@@ -228,9 +258,8 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 - (void)presentAdFromViewController:(UIViewController *)viewController {
     @try {
         %orig;
-        // تكرار نفس العملية هنا أيضاً لضمان شمولية طرق العرض المختلفة
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            executeFullEnvironmentRefresh();
+            executeFullEnvironmentRefresh(); // تجديد الجلسة والآيبي هنا أيضاً
             
             if ([self respondsToSelector:@selector(loadAd)]) {
                 [self loadAd];
