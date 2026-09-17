@@ -4,8 +4,8 @@
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
-#import <sys/sysctl.h>
 
+// إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -16,29 +16,7 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-static NSArray *getSpoofableModels() {
-    return @[
-        @"iPhone13,1", @"iPhone13,2", @"iPhone13,3", @"iPhone13,4",
-        @"iPhone14,2", @"iPhone14,3", @"iPhone14,4", @"iPhone14,5",
-        @"iPhone15,2", @"iPhone15,3", @"iPhone15,4", @"iPhone15,5",
-        @"iPhone16,1", @"iPhone16,2", @"iPhone16,3", @"iPhone16,4"
-    ];
-}
-
-static NSArray *getSpoofableSystems() {
-    return @[@"17.1.2", @"17.2.1", @"17.4.1", @"17.5.1", @"18.0", @"18.1.1", @"18.2"];
-}
-
-static NSString *currentRandomModel = @"iPhone16,1";
-static NSString *currentRandomSystem = @"18.1.1";
-
-static void randomizeDeviceSpoofing() {
-    NSArray *models = getSpoofableModels();
-    NSArray *systems = getSpoofableSystems();
-    currentRandomModel = models[arc4random_uniform((uint32_t)[models count])];
-    currentRandomSystem = systems[arc4random_uniform((uint32_t)[systems count])];
-}
-
+// 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على الـ tokenKey
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -61,6 +39,8 @@ static void clearKeychainExceptToken() {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
+                } else {
+                    NSLog(@">>> [Dynamic-Refresh] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -89,36 +69,59 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
+// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد
 static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
-        randomizeDeviceSpoofing();
+        // أ) حماية التوكن في الكيشين
         clearKeychainExceptToken();
 
+        // ب) مسح نطاق الـ NSUserDefaults بالكامل
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
 
-        if (@available(iOS 9.0, *)) {
-            NSSet *websiteDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
-            [[WKWebsiteDataStore defaultDataStore] fetchDataRecordsOfTypes:websiteDataTypes completionHandler:^(NSArray<WKWebsiteDataRecord *> * _Nonnull records) {
-                [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:websiteDataTypes forDataRecords:records completionHandler:^{}];
-            }];
-        }
-
+        // ج) تفريغ كاش الشبكة بالكامل
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
+        // د) مسح بيانات WebKit و Local Storage و IndexedDB و Cookies جذرياً
+        if ([WKWebsiteDataStore class]) {
+            NSSet *websiteDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+            NSDate *dateFrom = [NSDate distantPast];
+            [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:websiteDataTypes modifiedSince:dateFrom completionHandler:^{
+                NSLog(@">>> [Dynamic-Refresh] WKWebsiteDataStore (Local Storage, Cookies, WebKit cache) wiped successfully.");
+            }];
+        }
+
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *homeDir = NSHomeDirectory();
+        
+        // هـ) مسح مسارات WebKit التقليدية يدوياً من الـ Sandbox لضمان عدم تبقي أي ملف مخلف
+        NSArray *webkitSubpaths = @[
+            @"Library/Caches/WebKit",
+            @"Library/WebKit",
+            @"Library/Cookies",
+            @"Documents/WebKit"
+        ];
+        for (NSString *subpath in webkitSubpaths) {
+            NSString *fullWebKitPath = [homeDir stringByAppendingPathComponent:subpath];
+            if ([fileManager fileExistsAtPath:fullWebKitPath]) {
+                [fileManager removeItemAtPath:fullWebKitPath error:nil];
+            }
+        }
+        
+        // و) مسح الـ Sandbox الرئيسي بالكامل
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
+            // استثناءات بسيطة إذا لزم الأمر، لكن هنا نقوم بحذف الكل عدا ما تحتاجه (الـ Sandbox الافتراضي)
             NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
             [fileManager removeItemAtPath:fullPath error:&error];
         }
         
+        // ز) مسح كل الـ App Groups المرتبطة
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fileManager fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
@@ -128,6 +131,7 @@ static void executeFullEnvironmentRefresh() {
             }
         }
 
+        // ح) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد تماماً
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -156,41 +160,37 @@ static void executeFullEnvironmentRefresh() {
         [defaults setDouble:dynamicInactivityTime forKey:@"last_activity_interval"];
         
         [defaults synchronize];
+        
+        NSLog(@">>> [Dynamic-Refresh] Full environment wiped & fresh ID spawned: %@", freshID);
     }
 }
 
+// تشغيل التطهير تلقائياً مع كل إقلاع للتطبيق
 static __attribute__((constructor)) void initialAppLaunchSetup() {
     executeFullEnvironmentRefresh();
 }
 
+// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
+%hook ATTrackingManager
++ (NSUInteger)trackingAuthorizationStatus {
+    return 2;
+}
+%end
+
 %hook UIDevice
-- (NSString *)model { return @"iPhone"; }
-- (NSString *)systemName { return @"iOS"; }
-- (NSString *)systemVersion { return currentRandomSystem; }
-- (NSUUID *)identifierForVendor { return [NSUUID UUID]; }
+- (NSUUID *)identifierForVendor {
+    return [NSUUID UUID];
+}
 %end
 
 %hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier { return [NSUUID UUID]; }
-- (BOOL)isAdvertisingTrackingEnabled { return NO; }
+- (NSUUID *)advertisingIdentifier {
+    return [NSUUID UUID];
+}
+- (BOOL)isAdvertisingTrackingEnabled {
+    return NO;
+}
 %end
-
-// استخدام MSHookFunction بدلاً من %exthook لتجنب مشاكل المعالجة في الـ Theos
-%ctor {
-    MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
-}
-
-static int (*original_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t *newlenp);
-static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t *newlenp) {
-    int result = original_sysctlbyname(name, oldp, oldlenp, newp, newlenp);
-    if (result == 0 && name && oldp) {
-        if (strcmp(name, "hw.machine") == 0 || strcmp(name, "hw.model") == 0) {
-            const char *spoofedModel = [currentRandomModel UTF8String];
-            strlcpy(oldp, spoofedModel, *oldlenp);
-        }
-    }
-    return result;
-}
 
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
@@ -201,28 +201,75 @@ static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, vo
 }
 %end
 
+// --- التحصين المطلق: تجديد البيئة وجلب إعلانات جديدة فوراً بعد انتهاء كل إعلان ---
 %hook ActivatorAdService
 
-- (BOOL)isReady { return YES; }
-- (BOOL)isAdReady { return YES; }
-- (BOOL)canShowAd { return YES; }
-- (BOOL)hasAdLoaded { return YES; }
+- (BOOL)isReady {
+    return YES;
+}
 
-- (void)loadAd { %orig; }
+- (BOOL)isAdReady {
+    return YES;
+}
+
+- (BOOL)canShowAd {
+    return YES;
+}
+
+- (BOOL)hasAdLoaded {
+    return YES;
+}
+
+- (void)loadAd {
+    %orig;
+    id targetSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+            [targetSelf loadAd];
+        }
+    });
+}
 
 - (void)showRewardAd {
-    @try { %orig; } @catch (NSException *exception) {}
+    @try {
+        %orig;
+        NSLog(@">>> [Dynamic-Refresh] showRewardAd executed. Refreshing environment for the next ad.");
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            executeFullEnvironmentRefresh();
+            
+            if ([self respondsToSelector:@selector(loadAd)]) {
+                [self loadAd];
+            }
+        });
+        
+    } @catch (NSException *exception) {
+        NSLog(@">>> [Dynamic-Refresh] Exception in showRewardAd: %@", exception.reason);
+    }
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try { %orig; } @catch (NSException *exception) {}
+    @try {
+        %orig;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            executeFullEnvironmentRefresh();
+            
+            if ([self respondsToSelector:@selector(loadAd)]) {
+                [self loadAd];
+            }
+        });
+    } @catch (NSException *exception) {
+        NSLog(@">>> [Dynamic-Refresh] Exception caught in presentAdFromViewController: %@", exception.reason);
+    }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
+    NSLog(@">>> [Dynamic-Refresh] Ad error intercepted, refreshing environment and re-loading.");
+    executeFullEnvironmentRefresh();
     id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) { [targetSelf loadAd]; }
-    });
+    if ([targetSelf respondsToSelector:@selector(loadApi)]) {
+        [targetSelf loadAd];
+    }
 }
 
 %end
