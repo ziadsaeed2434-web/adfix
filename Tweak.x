@@ -39,7 +39,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@">>> [Every-Launch-Wipe] tokenKey safely preserved: %@", service);
+                    NSLog(@">>> [Dynamic-Refresh] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -68,8 +68,8 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. التنفيذ في كل إقلاع للتطبيق (Constructor يعمل مع كل فتحه جديدة)
-static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaunch() {
+// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد (تُستعمل للإقلاع وعند انتهاء كل إعلان)
+static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
         // أ) حماية التوكن في الكيشين
         clearKeychainExceptToken();
@@ -87,7 +87,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
         
-        // د) مسح الـ Sandbox الرئيسي بالكامل في كل إقلاع
+        // د) مسح الـ Sandbox الرئيسي بالكامل
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
@@ -96,7 +96,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
             [fileManager removeItemAtPath:fullPath error:&error];
         }
         
-        // هـ) مسح كل الـ App Groups المرتبطة في كل إقلاع
+        // هـ) مسح كل الـ App Groups المرتبطة
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fileManager fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
@@ -106,7 +106,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
             }
         }
 
-        // و) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد مع كل إقلاع
+        // و) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد تماماً
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -136,8 +136,13 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         
         [defaults synchronize];
         
-        NSLog(@">>> [Every-Launch-Wipe] Sandbox, App Groups & Caches wiped successfully. Fresh environment spawned with ID: %@", freshID);
+        NSLog(@">>> [Dynamic-Refresh] Full environment wiped & fresh ID spawned: %@", freshID);
     }
+}
+
+// تشغيل التطهير تلقائياً مع كل إقلاع للتطبيق
+static __attribute__((constructor)) void initialAppLaunchSetup() {
+    executeFullEnvironmentRefresh();
 }
 
 // 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
@@ -171,7 +176,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// --- التحصين المطلق لإعلانات مضمونة ولا نهائية في كل إقلاع ---
+// --- التحصين المطلق: تجديد البيئة وجلب إعلانات جديدة فوراً بعد انتهاء كل إعلان ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -203,30 +208,42 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Every-Launch-Ads] showRewardAd executed. Pre-fetching next ad instantly.");
+        NSLog(@">>> [Dynamic-Refresh] showRewardAd executed. Refreshing environment for the next ad.");
         
-        id targetSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-                [targetSelf loadAd];
+        // بمجرد انتهاء عرض الإعلان الحالي، نقوم فوراً بتنفيذ عملية تجديد البيئة بالكامل (مسح الكاش، توليد IDFA جديد)
+        // ثم طلب إعلان جديد ليكون جاهزاً بشكل فوري وبدون الحاجة للخروج من التطبيق
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            executeFullEnvironmentRefresh();
+            
+            if ([self respondsToSelector:@selector(loadAd)]) {
+                [self loadAd];
             }
         });
         
     } @catch (NSException *exception) {
-        NSLog(@">>> [Every-Launch-Ads] Exception in showRewardAd: %@", exception.reason);
+        NSLog(@">>> [Dynamic-Refresh] Exception in showRewardAd: %@", exception.reason);
     }
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
     @try {
         %orig;
+        // تكرار نفس العملية هنا أيضاً لضمان شمولية طرق العرض المختلفة
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            executeFullEnvironmentRefresh();
+            
+            if ([self respondsToSelector:@selector(loadAd)]) {
+                [self loadAd];
+            }
+        });
     } @catch (NSException *exception) {
-        NSLog(@">>> [Every-Launch-Ads] Exception caught in presentAdFromViewController: %@", exception.reason);
+        NSLog(@">>> [Dynamic-Refresh] Exception caught in presentAdFromViewController: %@", exception.reason);
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Every-Launch-Ads] Ad error intercepted, forcing instant re-load.");
+    NSLog(@">>> [Dynamic-Refresh] Ad error intercepted, refreshing environment and re-loading.");
+    executeFullEnvironmentRefresh();
     id targetSelf = self;
     if ([targetSelf respondsToSelector:@selector(loadAd)]) {
         [targetSelf loadAd];
