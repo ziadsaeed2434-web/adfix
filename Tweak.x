@@ -16,7 +16,6 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// قائمة واسعة ومتنوعة لضمان تغيير طراز الجهاز بشكل حقيقي ومختلف كلياً في كل إقلاع
 static NSArray *getSpoofableModels() {
     return @[
         @"iPhone13,1", @"iPhone13,2", @"iPhone13,3", @"iPhone13,4",
@@ -90,22 +89,16 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// التنفيذ الشامل والعميق لكل شيء فور إقلاع التطبيق
 static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
-        // 1. توليد بصمة جهاز ونظام جديدة كلياً
         randomizeDeviceSpoofing();
-        
-        // 2. تنظيف الـ Keychain بالكامل مع الحفاظ على التوكن فقط
         clearKeychainExceptToken();
 
-        // 3. مسح جميع إعدادات الـ NSUserDefaults الخاصة بالتطبيق
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
 
-        // 4. مسح بيانات الـ WebKit وجميع ملفات الارتباط (Cookies & LocalStorage)
         if (@available(iOS 9.0, *)) {
             NSSet *websiteDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
             [[WKWebsiteDataStore defaultDataStore] fetchDataRecordsOfTypes:websiteDataTypes completionHandler:^(NSArray<WKWebsiteDataRecord *> * _Nonnull records) {
@@ -113,14 +106,11 @@ static void executeFullEnvironmentRefresh() {
             }];
         }
 
-        // 5. تصفير كاش الشبكة والطلبات السابقة
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        
-        // 6. مسح مجلد الـ Sandbox بالكامل (المجلد الرئيسي للتطبيق)
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
@@ -129,7 +119,6 @@ static void executeFullEnvironmentRefresh() {
             [fileManager removeItemAtPath:fullPath error:&error];
         }
         
-        // 7. مسح بيانات الـ Group Containers المشتركة إن وجدت
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fileManager fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
@@ -139,7 +128,6 @@ static void executeFullEnvironmentRefresh() {
             }
         }
 
-        // 8. حقن بيانات وهويات جديدة تماماً لتبدو كأنها أول تثبيت نظيف للجهاز
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -168,24 +156,18 @@ static void executeFullEnvironmentRefresh() {
         [defaults setDouble:dynamicInactivityTime forKey:@"last_activity_interval"];
         
         [defaults synchronize];
-        
-        NSLog(@">>> [Dynamic-Refresh] FULL WIPE & NEW DEVICE SPAWNED -> Model: %@, System: %@, IDFA: %@", currentRandomModel, currentRandomSystem, freshID);
     }
 }
 
-// تنفيذ كامل للعملية فور تشغيل وبدء إقلاع التطبيق حصرياً
 static __attribute__((constructor)) void initialAppLaunchSetup() {
     executeFullEnvironmentRefresh();
 }
 
-// خداع دوال النظام ومعلومات الهاردوير بناءً على البصمة الجديدة للإقلاع
 %hook UIDevice
-
 - (NSString *)model { return @"iPhone"; }
 - (NSString *)systemName { return @"iOS"; }
 - (NSString *)systemVersion { return currentRandomSystem; }
 - (NSUUID *)identifierForVendor { return [NSUUID UUID]; }
-
 %end
 
 %hook ASIdentifierManager
@@ -193,9 +175,14 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 - (BOOL)isAdvertisingTrackingEnabled { return NO; }
 %end
 
-%exthook sysctlbyname
-int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t *newlenp) {
-    int result = sysctlbyname(name, oldp, oldlenp, newp, newlenp);
+// استخدام MSHookFunction بدلاً من %exthook لتجنب مشاكل المعالجة في الـ Theos
+%ctor {
+    MSHookFunction((void *)sysctlbyname, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
+}
+
+static int (*original_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t *newlenp);
+static int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t *newlenp) {
+    int result = original_sysctlbyname(name, oldp, oldlenp, newp, newlenp);
     if (result == 0 && name && oldp) {
         if (strcmp(name, "hw.machine") == 0 || strcmp(name, "hw.model") == 0) {
             const char *spoofedModel = [currentRandomModel UTF8String];
@@ -204,9 +191,7 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
     }
     return result;
 }
-%end
 
-// إعادة دمج توليد وحقن الـ IP الوهمي في طلبات الشبكة لتفادي الحظر من جهة السيرفر
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
@@ -216,7 +201,6 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
 }
 %end
 
-// إدارة الإعلانات لضمان عدم توقفها
 %hook ActivatorAdService
 
 - (BOOL)isReady { return YES; }
@@ -227,15 +211,11 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
 - (void)loadAd { %orig; }
 
 - (void)showRewardAd {
-    @try {
-        %orig;
-    } @catch (NSException *exception) {}
+    @try { %orig; } @catch (NSException *exception) {}
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try {
-        %orig;
-    } @catch (NSException *exception) {}
+    @try { %orig; } @catch (NSException *exception) {}
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
