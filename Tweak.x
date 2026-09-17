@@ -54,7 +54,7 @@ static NSString *randomNewIDFA() {
 }
 
 static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+    return [NSString stringWithFormat:@"84.115.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 static double randomInactivitySeconds() {
@@ -68,7 +68,7 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد
+// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد (تُستعمل للإقلاع وعند انتهاء كل إعلان)
 static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
         // أ) حماية التوكن في الكيشين
@@ -176,7 +176,7 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 %end
 
-// --- التحصين المطلق: تجديد البيئة وجلب إعلانات جديدة عند النجاح أو الفشل ---
+// --- التحصين المطلق: تجديد البيئة وجلب إعلانات جديدة فوراً بعد انتهاء كل إعلان ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -205,12 +205,13 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
     });
 }
 
-// عند نجاح عرض الإعلان
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Dynamic-Refresh] showRewardAd executed successfully. Refreshing environment.");
+        NSLog(@">>> [Dynamic-Refresh] showRewardAd executed. Refreshing environment for the next ad.");
         
+        // بمجرد انتهاء عرض الإعلان الحالي، نقوم فوراً بتنفيذ عملية تجديد البيئة بالكامل (مسح الكاش، توليد IDFA جديد)
+        // ثم طلب إعلان جديد ليكون جاهزاً بشكل فوري وبدون الحاجة للخروج من التطبيق
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             executeFullEnvironmentRefresh();
             
@@ -221,16 +222,13 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
         
     } @catch (NSException *exception) {
         NSLog(@">>> [Dynamic-Refresh] Exception in showRewardAd: %@", exception.reason);
-        executeFullEnvironmentRefresh();
-        if ([self respondsToSelector:@selector(loadAd)]) {
-            [self loadAd];
-        }
     }
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
     @try {
         %orig;
+        // تكرار نفس العملية هنا أيضاً لضمان شمولية طرق العرض المختلفة
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             executeFullEnvironmentRefresh();
             
@@ -240,19 +238,12 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
         });
     } @catch (NSException *exception) {
         NSLog(@">>> [Dynamic-Refresh] Exception caught in presentAdFromViewController: %@", exception.reason);
-        executeFullEnvironmentRefresh();
-        if ([self respondsToSelector:@selector(loadAd)]) {
-            [self loadAd];
-        }
     }
 }
 
-// عند فشل جلب أو عرض الإعلان
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Dynamic-Refresh] Ad failure/error intercepted. Forcing environment refresh and re-load.");
-    
+    NSLog(@">>> [Dynamic-Refresh] Ad error intercepted, refreshing environment and re-loading.");
     executeFullEnvironmentRefresh();
-    
     id targetSelf = self;
     if ([targetSelf respondsToSelector:@selector(loadAd)]) {
         [targetSelf loadAd];
