@@ -221,7 +221,6 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
         
     } @catch (NSException *exception) {
         NSLog(@">>> [Dynamic-Refresh] Exception in showRewardAd: %@", exception.reason);
-        // حتى عند حدوث استثناء، نقوم بتجديد البيئة لتجنب التعليق
         executeFullEnvironmentRefresh();
         if ([self respondsToSelector:@selector(loadAd)]) {
             [self loadAd];
@@ -248,11 +247,10 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
     }
 }
 
-// عند فشل جلب أو عرض الإعلان (أي خطأ من السيرفر أو النظام)
+// عند فشل جلب أو عرض الإعلان
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@%>>> [Dynamic-Refresh] Ad failure/error intercepted. Forcing environment refresh and re-load.);
+    NSLog(@">>> [Dynamic-Refresh] Ad failure/error intercepted. Forcing environment refresh and re-load.");
     
-    // تجديد البيئة بالكامل فوراً عند الفشل لكسر أي حظر من السيرفر
     executeFullEnvironmentRefresh();
     
     id targetSelf = self;
