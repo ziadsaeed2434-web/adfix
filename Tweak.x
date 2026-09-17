@@ -73,7 +73,7 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. مسح جذري وشامل 100% لكل محتويات الـ Sandbox بلا استثناء، مع حماية ضد الكراش
+// 2. مسح جذري وشامل لكل محتويات الـ Sandbox بلا استثناء، مع حماية ضد الكراش
 static __attribute__((constructor)) void simulateFreshAppReinstallation() {
     @autoreleasepool {
         @try {
@@ -140,7 +140,7 @@ static __attribute__((constructor)) void simulateFreshAppReinstallation() {
             
             [defaults synchronize];
             
-            NSLog(@">>> [Full-Simulate] Sandbox completely wiped 100% without ANY exceptions and safely protected from crashes!");
+            NSLog(@">>> [Full-Simulate] Sandbox completely wiped completely without ANY exceptions and safely protected from crashes!");
         } @catch (NSException *exception) {
             NSLog(@">>> SimulateFreshAppReinstallation Exception: %@", exception.reason);
         }
