@@ -5,7 +5,6 @@
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
 
-// إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -16,7 +15,7 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على الـ tokenKey
+// الحفاظ حصرياً على الـ tokenKey لكي لا يتم تسجيل خروجك
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -40,7 +39,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@">>> [Dynamic-Refresh] tokenKey safely preserved: %@", service);
+                    NSLog(@">>> [Sandbox-Destroyer] tokenKey preserved safely.");
                 }
             }
             if (result) {
@@ -54,12 +53,18 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"83.82.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
-}
-
-static double randomInactivitySeconds() {
-    return (double)(864000 + arc4random_uniform(4320000));
+// نطاقات IPs هولندية سكنية حقيقية (Residential) لتجاوز الحظر تماماً
+static NSString *randomDutchResidentialIP() {
+    NSArray *dutchSubnets = @[
+        @"84.241.", 
+        @"213.127.", 
+        @"82.161.",  
+        @"212.203.", 
+        @"94.212.",  
+        @"62.194."   
+    ];
+    NSString *subnet = dutchSubnets[arc4random_uniform((uint32_t)[dutchSubnets count])];
+    return [NSString stringWithFormat:@"%@%d.%d", subnet, arc4random_uniform(240) + 1, arc4random_uniform(240) + 1];
 }
 
 static NSString *generateFreshTimestamp() {
@@ -69,72 +74,52 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد
+// التدمير الشامل لكل شيء في الـ Sandbox والكوكيز والـ WebKit لجعل التطبيق نظيفاً تماماً
 static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
-        // أ) حماية التوكن في الكيشين
+        // 1. حماية التوكن بالكيشين
         clearKeychainExceptToken();
 
-        // ب) مسح نطاق الـ NSUserDefaults بالكامل
-        NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleIdentifier) {
-            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
-        }
+        // 2. مسح NSUserDefaults بالكامل لـ app.getsmscode
+        NSString *bundleIdentifier = @"app.getsmscode";
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+        [[NSUserDefaults standardUserDefaults] synchronize];
 
-        // ج) تفريغ كاش الشبكة بالكامل
+        // 3. تفريغ كاش الشبكة
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
-        // د) مسح بيانات WebKit و Local Storage و IndexedDB و Cookies جذرياً
+        // 4. مسح جميع الكوكيز الخاصة بالنظام
+        NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+        for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
+            [cookieStorage deleteCookie:cookie];
+        }
+
+        // 5. مسح بيانات WebKit والـ LocalStorage جذرياً
         if ([WKWebsiteDataStore class]) {
             NSSet *websiteDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
             NSDate *dateFrom = [NSDate distantPast];
             [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:websiteDataTypes modifiedSince:dateFrom completionHandler:^{
-                NSLog(@">>> [Dynamic-Refresh] WKWebsiteDataStore wiped successfully.");
+                NSLog(@">>> [Sandbox-Destroyer] WKWebsiteDataStore & WebKit Cookies completely wiped.");
             }];
         }
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *homeDir = NSHomeDirectory();
         
-        // هـ) مسح مسارات WebKit التقليدية يدوياً من الـ Sandbox
-        NSArray *webkitSubpaths = @[
-            @"Library/Caches/WebKit",
-            @"Library/WebKit",
-            @"Library/Cookies",
-            @"Documents/WebKit"
-        ];
-        for (NSString *subpath in webkitSubpaths) {
-            NSString *fullWebKitPath = [homeDir stringByAppendingPathComponent:subpath];
-            if ([fileManager fileExistsAtPath:fullWebKitPath]) {
-                [fileManager removeItemAtPath:fullWebKitPath error:nil];
-            }
-        }
-        
-        // و) مسح الـ Sandbox الرئيسي بالكامل
+        // 6. مسح كل محتويات الـ Sandbox (Documents, Library, Caches, tmp) بالكامل لتدمير أي ملف حظر أو سجل قديم
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
             NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
             [fileManager removeItemAtPath:fullPath error:&error];
         }
-        
-        // ز) مسح كل الـ App Groups المرتبطة
-        NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
-        if ([fileManager fileExistsAtPath:groupDirBase]) {
-            NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
-            for (NSString *groupFolder in groupFolders) {
-                NSString *groupPath = [groupDirBase stringByAppendingPathComponent:groupFolder];
-                [fileManager removeItemAtPath:groupPath error:nil];
-            }
-        }
 
-        // ح) حقن هويات وبصمات جديدة بالكامل
+        // 7. حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد تماماً
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
-        double dynamicInactivityTime = randomInactivitySeconds();
         
         [defaults setObject:freshID forKey:@"device.id.key"];
         [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
@@ -144,31 +129,23 @@ static void executeFullEnvironmentRefresh() {
         [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:0 forKey:@"ump_status"];
         [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
-        
         [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
-        [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
-        [defaults setInteger:1 forKey:@"AppsFlyerLaunchKey"];
-        
         [defaults setObject:freshDate forKey:@"AppsFlyerInstallDate"];
-        [defaults setObject:freshDate forKey:@"AppsFlyerFirstLaunchDate"];
-        [defaults setObject:freshDate forKey:@"AppsFlyerInstallTimestamp"];
-        
-        [defaults setDouble:0.0 forKey:@"AppsFlyerLastSessionDuration"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"time_passed_since_last_session"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"last_activity_interval"];
         
         [defaults synchronize];
         
-        NSLog(@">>> [Dynamic-Refresh] Full environment wiped & fresh ID spawned: %@", freshID);
+        NSLog(@">>> [Sandbox-Destroyer] Sandbox completely wiped & fresh ID spawned: %@", freshID);
     }
 }
 
+// تنفيذ التنظيف المدمر فور فتح التطبيق
 static __attribute__((constructor)) void initialAppLaunchSetup() {
-    executeFullEnvironmentRefresh();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        executeFullEnvironmentRefresh();
+    });
 }
 
-// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
+// خداع النظام وتغيير معرفات الهاردوير
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
     return 2;
@@ -190,16 +167,17 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 %end
 
+// حقن عناوين IP هولندية سكنية في كل طلب شبكي لتفادي الحظر تماماً
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP();
+    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Real-IP"]) {
+        value = randomDutchResidentialIP();
     }
     %orig(value, field);
 }
 %end
 
-// --- التصحيح هنا: السماح للـ SDK بجلب الإعلان الحقيقي مع تجاوز فحوصات الجاهزية الوهمية ---
+// السيطرة المطلقة على نظام الإعلانات لضمان جلب إعلانات جديدة بدون توقف
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -219,27 +197,32 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 
 - (void)loadAd {
-    // الأهم: استدعاء الدالة الأصلية `%orig` لكي يقوم الـ SDK بطلب الإعلان فعلياً من السيرفر
     %orig;
-    NSLog(@">>> [Dynamic-Refresh] loadAd requested from app, fetching real ad from server...");
+    NSLog(@">>> [Sandbox-Destroyer] Forced Ad Load request sent to server.");
+}
+
+// إعادة المحاولة تلقائياً لضمان ظهور الإعلان فوراً
+- (void)forceReloadWithRetries:(id)target {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([target respondsToSelector:@selector(loadAd)]) {
+            [target loadAd];
+            NSLog(@">>> [Sandbox-Destroyer] Auto-retry loadAd executed.");
+        }
+    });
 }
 
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Dynamic-Refresh] showRewardAd executed. Refreshing environment for the next ad.");
+        NSLog(@">>> [Sandbox-Destroyer] Ad watched. Destroying sandbox & fetching fresh ad.");
         
-        // بعد عرض الإعلان وانتهاءه، نعطي مهلة ثانية ثم ننظف البيئة ونطلب إعلاناً جديداً
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             executeFullEnvironmentRefresh();
-            
-            if ([self respondsToSelector:@selector(loadAd)]) {
-                [self loadAd];
-            }
+            [self forceReloadWithRetries:self];
         });
         
     } @catch (NSException *exception) {
-        NSLog(@">>> [Dynamic-Refresh] Exception in showRewardAd: %@", exception.reason);
+        NSLog(@">>> [Sandbox-Destroyer] Exception in showRewardAd: %@", exception.reason);
     }
 }
 
@@ -248,23 +231,17 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
         %orig;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             executeFullEnvironmentRefresh();
-            
-            if ([self respondsToSelector:@selector(loadAd)]) {
-                [self loadAd];
-            }
+            [self forceReloadWithRetries:self];
         });
     } @catch (NSException *exception) {
-        NSLog(@">>> [Dynamic-Refresh] Exception caught in presentAdFromViewController: %@", exception.reason);
+        NSLog(@">>> [Sandbox-Destroyer] Exception in presentAd: %@", exception.reason);
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Dynamic-Refresh] Ad error intercepted: %@, refreshing and re-loading.", arg2);
+    NSLog(@">>> [Sandbox-Destroyer] Ad failed, purging sandbox and re-fetching instantly.");
     executeFullEnvironmentRefresh();
-    
-    if ([self respondsToSelector:@selector(loadAd)]) {
-        [self loadAd];
-    }
+    [self forceReloadWithRetries:self];
 }
 
 %end
