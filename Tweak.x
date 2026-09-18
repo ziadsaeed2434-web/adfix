@@ -13,6 +13,7 @@
 - (BOOL)hasAdLoaded;
 - (void)showRewardAd;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
+- (void)forceReloadWithRetries:(id)target; // <-- تم إضافة الإعلان هنا لحل خطأ عدم التعرف على الدالة
 @end
 
 // الحفاظ حصرياً على الـ tokenKey لكي لا يتم تسجيل خروجك
@@ -32,7 +33,6 @@ static void clearKeychainExceptToken() {
             NSArray *items = (__bridge NSArray *)result;
             for (NSDictionary *item in items) {
                 NSString *account = item[(__bridge id)kSecAttrAccount];
-                NSString *service = item[(__bridge id)kSecAttrService];
                 
                 if (![account isEqualToString:@"tokenKey"]) {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
@@ -53,7 +53,6 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// نطاقات IPs هولندية سكنية حقيقية (Residential) لتجاوز الحظر تماماً
 static NSString *randomDutchResidentialIP() {
     NSArray *dutchSubnets = @[
         @"84.241.", 
@@ -74,29 +73,23 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// التدمير الشامل لكل شيء في الـ Sandbox والكوكيز والـ WebKit لجعل التطبيق نظيفاً تماماً
 static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
-        // 1. حماية التوكن بالكيشين
         clearKeychainExceptToken();
 
-        // 2. مسح NSUserDefaults بالكامل لـ app.getsmscode
         NSString *bundleIdentifier = @"app.getsmscode";
         [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         [[NSUserDefaults standardUserDefaults] synchronize];
 
-        // 3. تفريغ كاش الشبكة
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
-        // 4. مسح جميع الكوكيز الخاصة بالنظام
         NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
             [cookieStorage deleteCookie:cookie];
         }
 
-        // 5. مسح بيانات WebKit والـ LocalStorage جذرياً
         if ([WKWebsiteDataStore class]) {
             NSSet *websiteDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
             NSDate *dateFrom = [NSDate distantPast];
@@ -108,7 +101,6 @@ static void executeFullEnvironmentRefresh() {
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *homeDir = NSHomeDirectory();
         
-        // 6. مسح كل محتويات الـ Sandbox (Documents, Library, Caches, tmp) بالكامل لتدمير أي ملف حظر أو سجل قديم
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
@@ -116,7 +108,6 @@ static void executeFullEnvironmentRefresh() {
             [fileManager removeItemAtPath:fullPath error:&error];
         }
 
-        // 7. حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد تماماً
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -138,14 +129,12 @@ static void executeFullEnvironmentRefresh() {
     }
 }
 
-// تنفيذ التنظيف المدمر فور فتح التطبيق
 static __attribute__((constructor)) void initialAppLaunchSetup() {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         executeFullEnvironmentRefresh();
     });
 }
 
-// خداع النظام وتغيير معرفات الهاردوير
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
     return 2;
@@ -167,7 +156,6 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 %end
 
-// حقن عناوين IP هولندية سكنية في كل طلب شبكي لتفادي الحظر تماماً
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Real-IP"]) {
@@ -177,7 +165,6 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 %end
 
-// السيطرة المطلقة على نظام الإعلانات لضمان جلب إعلانات جديدة بدون توقف
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -201,7 +188,6 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
     NSLog(@">>> [Sandbox-Destroyer] Forced Ad Load request sent to server.");
 }
 
-// إعادة المحاولة تلقائياً لضمان ظهور الإعلان فوراً
 - (void)forceReloadWithRetries:(id)target {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([target respondsToSelector:@selector(loadAd)]) {
