@@ -54,7 +54,7 @@ static NSString *randomNewIDFA() {
 }
 
 static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+    return [NSString stringWithFormat:@"80.115.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 static double randomInactivitySeconds() {
@@ -143,7 +143,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 // 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 3;
+    return 2;
 }
 %end
 
@@ -158,7 +158,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
     return [NSUUID UUID];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
-    return YES;
+    return NO;
 }
 %end
 
