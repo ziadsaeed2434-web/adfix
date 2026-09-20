@@ -15,38 +15,52 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// دوال توليد البيانات العشوائية (User-Agent, IDFA)
+// دوال توليد البيانات العشوائية
 static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// دالة لتوليد IP حقيقي وسكني (Residential) يتبع لأكبر مزودي خدمة الإنترنت في اليونان (OTE, Vodafone, Nova)
-static NSString *randomGreekResidentialIP() {
-    NSArray *greekIPPrefixes = @[
-        @"79.107.", // OTE / Cosmote (Broadband Residential)
-        @"94.64.",   // Vodafone Greece (Residential)
-        @"212.205.", // OTE (Hellenic Telecommunications Organization)
-        @"5.55.",    // Nova / Wind Hellas
-        @"89.210.",  // Vodafone / Forthnet
-        @"188.4.",   // OTE Residential Pool
-        @"109.242."  // Cosmote Fiber Pool
+// متغيرات لتثبيت الـ IP والـ User-Agent طوال جلسة التطبيق الحالية
+static NSString *currentSessionIP = nil;
+static NSString *currentSessionUserAgent = nil;
+
+// دالة لتوليد IP سكني (Residential) ألماني حقيقي وثابت طوال الجلسة
+static NSString *getOrCreateGermanSessionIP() {
+    if (currentSessionIP) {
+        return currentSessionIP; // IP موحد وثابت طوال فترة فتح التطبيق
+    }
+    
+    // أكبر مزودي خدمة الإنترنت السكني في ألمانيا (Deutsche Telekom, Vodafone, 1&1) لضمان قبول الإعلانات 100%
+    NSArray *germanResidentialPrefixes = @[
+        @"79.200.",  // Deutsche Telekom (Residential)
+        @"84.112.",  // Vodafone Germany / Kabel Deutschland
+        @"217.224.", // Deutsche Telekom Broadband
+        @"91.64.",   // 1&1 Telecom GmbH
+        @"46.5.",    // Telefonica / O2 Germany
+        @"188.96."   // Vodafone DSL Pool
     ];
     
-    NSString *selectedPrefix = greekIPPrefixes[arc4random_uniform((uint32_t)greekIPPrefixes.count)];
+    NSString *selectedPrefix = germanResidentialPrefixes[arc4random_uniform((uint32_t)germanResidentialPrefixes.count)];
     int part3 = arc4random_uniform(250) + 1;
     int part4 = arc4random_uniform(250) + 1;
     
-    return [NSString stringWithFormat:@"%@%d.%d", selectedPrefix, part3, part4];
+    currentSessionIP = [NSString stringWithFormat:@"%@%d.%d", selectedPrefix, part3, part4];
+    return currentSessionIP;
 }
 
 static NSString *randomCleanUserAgent() {
-    NSArray *iOSVersions = @[@"16_5", @"16_6", @"17_0", @"17_1", @"17_2", @"17_4", @"17_5", @"18_0"];
-    NSArray *deviceModels = @[@"iPhone14,2", @"iPhone14,3", @"iPhone15,2", @"iPhone15,3", @"iPhone16,1", @"iPhone16,2"];
+    if (currentSessionUserAgent) {
+        return currentSessionUserAgent;
+    }
+    
+    NSArray *iOSVersions = @[@"17_0", @"17_2", @"17_4", @"17_5", @"18_0"];
+    NSArray *deviceModels = @[@"iPhone15,2", @"iPhone15,3", @"iPhone16,1", @"iPhone16,2"];
     
     NSString *randomOS = iOSVersions[arc4random_uniform((uint32_t)iOSVersions.count)];
     NSString *randomModel = deviceModels[arc4random_uniform((uint32_t)deviceModels.count)];
     
-    return [NSString stringWithFormat:@"Mozilla/5.0 (%@; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", randomModel, randomOS];
+    currentSessionUserAgent = [NSString stringWithFormat:@"Mozilla/5.0 (%@; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148", randomModel, randomOS];
+    return currentSessionUserAgent;
 }
 
 static double randomInactivitySeconds() {
@@ -56,11 +70,11 @@ static double randomInactivitySeconds() {
 static NSString *generateFreshTimestamp() {
     NSDate *now = [NSDate date];
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0300'"];
+    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0100'"];
     return [formatter stringFromDate:now];
 }
 
-// 1. تنظيف الـ Keychain مع الحفاظ حصرياً على الـ tokenKey (تم إزالة المتغير غير المستخدم)
+// 1. تنظيف الـ Keychain مع الحفاظ حصرياً على الـ tokenKey
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -91,12 +105,11 @@ static void clearKeychainExceptToken() {
     }
 }
 
-static NSString *currentSessionUserAgent = nil;
-
-// 2. التنفيذ في كل إقلاع للتطبيق (حقن موقع اليونان وإعدادات البيئة)
+// 2. التنفيذ في كل إقلاع للتطبيق (تثبيت بيئة دولة ألمانيا لضمان الإعلانات الأوروبية)
 static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaunch() {
     @autoreleasepool {
-        currentSessionUserAgent = randomCleanUserAgent();
+        getOrCreateGermanSessionIP();
+        randomCleanUserAgent();
         
         clearKeychainExceptToken();
 
@@ -132,14 +145,14 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         NSString *freshDate = generateFreshTimestamp();
         double dynamicInactivityTime = randomInactivitySeconds();
         
-        // إجبار لغة الجهاز والمنطقة لتكون يونانية (Greece / Greek)
-        [defaults setObject:@[@"el-GR", @"en-US"] forKey:@"AppleLanguages"];
-        [defaults setObject:@"GR" forKey:@"AppleLocale"];
-        [defaults setObject:@"Europe/Athens" forKey:@"NSReuseTimeZone"];
+        // إجبار لغة الجهاز والمنطقة لتكون ألمانية (Germany / German)
+        [defaults setObject:@[@"de-DE", @"en-US"] forKey:@"AppleLanguages"];
+        [defaults setObject:@"DE" forKey:@"AppleLocale"];
+        [defaults setObject:@"Europe/Berlin" forKey:@"NSReuseTimeZone"];
         
-        // تثبيت إحداثيات جغرافية عشوائية داخل أثينا، اليونان
-        [defaults setDouble:(37.9838 + ((double)(arc4random_uniform(100)) / 10000.0)) forKey:@"last_known_latitude"];
-        [defaults setDouble:(23.7275 + ((double)(arc4random_uniform(100)) / 10000.0)) forKey:@"last_known_longitude"];
+        // إحداثيات برلين، ألمانيا
+        [defaults setDouble:(52.5200 + ((double)(arc4random_uniform(100)) / 10000.0)) forKey:@"last_known_latitude"];
+        [defaults setDouble:(13.4050 + ((double)(arc4random_uniform(100)) / 10000.0)) forKey:@"last_known_longitude"];
         
         [defaults setObject:freshID forKey:@"device.id.key"];
         [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
@@ -148,7 +161,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         
         [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:0 forKey:@"ump_status"];
-        [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
+        [defaults setInteger:1 forKey:@"IABTCF_gdprApplies"]; // تفعيل قوانين الخصوصية الأوروبية بشكل سليم في ألمانيا
         
         [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
         [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
@@ -165,7 +178,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         
         [defaults synchronize];
         
-        NSLog(@">>> [Greek-Environment] Spawned successfully with Athens location and Greek residential IP profiles.");
+        NSLog(@">>> [Germany-Guaranteed-Ads] Session spawned. Fixed German IP: %@ | UA: %@", currentSessionIP, currentSessionUserAgent);
     }
 }
 
@@ -191,19 +204,19 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// 4. حقن الآيبيهات السكنية اليونانية وحقن الـ User-Agent في كل طلبات الشبكة
+// 4. حقن الـ IP الموحد والثابت طوال الجلسة في كافة طلبات الشبكة
 %hook NSMutableURLRequest
 
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Real-IP"]) {
-        value = randomGreekResidentialIP();
+        value = getOrCreateGermanSessionIP();
     }
     %orig(value, field);
 }
 
 - (void)addValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Real-IP"]) {
-        value = randomGreekResidentialIP();
+        value = getOrCreateGermanSessionIP();
     }
     %orig(value, field);
 }
@@ -240,7 +253,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 - (void)loadAd {
     %orig;
     id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
             [targetSelf loadAd];
         }
@@ -250,7 +263,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Greek-Ads] showRewardAd executed successfully.");
+        NSLog(@">>> [Germany-Ads] showRewardAd executed successfully.");
         
         id targetSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -260,7 +273,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         });
         
     } @catch (NSException *exception) {
-        NSLog(@">>> [Greek-Ads] Exception in showRewardAd: %@", exception.reason);
+        NSLog(@">>> [Germany-Ads] Exception in showRewardAd: %@", exception.reason);
     }
 }
 
@@ -274,12 +287,12 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
             }
         }
     } @catch (NSException *exception) {
-        NSLog(@">>> [Greek-Ads] Exception in presentAdFromViewController: %@", exception.reason);
+        NSLog(@">>> [Germany-Ads] Exception in presentAdFromViewController: %@", exception.reason);
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Greek-Ads] Ad error intercepted, reloading instantly.");
+    NSLog(@">>> [Germany-Ads] Ad error intercepted, reloading instantly.");
     id targetSelf = self;
     if ([targetSelf respondsToSelector:@selector(loadAd)]) {
         [targetSelf loadAd];
