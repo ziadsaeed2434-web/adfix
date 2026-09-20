@@ -1,13 +1,20 @@
+TARGET = iphone:clang:latest:14.0
+ARCHS = arm64 arm64e
+DEBUG = 0
+
 include $(THEOS)/makefiles/common.mk
 
-TARGET = iphone:clang:latest:14.0
-ARCHS = arm64
+TWEAK_NAME = AdPurgeTweak
 
-TWEAK_NAME = ProAdManager
-ProAdManager_FILES = Tweak.x
-ProAdManager_FRAMEWORKS = UIKit Security AppTrackingTransparency CoreLocation WebKit Foundation SystemConfiguration NetworkExtension AdSupport CFNetwork Network
+# Include all necessary frameworks
+AdPurgeTweak_FRAMEWORKS = Foundation UIKit Security AdSupport
+AdPurgeTweak_PRIVATE_FRAMEWORKS = AppTrackingTransparency
+AdPurgeTweak_LIBRARIES = substrate
+AdPurgeTweak_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 
-# هذا السطر هو السر لإلغاء الارتباط بـ Cydia Substrate نهائياً
-ProAdManager_LDFLAGS = -Wl,-flat_namespace,-undefined,suppress
+AdPurgeTweak_FILES = Tweak.x
 
 include $(THEOS_MAKE_PATH)/tweak.mk
+
+after-install::
+	install.exec "killall -9 Activator || true"
