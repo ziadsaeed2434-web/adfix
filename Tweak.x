@@ -22,21 +22,17 @@ static NSString *randomNewIDFA() {
 
 // دالة لتوليد IP حقيقي وسكني (Residential) يتبع لأكبر مزودي خدمة الإنترنت في اليونان (OTE, Vodafone, Nova)
 static NSString *randomGreekResidentialIP() {
-    // نطاقات حقيقية ومصرحة لمزودي خدمة الإنترنت في اليونان (OTE / Cosmote / Vodafone / Nova)
     NSArray *greekIPPrefixes = @[
         @"79.107.", // OTE / Cosmote (Broadband Residential)
         @"94.64.",   // Vodafone Greece (Residential)
         @"212.205.", // OTE (Hellenic Telecommunications Organization)
-        @"37.6.再说", // (سنستخدم نطاقات صحيحة أدناه بدقة)
         @"5.55.",    // Nova / Wind Hellas
         @"89.210.",  // Vodafone / Forthnet
         @"188.4.",   // OTE Residential Pool
         @"109.242."  // Cosmote Fiber Pool
     ];
     
-    // اختيار نطاق عشوائي من المزودين اليونانيين
     NSString *selectedPrefix = greekIPPrefixes[arc4random_uniform((uint32_t)greekIPPrefixes.count)];
-    // توليد الأجزاء الباقية بشكل عشوائي ضمن النطاق السكني
     int part3 = arc4random_uniform(250) + 1;
     int part4 = arc4random_uniform(250) + 1;
     
@@ -64,7 +60,7 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 1. تنظيف الـ Keychain مع الحفاظ حصرياً على الـ tokenKey
+// 1. تنظيف الـ Keychain مع الحفاظ حصرياً على الـ tokenKey (تم إزالة المتغير غير المستخدم)
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -81,7 +77,6 @@ static void clearKeychainExceptToken() {
             NSArray *items = (__bridge NSArray *)result;
             for (NSDictionary *item in items) {
                 NSString *account = item[(__bridge id)kSecAttrAccount];
-                NSString *service = item[(__bridge id)kSecAttrService];
                 
                 if (![account isEqualToString:@"tokenKey"]) {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
@@ -140,9 +135,9 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         // إجبار لغة الجهاز والمنطقة لتكون يونانية (Greece / Greek)
         [defaults setObject:@[@"el-GR", @"en-US"] forKey:@"AppleLanguages"];
         [defaults setObject:@"GR" forKey:@"AppleLocale"];
-        [defaults setObject:@"Europe/Athens" forKey:@"NSReuseTimeZone"]; // توقيت أثينا، اليونان
+        [defaults setObject:@"Europe/Athens" forKey:@"NSReuseTimeZone"];
         
-        // تثبيت إحداثيات جغرافية عشوائية داخل أثينا أو اليونان لخدمات الإعلانات
+        // تثبيت إحداثيات جغرافية عشوائية داخل أثينا، اليونان
         [defaults setDouble:(37.9838 + ((double)(arc4random_uniform(100)) / 10000.0)) forKey:@"last_known_latitude"];
         [defaults setDouble:(23.7275 + ((double)(arc4random_uniform(100)) / 10000.0)) forKey:@"last_known_longitude"];
         
@@ -153,7 +148,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         
         [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:0 forKey:@"ump_status"];
-        [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"]; // تطبيق قوانين الاتحاد الأوروبي بشكل صحيح في اليونان
+        [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
         
         [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
         [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
@@ -196,12 +191,12 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// 4. حقن الآيبيهات السكنية اليونانية وحمج الـ User-Agent في كل طلبات الشبكة
+// 4. حقن الآيبيهات السكنية اليونانية وحقن الـ User-Agent في كل طلبات الشبكة
 %hook NSMutableURLRequest
 
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Real-IP"]) {
-        value = randomGreekResidentialIP(); // حقن IP سكني يوناني حقيقي
+        value = randomGreekResidentialIP();
     }
     %orig(value, field);
 }
