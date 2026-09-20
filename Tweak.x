@@ -27,7 +27,6 @@ static void persistSessionIP(void) {
     if (!gGeneratedIP) {
         gGeneratedIP = generateDutchIP();
         NSLog(@"[AdPurge] Generated Dutch IP for session: %@", gGeneratedIP);
-        // Persist to a volatile location accessible across the session
         [[NSUserDefaults standardUserDefaults] setObject:gGeneratedIP forKey:@"__adhoc_session_ip"];
     }
 }
@@ -65,7 +64,6 @@ static void purgeSandbox(void) {
 }
 
 static void purgeKeychainExceptToken(void) {
-    // Define the query to delete all items
     NSMutableDictionary *query = [@{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecReturnAttributes: @YES,
@@ -92,7 +90,6 @@ static void purgeKeychainExceptToken(void) {
             continue;
         }
 
-        // Delete all other keychain items
         NSDictionary *deleteQuery = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
             (__bridge id)kSecAttrService: service,
@@ -119,7 +116,6 @@ static void resetAndConfigureDefaults(void) {
     }
 
     // --- Configure Pristine Environment ---
-    // Simulate a fresh install date (now)
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.dateFormat = @"yyyy-MM-dd_HHmmssZ";
     NSString *nowString = [formatter stringFromDate:[NSDate date]];
@@ -131,14 +127,13 @@ static void resetAndConfigureDefaults(void) {
     [defaults setObject:@(0) forKey:@"AppsFlyerReinstallCounter"];
 
     // --- Force European Consent State (Allow Ads) ---
-    // These values simulate a user who has consented to all purposes in the Netherlands.
     [defaults setObject:@(1) forKey:@"IABTCF_gdprApplies"];
     [defaults setObject:@"1111111111" forKey:@"IABTCF_PurposeConsents"];
     [defaults setObject:@"1111111111" forKey:@"IABTCF_PurposeLegitimateInterests"];
     [defaults setObject:@"1111111111" forKey:@"IABTCF_VendorConsents"];
     [defaults setObject:@"1111111111" forKey:@"IABTCF_VendorLegitimateInterests"];
-    [defaults setObject:@"3" forKey:@"ump_status"]; // 3 = Consent obtained
-    [defaults setObject:@"4444" forKey:@"UMP_consentModeValues"]; // All granted
+    [defaults setObject:@"3" forKey:@"ump_status"];
+    [defaults setObject:@"4444" forKey:@"UMP_consentModeValues"];
     [defaults setObject:@"1" forKey:@"IABTCF_SpecialFeaturesOptIns"];
     [defaults setObject:@"5" forKey:@"IABTCF_PolicyVersion"];
 
@@ -146,7 +141,6 @@ static void resetAndConfigureDefaults(void) {
     [defaults setObject:@"nl_NL" forKey:@"AppleLocale"];
     [defaults setObject:@"Europe/Amsterdam" forKey:@"AppleICUForce24HourTime"];
     [defaults setObject:@"nl_NL" forKey:@"AppleLanguages"];
-    // Note: Timezone forcing is better done via NSTimeZone swizzling, but this is a start.
 
     [defaults synchronize];
     NSLog(@"[AdPurge] NSUserDefaults reset and reconfigured for European environment.");
@@ -157,8 +151,9 @@ static void resetAndConfigureDefaults(void) {
 // ----------------------------------------------------------------------------
 CHDeclareClass(NSURLSessionConfiguration);
 
-CHOptimizedMethod(0, self, NSDictionary *, NSURLSessionConfiguration, HTTPAdditionalHeaders) {
-    NSMutableDictionary *headers = [CHSuper(0, NSURLSessionConfiguration, HTTPAdditionalHeaders) mutableCopy];
+// 0 Arguments (Getter)
+CHOptimizedMethod0(0, self, NSDictionary *, NSURLSessionConfiguration, HTTPAdditionalHeaders) {
+    NSMutableDictionary *headers = [CHSuper0(0, NSURLSessionConfiguration, HTTPAdditionalHeaders) mutableCopy];
     if (!headers) headers = [NSMutableDictionary new];
 
     NSString *ip = [[NSUserDefaults standardUserDefaults] stringForKey:@"__adhoc_session_ip"];
@@ -171,13 +166,10 @@ CHOptimizedMethod(0, self, NSDictionary *, NSURLSessionConfiguration, HTTPAdditi
     return headers;
 }
 
-// Hook NSMutableURLRequest to inject headers for all requests
 CHDeclareClass(NSMutableURLRequest);
 
-CHOptimizedMethod(0, self, void, NSMutableURLRequest, setValue:forHTTPHeaderField:) {
-    NSString *value = (NSString *)CHArg(0);
-    NSString *field = (NSString *)CHArg(1);
-
+// 2 Arguments
+CHOptimizedMethod2(0, self, void, NSMutableURLRequest, setValue, NSString *, value, forHTTPHeaderField, NSString *, field) {
     // Inject the Dutch IP for common geo-spoofing headers
     if ([field isEqualToString:@"X-Forwarded-For"] ||
         [field isEqualToString:@"Client-IP"] ||
@@ -189,76 +181,65 @@ CHOptimizedMethod(0, self, void, NSMutableURLRequest, setValue:forHTTPHeaderFiel
             value = ip; // Override with our generated IP
         }
     }
-    CHSuper(0, NSMutableURLRequest, setValue:value forHTTPHeaderField:field);
+    CHSuper2(0, NSMutableURLRequest, setValue, value, forHTTPHeaderField, field);
 }
 
 // ----------------------------------------------------------------------------
 // 5. SDK & Ad Controller Bypass
 // ----------------------------------------------------------------------------
-// Bypass GADAdLoader
 CHDeclareClass(GADAdLoader);
 
-CHOptimizedMethod(0, self, BOOL, GADAdLoader, isLoading) {
+// 0 Arguments (Getter)
+CHOptimizedMethod0(0, self, BOOL, GADAdLoader, isLoading) {
     return NO; // Force "not loading" so the app thinks it's ready to load
 }
 
-CHOptimizedMethod(0, self, void, GADAdLoader, loadRequest:) {
-    // Intercept the load request and force it to succeed
-    // In practice, we hook the completion handler, but for simplicity:
-    NSLog(@"[AdPurge] Forcing GADAdLoader to load request: %@", CHArg(0));
-    CHSuper(0, GADAdLoader, loadRequest:CHArg(0));
+// 1 Argument
+CHOptimizedMethod1(0, self, void, GADAdLoader, loadRequest, id, request) {
+    NSLog(@"[AdPurge] Forcing GADAdLoader to load request: %@", request);
+    CHSuper1(0, GADAdLoader, loadRequest, request);
 }
 
-// Bypass GADAdRequest (used by AdMob for ad requests)
 CHDeclareClass(GADAdRequest);
 
-CHOptimizedMethod(0, self, id, GADAdRequest, initWithAdUnitID:rootViewController:adTypes:options:) {
-    // Force options to simulate a full user consent
-    NSMutableDictionary *options = [(NSDictionary *)CHArg(3) mutableCopy];
-    if (!options) options = [NSMutableDictionary new];
-    options[@"_npa"] = @(0); // Non-personalized ads = 0 (allow personalized)
-    options[@"rdp"] = @(1);  // Set consent for personalized ads
-    return CHSuper(0, GADAdRequest, initWithAdUnitID:CHArg(0) rootViewController:CHArg(1) adTypes:CHArg(2) options:options);
+// 4 Arguments
+CHOptimizedMethod4(0, self, id, GADAdRequest, initWithAdUnitID, id, adUnitID, rootViewController, id, rootViewController, adTypes, id, adTypes, options, id, options) {
+    NSMutableDictionary *newOptions = [(NSDictionary *)options mutableCopy];
+    if (!newOptions) newOptions = [NSMutableDictionary new];
+    newOptions[@"_npa"] = @(0); // Non-personalized ads = 0 (allow personalized)
+    newOptions[@"rdp"] = @(1);  // Set consent for personalized ads
+    return CHSuper4(0, GADAdRequest, initWithAdUnitID, adUnitID, rootViewController, rootViewController, adTypes, adTypes, options, newOptions);
 }
 
-// Bypass custom Activator.AdService
 CHDeclareClass(Activator.AdService);
 
-CHOptimizedMethod(0, self, BOOL, Activator.AdService, hasRewardedAd) {
+// 0 Arguments
+CHOptimizedMethod0(0, self, BOOL, Activator.AdService, hasRewardedAd) {
     return YES; // Always claim a rewarded ad is ready
 }
 
-CHOptimizedMethod(0, self, BOOL, Activator.AdService, isReady) {
+CHOptimizedMethod0(0, self, BOOL, Activator.AdService, isReady) {
     return YES;
 }
 
-CHOptimizedMethod(0, self, void, Activator.AdService, loadRewardAd) {
-    // Trigger the load, then immediately signal success if the original doesn't
-    CHSuper(0, Activator.AdService, loadRewardAd);
+CHOptimizedMethod0(0, self, void, Activator.AdService, loadRewardAd) {
+    CHSuper0(0, Activator.AdService, loadRewardAd);
     NSLog(@"[AdPurge] Intercepted loadRewardAd. Forcing success state.");
 }
 
-// Bypass AMAAdController (AppMetrica)
 CHDeclareClass(AMAAdController);
 
-CHOptimizedMethod(0, self, BOOL, AMAAdController, isAdvertisingTrackingEnabled) {
+// 0 Arguments
+CHOptimizedMethod0(0, self, BOOL, AMAAdController, isAdvertisingTrackingEnabled) {
     return YES;
 }
 
-// Bypass AMAJailbreakCheck (to avoid detection)
 CHDeclareClass(AMAJailbreakCheck);
 
-CHOptimizedClassMethod(0, self, int, AMAJailbreakCheck, jailbroken) {
-    return 0; // Not jailbroken
-}
-
-CHOptimizedClassMethod(0, self, int, AMAJailbreakCheck, urlCheck) {
-    return 0;
-}
-
-CHOptimizedClassMethod(0, self, int, AMAJailbreakCheck, cydiaCheck) {
-    return 0;
-}
+// Class Methods (0 Arguments)
+CHOptimizedClassMethod0(0, self, int, AMAJailbreakCheck, jailbroken) { return 0; }
+CHOptimizedClassMethod0(0, self, int, AMAJailbreakCheck, urlCheck) { return 0; }
+CHOptimizedClassMethod0(0, self, int, AMAJailbreakCheck, cydiaCheck) { return 0; }
 
 // ----------------------------------------------------------------------------
 // 6. Initialization & Hook Setup
@@ -267,17 +248,11 @@ CHConstructor {
     @autoreleasepool {
         NSLog(@"[AdPurge] Tweak loaded. Starting environment purge...");
 
-        // 1. Generate IP
         persistSessionIP();
-
-        // 2. Purge Sandbox & Keychain
         purgeSandbox();
         purgeKeychainExceptToken();
-
-        // 3. Reset and Configure UserDefaults
         resetAndConfigureDefaults();
 
-        // 4. Initialize Hooks
         CHLoadClass(NSURLSessionConfiguration);
         CHLoadClass(NSMutableURLRequest);
         CHLoadClass(GADAdLoader);
