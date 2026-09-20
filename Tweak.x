@@ -8,14 +8,12 @@
 
 // MARK: - Helper Functions
 
-// Generates a random IP address in the 84.241.x.x range.
 static NSString *generateRandomDutchIP() {
     uint32_t randomPart1 = arc4random_uniform(256);
     uint32_t randomPart2 = arc4random_uniform(256);
     return [NSString stringWithFormat:@"84.241.%u.%u", randomPart1, randomPart2];
 }
 
-// The pinned IP for the current session.
 static NSString *sessionIP = nil;
 
 // MARK: - Deep Clean & Purge Module
@@ -46,7 +44,6 @@ static NSString *sessionIP = nil;
     }
 
     for (NSString *item in libraryContents) {
-        // Preserve the Preferences directory, as NSUserDefaults is stored here.
         if ([item isEqualToString:@"Preferences"]) {
             continue;
         }
@@ -57,7 +54,6 @@ static NSString *sessionIP = nil;
         }
     }
 
-    // Also clear the Caches directory specifically.
     NSArray *cachePaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     NSString *cachePath = [cachePaths firstObject];
     NSArray *cacheContents = [fileManager contentsOfDirectoryAtPath:cachePath error:&error];
@@ -67,23 +63,11 @@ static NSString *sessionIP = nil;
     }
 
     // 3. Targeted Keychain Cleanup
-    // This query deletes all keychain items for the app EXCEPT the one with the specific service and account.
-    NSDictionary *query = @{
+    NSMutableDictionary *allQuery = [@{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecAttrService: @"app.getsmscode",
-        (__bridge id)kSecAttrAccount: @"tokenKey"
-    };
-    
-    // First, delete the specific token we want to preserve, to ensure it's not accidentally removed later.
-    // Actually, we will delete everything EXCEPT this. We'll use a different approach:
-    // We fetch all items, and delete the ones that don't match.
-    
-    // Simpler approach: Delete all generic passwords, then re-add the token? No, we don't have the token value.
-    // Best approach: Query for all generic passwords, and delete those not matching our criteria.
-    
-    NSMutableDictionary *allQuery = [@{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                                        (__bridge id)kSecReturnAttributes: @YES,
-                                        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll} mutableCopy];
+        (__bridge id)kSecReturnAttributes: @YES,
+        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
+    } mutableCopy];
     
     CFTypeRef result = NULL;
     OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)allQuery, &result);
@@ -116,13 +100,12 @@ static NSString *sessionIP = nil;
 
 // MARK: - Network Spoofing Module
 
-@interface DutchIPProtocol : NSURLProtocol
+@interface DutchIPProtocol : NSURLProtocol <NSURLSessionDataDelegate>
 @end
 
 @implementation DutchIPProtocol
 
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
-    // Only intercept HTTP/HTTPS requests.
     if ([NSURLProtocol propertyForKey:@"DutchIPHandled" inRequest:request]) {
         return NO;
     }
@@ -136,16 +119,13 @@ static NSString *sessionIP = nil;
 - (void)startLoading {
     NSMutableURLRequest *newRequest = [self.request mutableCopy];
     
-    // Inject the pinned IP into the X-Forwarded-For header.
     if (sessionIP) {
         [newRequest setValue:sessionIP forHTTPHeaderField:@"X-Forwarded-For"];
         [newRequest setValue:sessionIP forHTTPHeaderField:@"X-Real-IP"];
     }
     
-    // Mark the request as handled to prevent infinite loops.
     [NSURLProtocol setProperty:@YES forKey:@"DutchIPHandled" inRequest:newRequest];
     
-    // Use a new session for this request to avoid caching issues.
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];
     
@@ -154,7 +134,6 @@ static NSString *sessionIP = nil;
 }
 
 - (void)stopLoading {
-    // No-op for this implementation.
 }
 
 // MARK: NSURLSessionDataDelegate
@@ -189,7 +168,6 @@ static NSString *sessionIP = nil;
 + (void)setupIdealEnvironment {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     
-    // 1. Reset Installation and Launch Data
     NSString *currentDateString = [NSString stringWithFormat:@"%.0f", [[NSDate date] timeIntervalSince1970]];
     [defaults setObject:currentDateString forKey:@"AppsFlyerInstallDate"];
     [defaults setObject:currentDateString forKey:@"AppsFlyerInitDate"];
@@ -200,15 +178,13 @@ static NSString *sessionIP = nil;
     [defaults setObject:@(1) forKey:@"AppsFlyerLaunchKey"];
     [defaults setObject:@(1) forKey:@"AppsFlyerReadyToSendEvents"];
     
-    // 2. Set Ideal European Consent (IAB TCF & UMP)
-    // This simulates a user who has granted full consent for all purposes.
-    [defaults setObject:@"1" forKey:@"IABTCF_gdprApplies"]; // GDPR applies
-    [defaults setObject:@"11111111111" forKey:@"IABTCF_PurposeConsents"]; // All purposes consented
+    [defaults setObject:@"1" forKey:@"IABTCF_gdprApplies"];
+    [defaults setObject:@"11111111111" forKey:@"IABTCF_PurposeConsents"];
     [defaults setObject:@"01000011111" forKey:@"IABTCF_PurposeLegitimateInterests"];
     [defaults setObject:@"10000000011110110000100000000000000000000000000001" forKey:@"IABTCF_VendorConsents"];
     [defaults setObject:@"10000000011110110000100000000000000000000000000001" forKey:@"IABTCF_VendorLegitimateInterests"];
-    [defaults setObject:@"1" forKey:@"IABTCF_SpecialFeaturesOptIns"]; // Opt-in to special features
-    [defaults setObject:@"CY" forKey:@"IABTCF_PublisherCC"]; // Set a European country code (e.g., Cyprus)
+    [defaults setObject:@"1" forKey:@"IABTCF_SpecialFeaturesOptIns"];
+    [defaults setObject:@"CY" forKey:@"IABTCF_PublisherCC"];
     [defaults setObject:@"0" forKey:@"IABTCF_PurposeOneTreatment"];
     [defaults setObject:@"0" forKey:@"IABTCF_UseNonStandardStacks"];
     [defaults setObject:@"300" forKey:@"IABTCF_CmpSdkID"];
@@ -219,7 +195,6 @@ static NSString *sessionIP = nil;
     [defaults setObject:@"1" forKey:@"ump_pors"];
     [defaults setObject:@"4444" forKey:@"UMP_consentModeValues"];
     
-    // 3. Disable Security/Diagnostic Flags (if necessary)
     [defaults setBool:NO forKey:@"em_lockdownModeEnabled"];
     [defaults setBool:NO forKey:@"hk_hfeModeEnabled"];
     
@@ -231,12 +206,9 @@ static NSString *sessionIP = nil;
 
 // MARK: - Ad-State Override Module
 
-// Hooking the custom AdService class. The actual class name might be Swift, e.g., "Activator.AdService".
-// We'll hook by name to be safe.
 static void hookAdService() {
     Class adServiceClass = NSClassFromString(@"Activator.AdService");
     if (!adServiceClass) {
-        // Try another common name pattern.
         adServiceClass = NSClassFromString(@"AdService");
     }
     if (!adServiceClass) {
@@ -244,18 +216,12 @@ static void hookAdService() {
         return;
     }
     
-    // Hook the methods that check for ad availability.
-    // The exact method names are inferred from the provided file content.
-    // We'll hook common patterns like "isReady", "hasAd", "canShowAd".
-    
     SEL isReadySelector = NSSelectorFromString(@"isReady");
     SEL hasActiveSubscriptionSelector = NSSelectorFromString(@"hasActiveSubscription");
     
     if ([adServiceClass instancesRespondToSelector:isReadySelector]) {
         Method originalMethod = class_getInstanceMethod(adServiceClass, isReadySelector);
-        IMP originalIMP = method_getImplementation(originalMethod);
         IMP newIMP = imp_implementationWithBlock(^BOOL(id _self) {
-            // Force isReady to always return YES.
             return YES;
         });
         method_setImplementation(originalMethod, newIMP);
@@ -264,16 +230,13 @@ static void hookAdService() {
     
     if ([adServiceClass instancesRespondToSelector:hasActiveSubscriptionSelector]) {
         Method originalMethod = class_getInstanceMethod(adServiceClass, hasActiveSubscriptionSelector);
-        IMP originalIMP = method_getImplementation(originalMethod);
         IMP newIMP = imp_implementationWithBlock(^BOOL(id _self) {
-            // Force hasActiveSubscription to always return NO, ensuring the app doesn't think the user is a premium subscriber.
             return NO;
         });
         method_setImplementation(originalMethod, newIMP);
         NSLog(@"[Tweak] Hooked -[AdService hasActiveSubscription] to always return NO.");
     }
     
-    // Hook the loading methods to force a successful load.
     SEL loadAppOpenAdSelector = NSSelectorFromString(@"loadAppOpenAd");
     SEL loadInterstitialAdSelector = NSSelectorFromString(@"loadInterstitialAd");
     SEL loadRewardAdSelector = NSSelectorFromString(@"loadRewardAd");
@@ -285,18 +248,11 @@ static void hookAdService() {
     for (NSString *selName in loadSelectors) {
         SEL selector = NSSelectorFromString(selName);
         if ([adServiceClass instancesRespondToSelector:selector]) {
-            Method originalMethod = class_getInstanceMethod(adServiceClass, selector);
-            IMP originalIMP = method_getImplementation(originalMethod);
-            // We can't easily change the return type or arguments, so we just let it run.
-            // The key is that the `isReady` check will now pass, so the app will attempt to show the ad.
-            // We could also call the original IMP and then force a callback, but that's more complex.
-            // For simplicity, we ensure the readiness check passes.
             NSLog(@"[Tweak] Found loading method: %@", selName);
         }
     }
 }
 
-// Hook Google Mobile Ads (GADAdLoader) as a fallback.
 static void hookGADAdLoader() {
     Class gadLoaderClass = NSClassFromString(@"GADAdLoader");
     if (gadLoaderClass) {
@@ -304,7 +260,7 @@ static void hookGADAdLoader() {
         if ([gadLoaderClass instancesRespondToSelector:isLoadingSelector]) {
             Method originalMethod = class_getInstanceMethod(gadLoaderClass, isLoadingSelector);
             IMP newIMP = imp_implementationWithBlock(^BOOL(id _self) {
-                return NO; // Force loading to appear finished.
+                return NO;
             });
             method_setImplementation(originalMethod, newIMP);
             NSLog(@"[Tweak] Hooked -[GADAdLoader isLoading] to always return NO.");
@@ -317,19 +273,14 @@ static void hookGADAdLoader() {
 %ctor {
     NSLog(@"[Tweak] Initializing getsmscode tweak...");
     
-    // 1. Generate and pin the Dutch IP for this session.
     sessionIP = generateRandomDutchIP();
     NSLog(@"[Tweak] Session IP set to: %@", sessionIP);
     
-    // 2. Register the custom NSURLProtocol to inject the IP into all requests.
     [NSURLProtocol registerClass:[DutchIPProtocol class]];
     
-    // 3. Perform the deep clean and setup the ideal environment.
     [Cleaner performDeepClean];
     [ConfigManager setupIdealEnvironment];
     
-    // 4. Hook the ad service and ad loader classes.
-    // We perform this after a short delay to ensure all classes are loaded.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         hookAdService();
         hookGADAdLoader();
