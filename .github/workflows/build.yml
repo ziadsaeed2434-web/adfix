@@ -11,7 +11,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
-    
 
     - name: Install ldid
       run: |
@@ -32,8 +31,11 @@ jobs:
       env:
         THEOS: /Users/runner/theos
 
+    - name: List built files
+      run: find .theos -name "*.dylib"
+
     - name: Upload Dylib Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ProAdManager-dylib
-        path: .theos/obj/release/*.dylib
+        name: AdPurgeTweak-dylib
+        path: .theos/obj/**/*.dylib
