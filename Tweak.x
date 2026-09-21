@@ -110,24 +110,15 @@
         NSString *log = [NSString stringWithFormat:@"[UI TEXT] Found Text: '%@'", text];
         [[TextDebuggerOverlay sharedInstance] logMessage:log];
         
-        // طباعة جزء من مسار الكود الذي قام بتحديث النص لمعرفة الكلاس المسؤول
+        // طباعة مسار الاستدعاء لمعرفة اسم الدالة والكلاس المسؤول عن تغيير النص
         NSArray *stack = [NSThread callStackSymbols];
         if (stack.count > 2) {
-            // نأخذ السطر المسؤول عن الاستدعاء
             NSString *caller = stack[2];
-            [[TextDebuggerOverlay ISSingletonOrObjC:caller] init]; // صيغة عرض آمنة
             [[TextDebuggerOverlay sharedInstance] logMessage:[NSString stringWithFormat:@"-> Caller: %@", caller]];
         }
     }
 }
 
-@end
-
-// طريقة مساعدة لتجنب أخطاء النطاق
-@implementation TextDebuggerOverlay (Helper)
-+ (id)ISSingletonOrObjC:(NSString *)str {
-    return [TextDebuggerOverlay sharedInstance];
-}
 @end
 
 %ctor {
