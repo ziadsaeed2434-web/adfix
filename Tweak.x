@@ -7,7 +7,7 @@
 // تعريف واجهات Google Mobile Ads SDK المطلوبة للحقن
 @interface GADMobileAds : NSObject
 + (instancetype)sharedInstance;
--cję (void)startWithCompletionHandler:(void(^)(id))completionHandler;
+- (void)startWithCompletionHandler:(void(^)(id))completionHandler;
 @end
 
 @interface GADRewardedAd : NSObject
@@ -40,7 +40,6 @@ static void preloadGoogleRewardedAd() {
                 NSLog(@">>> [AdMob-Injection] Rewarded Ad loaded successfully!");
             } else {
                 NSLog(@">>> [AdMob-Injection] Failed to load AdMob ad: %@", error.localizedDescription);
-                // محاولة إعادة التحميل بعد 5 ثوانٍ في حال الفشل
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     preloadGoogleRewardedAd();
                 });
@@ -56,11 +55,10 @@ static __attribute__((constructor)) void setupAdMobAndGermanEnvironment() {
         [defaults setObject:@[@"de-DE", @"en-US"] forKey:@"AppleLanguages"];
         [defaults setObject:@"DE" forKey:@"AppleLocale"];
         [defaults setObject:@"Europe/Berlin" forKey:@"NSReuseTimeZone"];
-        [defaults setInteger:3 forKey:@"ATT_Tracking_Status"]; // السماح بالتتبع لضمان ظهور إعلانات AdMob
+        [defaults setInteger:3 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:1 forKey:@"IABTCF_gdprApplies"];
         [defaults synchronize];
         
-        // تشغيل Google Mobile Ads SDK
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             Class mobileAdsClass = NSClassFromString(@"GADMobileAds");
             if (mobileAdsClass && [mobileAdsClass respondsToSelector:@selector(sharedInstance)]) {
@@ -90,6 +88,17 @@ static __attribute__((constructor)) void setupAdMobAndGermanEnvironment() {
 - (BOOL)isAdvertisingTrackingEnabled { return YES; }
 %end
 
+// تعريف الكلاس لتجنب خطأ Forward Declaration
+@interface ActivatorAdService : NSObject
+- (void)loadAd;
+- (BOOL)isReady;
+- (BOOL)isAdReady;
+- (BOOL)canShowAd;
+- (BOOL)hasAdLoaded;
+- (void)showRewardAd;
+- (void)presentAdFromViewController:(UIViewController *)viewController;
+@end
+
 // 3. حقن زر التطبيق وربطه مباشرة بإعلان AdMob الحقيقي
 %hook ActivatorAdService
 
@@ -113,15 +122,14 @@ static __attribute__((constructor)) void setupAdMobAndGermanEnvironment() {
         if (sharedRewardedAd && rootVC) {
             NSLog(@">>> [AdMob-Injection] Presenting Google AdMob Rewarded Ad!");
             [sharedRewardedAd presentFromRootViewController:rootVC userDidEarnRewardHandler:^{
-                NSLog(@drawing @">>> [AdMob-Injection] User earned reward!");
+                NSLog(@">>> [AdMob-Injection] User earned reward!");
             }];
-            // إعادة تحميل إعلان جديد للمرة القادمة
             sharedRewardedAd = nil;
             preloadGoogleRewardedAd();
         } else {
             NSLog(@">>> [AdMob-Injection] Ad not ready yet, forcing reload...");
             preloadGoogleRewardedAd();
-            %orig; // استدعاء الدالة الأصلية كخيار احتياطي
+            %orig;
         }
     } @catch (NSException *e) {
         NSLog(@">>> [AdMob-Injection] Exception in showRewardAd: %@", e.reason);
