@@ -2,20 +2,20 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-@interface LocalAdChecker : NSObject
+@interface AdBypasserOverlay : NSObject
 @property (nonatomic, strong) UIWindow *debugWindow;
 @property (nonatomic, strong) UITextView *logTextView;
 + (instancetype)sharedInstance;
 - (void)logMessage:(NSString *)message;
 @end
 
-@implementation LocalAdChecker
+@implementation AdBypasserOverlay
 
 + (instancetype)sharedInstance {
-    static LocalAdChecker *sharedInstance = nil;
+    static AdBypasserOverlay *sharedInstance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sharedInstance = [[LocalAdChecker alloc] init];
+        sharedInstance = [[AdBypasserOverlay alloc] init];
     });
     return sharedInstance;
 }
@@ -43,11 +43,10 @@
         self.debugWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     }
     
-    // نافذة علوية قابلة للتمرير بيدك لقراءة كل الفحوصات المحلية
-    self.debugWindow.frame = CGRectMake(0, 30, [UIScreen mainScreen].bounds.size.width, 260);
+    self.debugWindow.frame = CGRectMake(0, 30, [UIScreen mainScreen].bounds.size.width, 180);
     self.debugWindow.windowLevel = UIWindowLevelAlert + 99999;
     self.debugWindow.hidden = NO;
-    self.debugWindow.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.97];
+    self.debugWindow.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.95];
     
     UIViewController *rootVC = [[UIViewController alloc] init];
     rootVC.view.backgroundColor = [UIColor clearColor];
@@ -56,10 +55,10 @@
     self.logTextView.editable = NO;
     self.logTextView.scrollEnabled = YES;
     self.logTextView.userInteractionEnabled = YES;
-    self.logTextView.textColor = [UIColor magentaColor]; // لون مميز للفحص المحلي
+    self.logTextView.textColor = [UIColor greenColor];
     self.logTextView.backgroundColor = [UIColor clearColor];
-    self.logTextView.font = [UIFont fontWithName:@"Courier-Bold" size:9];
-    self.logTextView.text = @"[LOCAL SCAN] Deep Local Reason Analyzer Started...\n[LOCAL SCAN] Scanning memory for Ad restrictions...\n";
+    self.logTextView.font = [UIFont fontWithName:@"Courier-Bold" size:10];
+    self.logTextView.text = @"[AD BYPASSER] Active - Forcing Ad Consents & Bypassing Restrictions...\n";
     
     [rootVC.view addSubview:self.logTextView];
     self.debugWindow.rootViewController = rootVC;
@@ -79,57 +78,56 @@
 
 @end
 
-// فحص محلي للكلاسات المرتبطة بالإعلانات عند الإطلاق
-static void performLocalMemoryScan() {
-    int numClasses = objc_getClassList(NULL, 0);
-    if (numClasses > 0) {
-        Class *classes = (__unsafe_unretained Class *)malloc(sizeof(Class) * numClasses);
-        numClasses = objc_getClassList(classes, numClasses);
-        
-        int adClassesCount = 0;
-        for (int i = 0; i < numClasses; i++) {
-            NSString *className = NSStringFromClass(classes[i]);
-            // البحث عن الكلاسات المسؤولة محلياً عن الإعلانات أو المتجر
-            if ([className rangeOfString:@"Ad" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                [className rangeOfString:@"Reward" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                [className rangeOfString:@"Monetiz" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                [className rangeOfString:@"Store" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                
-                adClassesCount++;
-                if (adClassesCount <= 15) { // عرض عينة من الكلاسات المكتشفة محلياً
-                    [[LocalAdChecker sharedInstance] logMessage:[NSString stringWithFormat:@"[LOCAL CLASS] Found: %@", className]];
-                }
-            }
+// -----------------------------------------------------------------
+// خداع التخزين المحلي وإجبار قيم الموافقة والتتبع على النجاح
+// -----------------------------------------------------------------
+@implementation NSUserDefaults (AdBypasser)
+
+- (id)bypass_objectForKey:(NSString *)defaultName {
+    if (defaultName) {
+        // إجبار الموافقة على ملفات تعريف الارتباط للإعلانات
+        if ([defaultName isEqualToString:@"gad_has_consent_for_cookies"]) {
+            return @(YES);
         }
-        free(classes);
-        [[LocalAdChecker sharedInstance] logMessage:[NSString stringWithFormat:@"[LOCAL SCAN] Total relevant classes found: %d", adClassesCount]];
+        // إجبار حالة الإعلانات المخصصة على النجاح
+        if ([defaultName isEqualToString:@"personalized_ad_status"]) {
+            return @(1);
+        }
+        // إجبار عدم تقييد الإعلانات
+        if ([defaultName isEqualToString:@"gad_rdp"]) {
+            return @(0);
+        }
     }
+    return [self bypass_objectForKey:defaultName];
 }
 
-// اعتراض الشروط والتحققات المحلية عبر رصد استدعاءات الـ NSUserDefaults (حيث غالباً ما يتم حفظ حالة الحظر أو التوقيت محلياً)
-@interface NSUserDefaults (LocalAdChecker)
-@end
-
-@implementation NSUserDefaults (LocalAdChecker)
-
-- (id)debug_objectForKey:(NSString *)defaultName {
-    id value = [self debug_objectForKey:defaultName];
-    if (defaultName && ([defaultName rangeOfString:@"ad" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                        [defaultName rangeOfString:@"time" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                        [defaultName rangeOfString:@"limit" options:NSCaseInsensitiveSearch].location != NSNotFound)) {
-        [[LocalAdChecker sharedInstance] logMessage:[NSString stringWithFormat:@"[LOCAL PREF] Read Key: %@ = %@", defaultName, value]];
+- (BOOL)bypass_boolForKey:(NSString *)defaultName {
+    if (defaultName) {
+        if ([defaultName isEqualToString:@"gad_has_consent_for_cookies"] ||
+            [defaultName isEqualToString:@"gad_rdp"]) {
+            return YES;
+        }
     }
-    return value;
+    return [self bypass_boolForKey:defaultName];
 }
 
 + (void)load {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         Class class = [self class];
-        Method original = class_getInstanceMethod(class, @selector(objectForKey:));
-        Method swizzled = class_getInstanceMethod(class, @selector(debug_objectForKey:));
-        if (original && swizzled) {
-            method_exchangeImplementations(original, swizzled);
+        
+        // تبديل دالة objectForKey
+        Method originalObj = class_getInstanceMethod(class, @selector(objectForKey:));
+        Method swizzledObj = class_getInstanceMethod(class, @selector(bypass_objectForKey:));
+        if (originalObj && swizzledObj) {
+            method_exchangeImplementations(originalObj, swizzledObj);
+        }
+        
+        // تبديل دالة boolForKey
+        Method originalBool = class_getInstanceMethod(class, @selector(boolForKey:));
+        Method swizzledBool = class_getInstanceMethod(class, @selector(bypass_boolForKey:));
+        if (originalBool && swizzledBool) {
+            method_exchangeImplementations(originalBool, swizzledBool);
         }
     });
 }
@@ -137,8 +135,5 @@ static void performLocalMemoryScan() {
 @end
 
 %ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        performLocalMemoryScan();
-    });
-    [[LocalAdChecker sharedInstance] logMessage:@"[INIT] Local Reason Analyzer Hooked Successfully!"];
+    [[AdBypasserOverlay sharedInstance] logMessage:@"[SUCCESS] Consent Bypasser Hooked Successfully!"];
 }
