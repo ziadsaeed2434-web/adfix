@@ -31,19 +31,13 @@ static void clearKeychainExceptToken() {
             NSArray *items = (__bridge NSArray *)result;
             for (NSDictionary *item in items) {
                 NSString *account = item[(__bridge id)kSecAttrAccount];
-                NSString *service = item[(__bridge id)kSecAttrService];
-                
                 if (![account isEqualToString:@"tokenKey"]) {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
-                } else {
-                    NSLog(@">>> [Dynamic-Refresh] tokenKey safely preserved: %@", service);
                 }
             }
-            if (result) {
-                CFRelease(result);
-            }
+            if (result) CFRelease(result);
         }
     }
 }
@@ -67,48 +61,7 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// الهندسة العكسية الحية للكلاسات في الذاكرة
-static void forceEnableAllAdClassesAtRuntime() {
-    int numClasses = objc_getClassList(NULL, 0);
-    if (numClasses > 0) {
-        Class *classes = (__unsafe_unretained Class *)malloc(sizeof(Class) * numClasses);
-        numClasses = objc_getClassList(classes, numClasses);
-        
-        for (int i = 0; i < numClasses; i++) {
-            Class cls = classes[i];
-            NSString *className = NSStringFromClass(cls);
-            
-            if ([className rangeOfString:@"Ad" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                [className rangeOfString:@"Reward" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                [className rangeOfString:@"Monetiz" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                
-                unsigned int methodCount = 0;
-                Method *methods = class_copyMethodList(cls, &methodCount);
-                for (unsigned int j = 0; j < methodCount; j++) {
-                    SEL selector = method_getName(methods[j]);
-                    NSString *selName = NSStringFromSelector(selector);
-                    
-                    if ([selName rangeOfString:@"Ready" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                        [selName rangeOfString:@"CanShow" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                        [selName rangeOfString:@"Loaded" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                        [selName rangeOfString:@"Valid" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                        
-                        Method m = class_getInstanceMethod(cls, selector);
-                        if (m) {
-                            method_setImplementation(m, imp_implementationWithBlock(^BOOL(id selfObj) {
-                                return YES;
-                            }));
-                        }
-                    }
-                }
-                if (methods) free(methods);
-            }
-        }
-        free(classes);
-    }
-}
-
-// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل
+// 2. دالة الحذف والتنظيف الشاملة والعميقة (كما طلبت تماماً بدون حذف ما يسبب الكرش عند البداية المطلقة)
 static void executeFullEnvironmentRefresh() {
     @autoreleasepool {
         clearKeychainExceptToken();
@@ -125,12 +78,24 @@ static void executeFullEnvironmentRefresh() {
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
-        NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
-        for (NSString *item in homeContents) {
-            NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
-            [fileManager removeItemAtPath:fullPath error:&error];
+        
+        // مسح محتويات مجلدات مؤقتة داخل الساندبوكس بأمان لضمان عدم الكرش
+        NSArray *subDirsToClean = @[@"Library/Caches", @"tmp", @"Library/Application Support"];
+        for (NSString *subDir in subDirsToClean) {
+            NSString *fullSubPath = [homeDir stringByAppendingPathComponent:subDir];
+            if ([fileManager fileExistsAtPath:fullSubPath]) {
+                NSArray *contents = [fileManager contentsOfDirectoryAtPath:fullSubPath error:&error];
+                for (NSString *item in contents) {
+                    // حماية بعض ملفات الإعدادات الأساسية لكي لا يحدث Crash
+                    if (![item isEqualToString:@"Preferences"]) {
+                        NSString *itemPath = [fullSubPath stringByAppendingPathComponent:item];
+                        [fileManager removeItemAtPath:itemPath error:&error];
+                    }
+                }
+            }
         }
         
+        // مسح الـ Group Containers المرتبطة تماماً
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fileManager fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
@@ -150,7 +115,7 @@ static void executeFullEnvironmentRefresh() {
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
         
-        [defaults setInteger:3 forKey:@"ATT_Tracking_Status"];
+        [defaults setInteger:3 forKey:@"ATT_Tracking_Status"]; // Authorized
         [defaults setInteger:1 forKey:@"ump_status"];
         [defaults setInteger:1 forKey:@"IABTCF_gdprApplies"];
         [defaults setObject:@"1" forKey:@"gad_has_consent_for_cookies"];
@@ -163,14 +128,15 @@ static void executeFullEnvironmentRefresh() {
         
         [defaults synchronize];
         
-        forceEnableAllAdClassesAtRuntime();
-        
-        NSLog(@">>> [Dynamic-Refresh] Full environment wiped & Elite ID spawned: %@", freshID);
+        NSLog(@">>> [Dynamic-Refresh] Environment wiped successfully without crash.");
     }
 }
 
+// تنفيذ التنظيف بعد إقلاع التطبيق بثانية لضمان الاستقرار وعدم الانهيار
 static __attribute__((constructor)) void initialAppLaunchSetup() {
-    executeFullEnvironmentRefresh();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        executeFullEnvironmentRefresh();
+    });
 }
 
 // 3. فرض الهوية والتتبع على مستوى النظام
@@ -233,7 +199,7 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 %hook NSTimer
 + (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval target:(id)target selector:(SEL)aSelector userInfo:(id)userInfo repeats:(BOOL)repeats {
     if (interval > 5.0) {
-        interval = 0.1; // تسريع أي مؤقت انتظار طويل للإعلانات إلى 0.1 ثانية
+        interval = 0.1;
     }
     return %orig(interval, target, aSelector, userInfo, repeats);
 }
