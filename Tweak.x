@@ -29,16 +29,18 @@
 }
 
 - (void)setupUI {
-    UIWindowScene *scene = nil;
-    for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
-        if ([s isKindOfClass:[UIWindowScene class]]) {
-            scene = (UIScene *)s;
+    UIWindowScene *targetScene = nil;
+    
+    // تصحيح فحص النوع لتجنب خطأ التوافق أثناء الترجمة
+    for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            targetScene = (UIWindowScene *)scene;
             break;
         }
     }
     
-    if (scene) {
-        self.debugWindow = [[UIWindow alloc] initWithWindowScene:scene];
+    if (targetScene) {
+        self.debugWindow = [[UIWindow alloc] initWithWindowScene:targetScene];
     } else {
         self.debugWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     }
@@ -78,21 +80,16 @@
 @end
 
 // -----------------------------------------------------------------
-// اعتراض شبكي شامل (Network Interception) عبر NSURLSessionTask
+// اعتراض شبكي وتتبع الاتصالات
 // -----------------------------------------------------------------
 @interface NSURLSession (AdDebugger)
 @end
 
 @implementation NSURLSession (AdDebugger)
 
-// سنقوم باعتراض طريقة إنشاء الـ DataTask لمراقبة أي رابط يخص الإعلانات
 + (void)load {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        Class class = objc_getClass("__NSCFURLSession");
-        if (!class) class = [NSURLSession class];
-        
-        // يمكننا تتبع الـ requests الصادرة عبر طبقة الـ Foundation
         [[ComprehensiveAdDebugger sharedInstance] logMessage:@"[NET] Network hooks initialized successfully."];
     });
 }
@@ -106,7 +103,6 @@ void hooked_NSLog(NSString *format, ...) {
     NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
     va_end(args);
     
-    // فلترة الرسائل غير الهامة وعرض المهمة المتعلقة بالاعلانات أو الأخطاء
     if ([message rangeOfString:@"ad" options:NSCaseInsensitiveSearch].location != NSNotFound ||
         [message rangeOfString:@"error" options:NSCaseInsensitiveSearch].location != NSNotFound ||
         [message rangeOfString:@"fail" options:NSCaseInsensitiveSearch].location != NSNotFound ||
