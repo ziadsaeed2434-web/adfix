@@ -2,20 +2,20 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-@interface ComprehensiveAdDebugger : NSObject
+@interface TextDebuggerOverlay : NSObject
 @property (nonatomic, strong) UIWindow *debugWindow;
 @property (nonatomic, strong) UITextView *logTextView;
 + (instancetype)sharedInstance;
 - (void)logMessage:(NSString *)message;
 @end
 
-@implementation ComprehensiveAdDebugger
+@implementation TextDebuggerOverlay
 
 + (instancetype)sharedInstance {
-    static ComprehensiveAdDebugger *sharedInstance = nil;
+    static TextDebuggerOverlay *sharedInstance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sharedInstance = [[ComprehensiveAdDebugger alloc] init];
+        sharedInstance = [[TextDebuggerOverlay alloc] init];
     });
     return sharedInstance;
 }
@@ -30,8 +30,6 @@
 
 - (void)setupUI {
     UIWindowScene *targetScene = nil;
-    
-    // تصحيح فحص النوع لتجنب خطأ التوافق أثناء الترجمة
     for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
         if ([scene isKindOfClass:[UIWindowScene class]]) {
             targetScene = (UIWindowScene *)scene;
@@ -45,21 +43,20 @@
         self.debugWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     }
     
-    // مربع علوي يغطي عرض الشاشة وبارتفاع 200 بكسل
-    self.debugWindow.frame = CGRectMake(0, 35, [UIScreen mainScreen].bounds.size.width, 200);
+    self.debugWindow.frame = CGRectMake(0, 30, [UIScreen mainScreen].bounds.size.width, 220);
     self.debugWindow.windowLevel = UIWindowLevelAlert + 99999;
     self.debugWindow.hidden = NO;
-    self.debugWindow.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.9];
+    self.debugWindow.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.95];
     
     UIViewController *rootVC = [[UIViewController alloc] init];
     rootVC.view.backgroundColor = [UIColor clearColor];
     
     self.logTextView = [[UITextView alloc] initWithFrame:rootVC.view.bounds];
     self.logTextView.editable = NO;
-    self.logTextView.textColor = [UIColor yellowColor];
+    self.logTextView.textColor = [UIColor cyanColor];
     self.logTextView.backgroundColor = [UIColor clearColor];
-    self.logTextView.font = [UIFont fontWithName:@"Courier-Bold" size:10];
-    self.logTextView.text = @"[INFO] Comprehensive Ad Debugger Started...\n[INFO] Monitoring Network & Local APIs...\n";
+    self.logTextView.font = [UIFont fontWithName:@"Courier-Bold" size:9];
+    self.logTextView.text = @"[INFO] Text & State Debugger Initialized...\n[INFO] Watching for 'No ad yet' changes...\n";
     
     [rootVC.view addSubview:self.logTextView];
     self.debugWindow.rootViewController = rootVC;
@@ -80,37 +77,59 @@
 @end
 
 // -----------------------------------------------------------------
-// اعتراض شبكي وتتبع الاتصالات
+// اعتراض تحديث النصوص في العناوين والازرار (UILabel setText:)
 // -----------------------------------------------------------------
-@interface NSURLSession (AdDebugger)
-@end
-
-@implementation NSURLSession (AdDebugger)
+@implementation UILabel (TextDebugger)
 
 + (void)load {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        [[ComprehensiveAdDebugger sharedInstance] logMessage:@"[NET] Network hooks initialized successfully."];
+        Class class = [self class];
+        SEL originalSelector = @selector(setText:);
+        SEL swizzledSelector = @selector(debug_setText:);
+        
+        Method originalMethod = class_getInstanceMethod(class, originalSelector);
+        Method swizzledMethod = class_getInstanceMethod(class, swizzledSelector);
+        
+        if (originalMethod && swizzledMethod) {
+            method_exchangeImplementations(originalMethod, swizzledMethod);
+        }
     });
+}
+
+- (void)debug_setText:(NSString *)text {
+    // استدعاء الدالة الأصلية حتى لا يتأثر شكل التطبيق
+    [self debug_setText:text];
+    
+    // إذا كان النص يحتوي على عبارة تخص الإعلانات أو الحالة
+    if (text && (
+        [text rangeOfString:@"ad" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [text rangeOfString:@"reward" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [text rangeOfString:@"coin" options:NSCaseInsensitiveSearch].location != NSNotFound
+    )) {
+        NSString *log = [NSString stringWithFormat:@"[UI TEXT] Found Text: '%@'", text];
+        [[TextDebuggerOverlay sharedInstance] logMessage:log];
+        
+        // طباعة جزء من مسار الكود الذي قام بتحديث النص لمعرفة الكلاس المسؤول
+        NSArray *stack = [NSThread callStackSymbols];
+        if (stack.count > 2) {
+            // نأخذ السطر المسؤول عن الاستدعاء
+            NSString *caller = stack[2];
+            [[TextDebuggerOverlay ISSingletonOrObjC:caller] init]; // صيغة عرض آمنة
+            [[TextDebuggerOverlay sharedInstance] logMessage:[NSString stringWithFormat:@"-> Caller: %@", caller]];
+        }
+    }
 }
 
 @end
 
-// اعتراض دوال طباعة الأخطاء والـ NSLog لتظهر فوراً على الشاشة
-void hooked_NSLog(NSString *format, ...) {
-    va_list args;
-    va_start(args, format);
-    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
-    va_end(args);
-    
-    if ([message rangeOfString:@"ad" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [message rangeOfString:@"error" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [message rangeOfString:@"fail" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [message rangeOfString:@"reward" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-        [[ComprehensiveAdDebugger sharedInstance] logMessage:[NSString stringWithFormat:@"[LOG] %@", message]];
-    }
+// طريقة مساعدة لتجنب أخطاء النطاق
+@implementation TextDebuggerOverlay (Helper)
++ (id)ISSingletonOrObjC:(NSString *)str {
+    return [TextDebuggerOverlay sharedInstance];
 }
+@end
 
 %ctor {
-    [[ComprehensiveAdDebugger sharedInstance] logMessage:@"[INIT] Dylib Injected. Ready to capture issues!"];
+    [[TextDebuggerOverlay sharedInstance] logMessage:@"[INIT] Hooked UILabel setText successfully!"];
 }
