@@ -1,89 +1,74 @@
-#import <Foundation/Foundation.h>
-#import <CoreLocation/CoreLocation.h>
-#import <objc/runtime.h>
+#import <UIKit/UIKit.h>
+#import <StoreKit/StoreKit.h>
 
-static NSString *currentActiveIP = nil;
-static double currentLatitude = 0.0;
-static double currentLongitude = 0.0;
-
-// قائمة بنطاقات مزودي الخدمة السكنيين الحقيقيين في أوروبا (Residential ISPs) لضمان قبول الإعلانات
-static NSArray *getResidentialIPPool() {
-    return @[
-        // ألمانيا - Deutsche Telekom / Vodafone (Residential)
-        @"87.138", @"91.64", @"188.100", @"79.200",
-        // فرنسا - Orange / Free / SFR (Residential)
-        @"80.12", @"90.109", @"78.119", @"88.160",
-        // بريطانيا - BT / Sky / Virgin Media (Residential)
-        @"86.130", @"90.200", @"82.132", @"78.144"
-    ];
+// دالة مسلّحة للبحث الذكي عن زر الإغلاق داخل الـ View الخاصة بالإعلان فقط
+static void dismissAdView(UIView *view) {
+    if (!view) return;
+    
+    for (UIView *subview in view.subviews) {
+        // التحقق مما إذا كان الزر هو UIButton أو UIControl
+        if ([subview isKindOfClass:[UIButton class]] || [subview isKindOfClass:[UIControl class]]) {
+            UIButton *button = (UIButton *)subview;
+            NSString *title = [button titleForState:UIControlStateNormal];
+            NSString *accessibilityLabel = button.accessibilityLabel;
+            
+            // مطابقة الكلمات الشائعة لزر الإغلاق
+            if ([title isEqualToString:@"X"] || [title isEqualToString:@"✕"] || 
+                [title isEqualToString:@"Close"] || [title isEqualToString:@"Fermer"] || 
+                [accessibilityLabel localizedCaseInsensitiveContainsString:@"close"] || 
+                [accessibilityLabel localizedCaseInsensitiveContainsString:@"dismiss"] ||
+                [accessibilityLabel localizedCaseInsensitiveContainsString:@"exit"]) {
+                
+                [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+                return;
+            }
+        }
+        
+        // بحث تداخلي عميق ولكن بشكل آمن
+        dismissAdView(subview);
+    }
 }
 
-// دالة لتوليد IP سكني حقيقي ومضمون للإعلانات
-static NSString *randomResidentialEuropeanIP() {
-    NSArray *pool = getResidentialIPPool();
-    NSString *prefix = pool[arc4random_uniform((uint32_t)[pool count])];
-    
-    int part3 = arc4random_uniform(250) + 1;
-    int part4 = arc4random_uniform(250) + 1;
-    
-    return [NSString stringWithFormat:@"%@.%d.%d", prefix, part3, part4];
-}
+%hook UIViewController
 
-// دالة لتوليد إحداثيات جغرافية دقيقة ومتطابقة مع أوروبا
-static void generateMatchedCoordinates(double *lat, double *lon) {
-    // إحداثيات واقعية في أوروبا (مناطق وسط أوروبا)
-    *lat = 48.8566 + ((double)(arc4random_uniform(200) - 100) / 100.0); // حول باريس/ألمانيا
-    *lon = 2.3522 + ((double)(arc4random_uniform(200) - 100) / 100.0);
-}
-
-// تحديث الـ IP السكني والموقع كل 10 ثوانٍ
-static void updateResidentialIPAndLocation() {
-    currentActiveIP = randomResidentialEuropeanIP();
-    generateMatchedCoordinates(&currentLatitude, &currentLongitude);
+// مراقبة عرض واجهات العرض (تحديد الإعلانات ونافذة الأبل ستور)
+- (void)presentViewController:(UIViewController * )viewControllerToPresent animated:(BOOL)flag completion:(void (^)(void))completion {
+    %orig;
     
-    NSLog(@">>> [Residential-Ads-Ready] New Residential IP: %@ | Location: %f, %f", currentActiveIP, currentLatitude, currentLongitude);
-}
+    if (!viewControllerToPresent) return;
 
-// تشغيل التحديث فوراً وكل 10 ثوانٍ
-static __attribute__((constructor)) void initialResidentialSetup() {
-    updateResidentialIPAndLocation();
+    // 1. معالجة نافذة الأبل ستور فور ظهورها (SKStoreProductViewController)
+    if ([viewControllerToPresent isKindOfClass:[SKStoreProductViewController class]]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [viewControllerToPresent dismissViewControllerAnimated:YES completion:nil];
+        });
+        return;
+    }
     
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [NSTimer scheduledTimerWithTimeInterval:10.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
-            updateResidentialIPAndLocation();
-        }];
+    // 2. مراقبة الإعلانات التي تفتح كـ Modal وإعطاؤها مهلة قصيرة لعرض زر الإغلاق ثم الضغط عليه
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (viewControllerToPresent.view) {
+            dismissAdView(viewControllerToPresent.view);
+        }
     });
 }
 
-// حقن الـ IP السكني في الترويسات للطلبات المرسلة
-%hook NSMutableURLRequest
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Real-IP"]) {
-        if (!currentActiveIP) {
-            currentActiveIP = randomResidentialEuropeanIP();
-        }
-        value = currentActiveIP;
-    }
-    %orig(value, field);
-}
 %end
 
-// مطابقة موقع الـ GPS مع الـ IP السكني الجديد
-%hook CLLocationManager
+// مراقبة العناصر الجديدة التي تضاف للشاشة لتغطية أي إعلانات داخلية (In-app Ads)
+%hook UIView
 
-- (CLLocation *)location {
-    if (currentLatitude == 0.0 && currentLongitude == 0.0) {
-        generateMatchedCoordinates(&currentLatitude, &currentLongitude);
-    }
-    return [[CLLocation alloc] initWithLatitude:currentLatitude longitude:currentLongitude];
-}
-
-- (void)startUpdatingLocation {
+- (void)didAddSubview:(UIView * )subview {
     %orig;
-    if ([self delegate] && [[self delegate] respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
-        CLLocation *fakeLocation = [[CLLocation alloc] initWithLatitude:currentLatitude longitude:currentLongitude];
-        [[self delegate] locationManager:self didUpdateLocations:@[fakeLocation]];
+    
+    // التحقق المباشر من الـ Subview الجديدة فقط لعدم التسبب بثقل في المعالج
+    if (subview && [subview isKindOfClass:[UIView class]]) {
+        // تأخير بسيط جداً للتأكد من اكتمال رسم عناصر الإعلان
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dismissAdView(subview);
+        });
     }
 }
 
 %end
+
