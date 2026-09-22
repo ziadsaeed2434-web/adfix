@@ -1,74 +1,79 @@
 #import <UIKit/UIKit.h>
 #import <StoreKit/StoreKit.h>
 
-// دالة مسلّحة للبحث الذكي عن زر الإغلاق داخل الـ View الخاصة بالإعلان فقط
-static void dismissAdView(UIView *view) {
-    if (!view) return;
+// دالة بحث آمنة جداً ومحمية ضد الكرش
+static void safeDismissAd(UIView *view) {
+    if (!view || ![view isKindOfClass:[UIView class]]) return;
     
-    for (UIView *subview in view.subviews) {
-        // التحقق مما إذا كان الزر هو UIButton أو UIControl
-        if ([subview isKindOfClass:[UIButton class]] || [subview isKindOfClass:[UIControl class]]) {
+    // استخدام حلقة آمنة لتفادي التعديل المباشر أثناء التكرار
+    NSArray *subviews = [view.subviews copy];
+    for (UIView *subview in subviews) {
+        if (!subview) continue;
+        
+        // التحقق مما إذا كان الزر هو UIButton
+        if ([subview isKindOfClass:[UIButton class]]) {
             UIButton *button = (UIButton *)subview;
             NSString *title = [button titleForState:UIControlStateNormal];
             NSString *accessibilityLabel = button.accessibilityLabel;
             
-            // مطابقة الكلمات الشائعة لزر الإغلاق
             if ([title isEqualToString:@"X"] || [title isEqualToString:@"✕"] || 
-                [title isEqualToString:@"Close"] || [title isEqualToString:@"Fermer"] || 
+                [title isEqualToString:@"Close"] || [title isEqualToString:@"Fermer"] ||
                 [accessibilityLabel localizedCaseInsensitiveContainsString:@"close"] || 
-                [accessibilityLabel localizedCaseInsensitiveContainsString:@"dismiss"] ||
-                [accessibilityLabel localizedCaseInsensitiveContainsString:@"exit"]) {
+                [accessibilityLabel localizedCaseInsensitiveContainsString:@"dismiss"]) {
                 
-                [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-                return;
+                // التأكد من أن الزر مفعل ويمكن الضغط عليه
+                if (button.enabled && button.userInteractionEnabled) {
+                    [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+                    return;
+                }
             }
         }
         
-        // بحث تداخلي عميق ولكن بشكل آمن
-        dismissAdView(subview);
+        // استدعاء تداخلي آمن
+        safeDismissAd(subview);
     }
 }
 
 %hook UIViewController
 
-// مراقبة عرض واجهات العرض (تحديد الإعلانات ونافذة الأبل ستور)
 - (void)presentViewController:(UIViewController * )viewControllerToPresent animated:(BOOL)flag completion:(void (^)(void))completion {
     %orig;
     
     if (!viewControllerToPresent) return;
 
-    // 1. معالجة نافذة الأبل ستور فور ظهورها (SKStoreProductViewController)
+    // 1. معالجة صفحة الأبل ستور بشكل آمن تماماً
     if ([viewControllerToPresent isKindOfClass:[SKStoreProductViewController class]]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [viewControllerToPresent dismissViewControllerAnimated:YES completion:nil];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (viewControllerToPresent && !viewControllerToPresent.isBeingDismissed) {
+                [viewControllerToPresent dismissViewControllerAnimated:YES completion:nil];
+            }
         });
         return;
     }
     
-    // 2. مراقبة الإعلانات التي تفتح كـ Modal وإعطاؤها مهلة قصيرة لعرض زر الإغلاق ثم الضغط عليه
+    // 2. معالجة الإعلانات بمهلة آمنة تضمن عدم الانهيار
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (viewControllerToPresent.view) {
-            dismissAdView(viewControllerToPresent.view);
+        if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
+            safeDismissAd(viewControllerToPresent.view);
         }
     });
 }
 
 %end
 
-// مراقبة العناصر الجديدة التي تضاف للشاشة لتغطية أي إعلانات داخلية (In-app Ads)
 %hook UIView
 
 - (void)didAddSubview:(UIView * )subview {
     %orig;
     
-    // التحقق المباشر من الـ Subview الجديدة فقط لعدم التسبب بثقل في المعالج
-    if (subview && [subview isKindOfClass:[UIView class]]) {
-        // تأخير بسيط جداً للتأكد من اكتمال رسم عناصر الإعلان
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            dismissAdView(subview);
-        });
-    }
+    if (!subview) return;
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // التأكد من أن الـ view ما زال موجوداً في الذاكرة ولم يتم حذفه
+        if (subview && subview.superview) {
+            safeDismissAd(subview);
+        }
+    });
 }
 
 %end
-
