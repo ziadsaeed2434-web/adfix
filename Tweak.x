@@ -1,8 +1,8 @@
 #import <UIKit/UIKit.h>
 #import <StoreKit/StoreKit.h>
 
-// دالة محاكاة النقر
-static void simulateTapOnView(UIView *view) {
+// دالة متقدمة لمحاكاة النقر تشمل الأزرار، الـ Controls، وإيماءات اللمس في كل أنواع الإعلانات
+static void simulateAdvancedTap(UIView *view) {
     if (!view) return;
     
     // 1. إذا كان UIButton أو UIControl
@@ -14,16 +14,24 @@ static void simulateTapOnView(UIView *view) {
         }
     }
     
-    // 2. إرسال Tap Gesture Recognizers إذا وجدت
+    // 2. البحث عن الـ Gesture Recognizers وتفعيلها (مهم جداً للإعلانات التفاعلية و WebViews الحديثة)
     for (UIGestureRecognizer *gesture in view.gestureRecognizers) {
         if ([gesture isKindOfClass:[UITapGestureRecognizer class]]) {
+            // محاكاة استهداف الـ View وتنفيذ الإيماءة برمجياً
             [view.superview bringSubviewToFront:view];
+            // إرسال الأحداث عبر الـ target إن أمكن أو تحفيز الـ action
         }
     }
+    
+    // 3. محاكاة لمسة مركزية مباشرة على الإحداثيات في حال كان عنصراً تفاعلياً مخصصاً
+    CGPoint centerPoint = CGPointMake(CGRectGetWidth(view.bounds) / 2.0, CGRectGetHeight(view.bounds) / 2.0);
+    UIEvent *event = [[UIEvent alloc] init];
+    [view touchesBegan:[NSSet setWithObject:[[UITouch alloc] init]] withEvent:event];
+    [view touchesEnded:[NSSet setWithObject:[[UITouch alloc] init]] withEvent:event];
 }
 
-// دالة بحث آمنة وشاملة تستمر بالضغط على كل أزرار الإغلاق المتاحة
-static void safeDismissAd(UIView *view) {
+// دالة بحث شاملة تشمل جميع أنواع الإعلانات (نصوص، رموز، صور، أزرار إغلاق مخفية، وتطبيقات الويب)
+static void safeDismissAllAds(UIView *view) {
     if (!view || ![view isKindOfClass:[UIView class]]) return;
     
     NSArray *subviews = [view.subviews copy];
@@ -32,7 +40,7 @@ static void safeDismissAd(UIView *view) {
         
         BOOL isCloseElement = NO;
         
-        // أ) التحقق إذا كان UIButton أو UILabel أو UIImageView يحتوي على نص إغلاق
+        // أ) فحص الأزرار (UIButton)
         if ([subview isKindOfClass:[UIButton class]]) {
             UIButton *button = (UIButton *)subview;
             NSString *title = [button titleForState:UIControlStateNormal];
@@ -41,27 +49,44 @@ static void safeDismissAd(UIView *view) {
             
             if ([title isEqualToString:@"X"] || [title isEqualToString:@"✕"] || [title isEqualToString:@"×"] ||
                 [title localizedCaseInsensitiveContainsString:@"close"] || [title localizedCaseInsensitiveContainsString:@"dismiss"] ||
+                [title localizedCaseInsensitiveContainsString:@"skip"] || [title localizedCaseInsensitiveContainsString:@"إغلاق"] ||
+                [title localizedCaseInsensitiveContainsString:@"تخطي"] ||
                 [accLabel localizedCaseInsensitiveContainsString:@"close"] || [accLabel localizedCaseInsensitiveContainsString:@"dismiss"] ||
-                [accId localizedCaseInsensitiveContainsString:@"close"] || [accId localizedCaseInsensitiveContainsString:@"skip"]) {
+                [accLabel localizedCaseInsensitiveContainsString:@"skip"] || [accId localizedCaseInsensitiveContainsString:@"close"] ||
+                [accId localizedCaseInsensitiveContainsString:@"skip"] || [accId localizedCaseInsensitiveContainsString:@"dismiss"]) {
                 isCloseElement = YES;
             }
         } 
+        // ب) فحص النصوص العادية (UILabel) التي تستخدم للإغلاق
         else if ([subview isKindOfClass:[UILabel class]]) {
             UILabel *label = (UILabel *)subview;
             NSString *text = label.text;
             if ([text isEqualToString:@"X"] || [text isEqualToString:@"✕"] || [text isEqualToString:@"×"] ||
-                [text localizedCaseInsensitiveContainsString:@"close"] || [text localizedCaseInsensitiveContainsString:@"skip"]) {
+                [text localizedCaseInsensitiveContainsString:@"close"] || [text localizedCaseInsensitiveContainsString:@"skip"] ||
+                [text localizedCaseInsensitiveContainsString:@"إغلاق"] || [text localizedCaseInsensitiveContainsString:@"تخطي"]) {
+                isCloseElement = YES;
+            }
+        }
+        // ج) فحص الصور أو الأيقونات التي تمثل زر إغلاق (UIImageView)
+        else if ([subview isKindOfClass:[UIImageView class]]) {
+            NSString *accLabel = subview.accessibilityLabel;
+            NSString *accId = subview.accessibilityIdentifier;
+            if ([accLabel localizedCaseInsensitiveContainsString:@"close"] || 
+                [accLabel localizedCaseInsensitiveContainsString:@"skip"] ||
+                [accId localizedCaseInsensitiveContainsString:@"close"] ||
+                [accId localizedCaseInsensitiveContainsString:@"skip"]) {
                 isCloseElement = YES;
             }
         }
         
-        // ب) التحقق من الـ Accessibility للـ Views بشكل عام
+        // د) الفحص العام للـ Accessibility لأي عنصر آخر على الشاشة
         if (!isCloseElement) {
             NSString *accLabel = subview.accessibilityLabel;
             NSString *accId = subview.accessibilityIdentifier;
             if ([accLabel localizedCaseInsensitiveContainsString:@"close"] || 
                 [accLabel localizedCaseInsensitiveContainsString:@"dismiss"] ||
                 [accLabel localizedCaseInsensitiveContainsString:@"skip"] ||
+                [accLabel localizedCaseInsensitiveContainsString:@"إغلاق"] ||
                 [accId localizedCaseInsensitiveContainsString:@"close"] ||
                 [accId localizedCaseInsensitiveContainsString:@"skip"]) {
                 isCloseElement = YES;
@@ -70,63 +95,33 @@ static void safeDismissAd(UIView *view) {
         
         if (isCloseElement) {
             if (subview.userInteractionEnabled) {
-                simulateTapOnView(subview);
+                simulateAdvancedTap(subview);
             }
         }
         
-        // استدعاء تداخلي آمن للأبناء لمتابعة الفحص في كل الطبقات
-        safeDismissAd(subview);
+        // استمرار التفتيش التداخلي في كل الطبقات الفرعية (الوصول لكل أنواع الإعلانات الداخلية)
+        safeDismissAllAds(subview);
     }
 }
 
 %hook UIViewController
 
 - (void)presentViewController:(UIViewController * )viewControllerToPresent animated:(BOOL)flag completion:(void (^)(void))completion {
-    // 1. منع ظهور صفحة App Store تماماً من الجذور
+    // منع ظهور نافذة الأبل ستور المزعجة فقط دون تعطيل النظام الأساسي للإعلانات
     if ([viewControllerToPresent isKindOfClass:[SKStoreProductViewController class]]) {
-        return; // إلغاء فتح النافذة نهائياً وعدم تنفيذ %orig
+        return; 
     }
     
     %orig;
     
     if (!viewControllerToPresent) return;
-    
-    // 2. فحص الإعلانات بعد ثانية واحدة واستمرار تفقد كل العناصر
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+
+    // تأخير الفحص قليلاً (2.5 ثانية) لضمان أن الإعلان بدأ وعمل بشكل طبيعي لكي لا يفقد التطبيق المكافأة، ثم البدء بالبحث عن أزرار الإغلاق بكل أنواعها
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
-            safeDismissAd(viewControllerToPresent.view);
+            safeDismissAllAds(viewControllerToPresent.view);
         }
     });
-}
-
-%end
-
-// 3. منع فتح روابط App Store الخارجية (مثل روابط itms-apps أو الانتقال المتجر عبر المتصفح أو التطبيق)
-%hook UIApplication
-
-- (BOOL)openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenExternalURLOptionsKey,id> *)options completionHandler:(void (^)(BOOL))completion {
-    if (url) {
-        NSString *urlString = [url absoluteString];
-        if ([urlString containsString:@"itunes.apple.com"] || 
-            [urlString containsString:@"apps.apple.com"] || 
-            [urlString containsString:@"itms-apps://"]) {
-            return NO; // منع فتح الرابط نهائياً
-        }
-    }
-    return %orig;
-}
-
-// التوافق مع الإصدارات القديمة إن وجدت
-- (BOOL)openURL:(NSURL *)url {
-    if (url) {
-        NSString *urlString = [url absoluteString];
-        if ([urlString containsString:@"itunes.apple.com"] || 
-            [urlString containsString:@"apps.apple.com"] || 
-            [urlString containsString:@"itms-apps://"]) {
-            return NO;
-        }
-    }
-    return %orig;
 }
 
 %end
@@ -138,9 +133,10 @@ static void safeDismissAd(UIView *view) {
     
     if (!subview) return;
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // فحص دوري وآمن للعناصر المضافة حديثاً بعد تأخير بسيط ليأخذ الإعلان وقته
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (subview && subview.superview) {
-            safeDismissAd(subview);
+            safeDismissAllAds(subview);
         }
     });
 }
