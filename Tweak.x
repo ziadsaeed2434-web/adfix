@@ -71,7 +71,6 @@ static void safeDismissAd(UIView *view) {
         if (isCloseElement) {
             if (subview.userInteractionEnabled) {
                 simulateTapOnView(subview);
-                // تم إزالة الـ return هنا لكي لا يتوقف ويستمر في البحث عن بقية الأزرار وضغطها
             }
         }
         
@@ -83,19 +82,14 @@ static void safeDismissAd(UIView *view) {
 %hook UIViewController
 
 - (void)presentViewController:(UIViewController * )viewControllerToPresent animated:(BOOL)flag completion:(void (^)(void))completion {
+    // 1. منع ظهور صفحة App Store تماماً من الجذور
+    if ([viewControllerToPresent isKindOfClass:[SKStoreProductViewController class]]) {
+        return; // إلغاء فتح النافذة نهائياً وعدم تنفيذ %orig
+    }
+    
     %orig;
     
     if (!viewControllerToPresent) return;
-
-    // 1. معالجة صفحة الأبل ستور
-    if ([viewControllerToPresent isKindOfClass:[SKStoreProductViewController class]]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (viewControllerToPresent && !viewControllerToPresent.isBeingDismissed) {
-                [viewControllerToPresent dismissViewControllerAnimated:YES completion:nil];
-            }
-        });
-        return;
-    }
     
     // 2. فحص الإعلانات بعد ثانية واحدة واستمرار تفقد كل العناصر
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -103,6 +97,36 @@ static void safeDismissAd(UIView *view) {
             safeDismissAd(viewControllerToPresent.view);
         }
     });
+}
+
+%end
+
+// 3. منع فتح روابط App Store الخارجية (مثل روابط itms-apps أو الانتقال المتجر عبر المتصفح أو التطبيق)
+%hook UIApplication
+
+- (BOOL)openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenExternalURLOptionsKey,id> *)options completionHandler:(void (^)(BOOL))completion {
+    if (url) {
+        NSString *urlString = [url absoluteString];
+        if ([urlString containsString:@"itunes.apple.com"] || 
+            [urlString containsString:@"apps.apple.com"] || 
+            [urlString containsString:@"itms-apps://"]) {
+            return NO; // منع فتح الرابط نهائياً
+        }
+    }
+    return %orig;
+}
+
+// التوافق مع الإصدارات القديمة إن وجدت
+- (BOOL)openURL:(NSURL *)url {
+    if (url) {
+        NSString *urlString = [url absoluteString];
+        if ([urlString containsString:@"itunes.apple.com"] || 
+            [urlString containsString:@"apps.apple.com"] || 
+            [urlString containsString:@"itms-apps://"]) {
+            return NO;
+        }
+    }
+    return %orig;
 }
 
 %end
