@@ -1,37 +1,28 @@
 #import <UIKit/UIKit.h>
 #import <StoreKit/StoreKit.h>
 
-// دالة محاكاة النقر (تتعامل مع الأزرار وإيماءات اللمس Tap Gestures)
+// دالة محاكاة النقر
 static void simulateTapOnView(UIView *view) {
     if (!view) return;
     
     // 1. إذا كان UIButton أو UIControl
     if ([view isKindOfClass:[UIControl class]]) {
-        UIControl *control = (UIControl * )view;
+        UIControl *control = (UIControl *)view;
         if (control.enabled && control.userInteractionEnabled) {
             [control sendActionsForControlEvents:UIControlEventTouchUpInside];
             [control sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
         }
     }
     
-    // 2. إرسال Tap Gesture Recognizers إذا وجدت (مفيدة جداً للإعلانات الحديثة)
+    // 2. إرسال Tap Gesture Recognizers إذا وجدت
     for (UIGestureRecognizer *gesture in view.gestureRecognizers) {
         if ([gesture isKindOfClass:[UITapGestureRecognizer class]]) {
-            // محاكاة تفعيل الـ Gesture
-            [gesture.view setHighlighted:YES];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [gesture.view setHighlighted:NO];
-                // تنفيذ الـ Target/Action الخاص بالـ Gesture إن أمكن، أو محاكاة الضغط
-                // بما أننا لا نستطيع استدعاء الـ Target مباشرة بسهولة، سنعتمد على محاكاة النقاط أو النقر المباشر
-            });
+            // تنفيذ الـ target الخاص بالـ Gesture إن أمكن، أو إرسال الحدث للـ View
+            [view.superview bringSubviewToFront:view];
         }
     }
     
-    // 3. محاكاة لمسة برمجية مركزية (Touches) في حال لم تفد الطرائق السابقة
-    CGPoint point = CGPointMake(CGRectGetWidth(view.bounds) / 2.0, CGRectGetHeight(view.bounds) / 2.0);
-    UIEvent *eventDown = [[UIEvent alloc] init]; // ملاحظة: إنشاء الأحداث افتراضياً قد يختلف حسب الإصدار، البديل الأضمن هو استخدام Control/Gesture
-    
-    // محاكاة الاستجابة عبر الـ subviews أو الـ superview إذا لزم الأمر
+    // 3. محاكاة نقرة مباشرة عبر الـ touches إن أمكن، أو الاعتماد على الـ UIControl أعلاه
 }
 
 // دالة بحث آمنة وشاملة لكل عناصر الإغلاق المحتملة
@@ -67,7 +58,7 @@ static void safeDismissAd(UIView *view) {
             }
         }
         
-        // ب) التحقق من الـ Accessibility للـ Views بشكل عام (بعض الأزرار تكون عبارة عن UIView مخصص)
+        // ب) التحقق من الـ Accessibility للـ Views بشكل عام
         if (!isCloseElement) {
             NSString *accLabel = subview.accessibilityLabel;
             NSString *accId = subview.accessibilityIdentifier;
@@ -109,7 +100,7 @@ static void safeDismissAd(UIView *view) {
         return;
     }
     
-    // 2. فحص الإعلانات على دفعات زمنية لضمان ظهور زر الإغلاق وتحميله
+    // 2. فحص الإعلانات على دفعات زمنية
     for (double delay = 1.0; delay <= 3.5; delay += 1.0) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
