@@ -1,201 +1,175 @@
-// AdBypassTweak.xm
-// تويك شامل لتخطي حدود الإعلانات المكافأة في التطبيقات (Native + Flutter)
-// مع تنظيف شامل لمجلدات Cache و tmp وملفات الـ Hive كل 15 ثانية
-
-#import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <Foundation/Foundation.h>
 
-// دالة تنفيذ المهام الدورية كل 15 ثانية (التصفير وتنظيف الملفات)
-static void executePeriodicTasks(NSTimer *timer) {
-    @autoreleasepool {
-        NSLog(@"[AdBypass] تنفيد مهام التنظيف الدورية كل 15 ثانية...");
-        
-        // 1. إعادة تعيين قيم NSUserDefaults بشكل دوري
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        
-        [defaults setObject:[NSDate dateWithTimeIntervalSince1970:0] forKey:@"mvsdk_lastRewardSettingDate"];
-        [defaults setObject:[NSDate dateWithTimeIntervalSince1970:0] forKey:@"fyb_next_allowed_session_tracking_date"];
-        [defaults setObject:[NSDate dateWithTimeIntervalSince1970:0] forKey:@"mvsdk_lastRewardSettingDate_requestFail"];
-        
-        [defaults setObject:@{} forKey:@"DTX_currentUserSession"];
-        [defaults setObject:@{} forKey:@"fyb_user_sessions"];
-        [defaults setInteger:0 forKey:@"fyb_num_sdk_starts"];
-        [defaults setInteger:0 forKey:@"fyb_num_app_version_starts"];
-        [defaults setInteger:0 forKey:@"fyb_num_sdk_version_starts"];
-        [defaults setInteger:0 forKey:@"kICountUpToDateKey"];
-        [defaults setInteger:999999 forKey:@"mvsdk_rewardSetting_apiCap"];
-        
-        [defaults synchronize];
+// متغيرات عامة لمنع التكرار السريع
+static NSTimer *fastTimer = nil;
+static NSTimer *restartTimer = nil;
+static NSString *lastTappedButton = nil;
+static NSTimeInterval lastTapTime = 0;
 
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        
-        // 2. حذف ملفات Flutter / التخزين المؤقت المحددة من مجلد Documents
-        NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-        NSArray *filesToDelete = @[
-            @"hydrated_box.hive",
-            @"hydrated_box.lock",
-            @"flutter_secure_storage.dat",
-            @"shared_preferences.json"
-        ];
-        
-        for (NSString *fileName in filesToDelete) {
-            NSString *filePath = [documentsPath stringByAppendingPathComponent:fileName];
-            if ([fileManager fileExistsAtPath:filePath]) {
-                NSError *error = nil;
-                [fileManager removeItemAtPath:filePath error:&error];
-                if (!error) {
-                    NSLog(@"[AdBypass] تم حذف ملف التخزين: %@", fileName);
-                }
-            }
+// 1. دالة مساعدة للبحث عن أي UIView يحتوي على نص معين
+UIView* findViewWithText(UIView *parentView, NSString *searchText) {
+    if (!parentView) return nil;
+    
+    if ([parentView isKindOfClass:[UILabel class]] || [parentView isKindOfClass:[UIButton class]]) {
+        NSString *text = nil;
+        if ([parentView isKindOfClass:[UILabel class]]) {
+            text = ((UILabel *)parentView).text;
+        } else {
+            text = [(UIButton *)parentView titleForState:UIControlStateNormal];
         }
         
-        // 3. تفريغ مجلد الـ Cache بالكامل (Library/Caches)
-        NSString *cachesPath = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
-        if (cachesPath) {
-            NSArray *cachesContents = [fileManager contentsOfDirectoryAtPath:cachesPath error:nil];
-            for (NSString *item in cachesContents) {
-                // استثناء مجلدات النظام الحساسة إن وجد (يمكنك إزالتها إذا أردت الحذف الأعمى)
-                NSString *itemPath = [cachesPath stringByAppendingPathComponent:item];
-                NSError *error = nil;
-                [fileManager removeItemAtPath:itemPath error:&error];
-                if (!error) {
-                    NSLog(@"[AdBypass] تم مسح محتوى من Caches: %@", item);
-                }
-            }
-        }
-        
-        // 4. تفريغ مجلد الـ tmp بالكامل (Temporary Directory)
-        NSString *tmpPath = NSTemporaryDirectory();
-        if (tmpPath) {
-            NSArray *tmpContents = [fileManager contentsOfDirectoryAtPath:tmpPath error:nil];
-            for (NSString *item in tmpContents) {
-                NSString *itemPath = [tmpPath stringByAppendingPathComponent:item];
-                NSError *error = nil;
-                [fileManager removeItemAtPath:itemPath error:&error];
-                if (!error) {
-                    NSLog(@"[AdBypass] تم مسح ملف مؤقت من tmp: %@", item);
-                }
-            }
+        if (text && [text rangeOfString:searchText options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return parentView;
         }
     }
+    
+    for (UIView *subview in parentView.subviews) {
+        UIView *foundView = findViewWithText(subview, searchText);
+        if (foundView) {
+            return foundView;
+        }
+    }
+    return nil;
 }
 
-
-// ==========================================================
-// الجزء الأول: اعتراض NSUserDefaults (للإعلانات الأصلية)
-// ==========================================================
-
-%hook NSUserDefaults
-
-- (void)setObject:(id)value forKey:(NSString *)key {
-    if ([key isEqualToString:@"mvsdk_rewardSetting"]) {
-        NSMutableDictionary *newDict = [value mutableCopy];
-        if (newDict[@"cap"] && [newDict[@"cap"] isKindOfClass:[NSDictionary class]]) {
-            NSMutableDictionary *capDict = [newDict[@"cap"] mutableCopy];
-            for (NSString *capKey in capDict.allKeys) {
-                capDict[capKey] = @999999;
-            }
-            newDict[@"cap"] = capDict;
+// 2. دالة مساعدة للبحث عن زر يحتوي على نص معين
+UIButton* findButtonWithText(UIView *parentView, NSString *searchText) {
+    if (!parentView) return nil;
+    
+    if ([parentView isKindOfClass:[UIButton class]]) {
+        UIButton *button = (UIButton *)parentView;
+        NSString *buttonTitle = [button titleForState:UIControlStateNormal];
+        if (buttonTitle && [buttonTitle rangeOfString:searchText options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return button;
         }
-        %orig(newDict, key);
-        return;
     }
     
-    if ([key isEqualToString:@"mvsdk_lastRewardSettingDate"] || 
-        [key isEqualToString:@"fyb_next_allowed_session_tracking_date"] ||
-        [key isEqualToString:@"mvsdk_lastRewardSettingDate_requestFail"]) {
-        %orig([NSDate dateWithTimeIntervalSince1970:0], key);
-        return;
+    for (UIView *subview in parentView.subviews) {
+        UIButton *foundButton = findButtonWithText(subview, searchText);
+        if (foundButton) {
+            return foundButton;
+        }
     }
-    
-    if ([key isEqualToString:@"DTX_currentUserSession"] || [key isEqualToString:@"fyb_user_sessions"]) {
-        %orig(@{}, key);
-        return;
-    }
-    
-    if ([key isEqualToString:@"vungle.gdpr.date"]) {
-        %orig(@0, key);
-        return;
-    }
+    return nil;
+}
 
+// 3. دالة محاكاة الضغط مع حماية من التكرار اللحظي
+void simulateButtonTap(UIButton *button) {
+    if (!button || !button.enabled || button.hidden || button.alpha == 0) return;
+    
+    NSString *buttonTitle = [button titleForState:UIControlStateNormal];
+    NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
+    
+    // منع الضغط على نفس الزر في أقل من ثانيتين (لمنع التكرار العشوائي)
+    if ([buttonTitle isEqualToString:lastTappedButton] && (currentTime - lastTapTime) < 2.0) {
+        return;
+    }
+    
+    lastTappedButton = buttonTitle;
+    lastTapTime = currentTime;
+    
+    [button sendActionsForControlEvents:UIControlEventTouchDown];
+    [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+    
+    NSLog(@"[AutoEarn] تم الضغط على الزر: %@", buttonTitle);
+}
+
+// ---------------------------------------------------------
+// اعتراض دورة حياة الـ View Controller
+// ---------------------------------------------------------
+%hook UIViewController
+
+- (void)viewDidAppear:(BOOL)animated {
     %orig;
+    
+    // التأكد من عدم وجود مؤقتات قديمة لتجنب التكرار
+    if (fastTimer) {
+        [fastTimer invalidate];
+        fastTimer = nil;
+    }
+    if (restartTimer) {
+        [restartTimer invalidate];
+        restartTimer = nil;
+    }
+    
+    // المؤقت السريع: يفحص الشاشة كل 3 ثوانٍ
+    fastTimer = [NSTimer scheduledTimerWithTimeInterval:3.0
+                                                 target:self
+                                               selector:@selector(autoEarnTimerTick:)
+                                               userInfo:nil
+                                                repeats:YES];
+    
+    // مؤقت إعادة التشغيل: يضمن استمرار العمل اللانهائي حتى لو توقف المؤقت الأول
+    restartTimer = [NSTimer scheduledTimerWithTimeInterval:30.0
+                                                    target:self
+                                                  selector:@selector(restartFastTimer:)
+                                                  userInfo:nil
+                                                   repeats:YES];
 }
 
-- (void)setInteger:(NSInteger)value forKey:(NSString *)key {
-    if ([key hasPrefix:@"kICountUpToDateKey"]) {
-        %orig(0, key);
-        return;
-    }
-    
-    if ([key isEqualToString:@"mvsdk_rewardSetting_apiCap"]) {
-        %orig(999999, key);
-        return;
-    }
-    
-    if ([key isEqualToString:@"fyb_num_sdk_starts"] || 
-        [key isEqualToString:@"fyb_num_app_version_starts"] ||
-        [key isEqualToString:@"fyb_num_sdk_version_starts"]) {
-        %orig(0, key);
-        return;
-    }
-
+- (void)viewDidDisappear:(BOOL)animated {
     %orig;
+    // لا نوقف المؤقتات هنا لكي تستمر في العمل عند الانتقال بين الشاشات
 }
 
-- (void)setBool:(BOOL)value forKey:(NSString *)key {
-    if ([key isEqualToString:@"MTG_kTransformed"] || 
-        [key isEqualToString:@"MTGImageCachedTransformed"] ||
-        [key isEqualToString:@"com.applovin.sdk.isFirstRun"]) {
-        %orig(YES, key);
+// دالة إعادة تشغيل المؤقت السريع (لضمان التنفيذ اللانهائي)
+- (void)restartFastTimer:(NSTimer *)timer {
+    NSLog(@"[AutoEarn] إعادة تشغيل المؤقت السريع لضمان الاستمرارية...");
+    
+    if (fastTimer) {
+        [fastTimer invalidate];
+    }
+    
+    fastTimer = [NSTimer scheduledTimerWithTimeInterval:3.0
+                                                 target:self
+                                               selector:@selector(autoEarnTimerTick:)
+                                               userInfo:nil
+                                                repeats:YES];
+}
+
+// دالة المؤقت الرئيسية (منطق التنفيذ)
+- (void)autoEarnTimerTick:(NSTimer *)timer {
+    UIView *currentView = self.view;
+    if (!currentView) return;
+    
+    // =========================================================
+    // الأولوية الأولى: البحث عن حاوية "Watch videos" ثم الضغط على زر "Earn" بداخلها
+    // =========================================================
+    UIView *watchVideosContainer = findViewWithText(currentView, @"Watch videos");
+    
+    if (watchVideosContainer) {
+        UIView *parentContainer = watchVideosContainer.superview;
+        
+        UIButton *earnBtn = findButtonWithText(parentContainer, @"Earn");
+        
+        if (!earnBtn && parentContainer.superview) {
+            earnBtn = findButtonWithText(parentContainer.superview, @"Earn");
+        }
+        
+        if (earnBtn) {
+            simulateButtonTap(earnBtn);
+            return;
+        }
+    }
+    
+    // =========================================================
+    // الأولوية الثانية: البحث عن زر "Watch Videos" (داخل صفحة الفيديوهات)
+    // =========================================================
+    UIButton *watchVideosBtn = findButtonWithText(currentView, @"Watch Videos");
+    if (watchVideosBtn) {
+        simulateButtonTap(watchVideosBtn);
         return;
     }
-    %orig;
-}
-
-%end
-
-
-// ==========================================================
-// الجزء الثاني: تشغيل المؤقت (Timer) عند تشغيل التطبيق
-// ==========================================================
-
-%hook UIApplication
-
-- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     
-    // تنفيذ التنظيف فوراً عند فتح التطبيق
-    executePeriodicTasks(nil);
-    
-    // جدولة التكرار كل 15 ثانية بشكل مستمر في الخلفية والأمام
-    [[NSRunLoop mainRunLoop] performBlock:^{
-        [NSTimer scheduledTimerWithTimeInterval:15.0
-                                         target:[NSBlockOperation blockOperationWithBlock:^{
-                                             executePeriodicTasks(nil);
-                                         }]
-                                       selector:@selector(main)
-                                       userInfo:nil
-                                        repeats:YES];
-    }];
-    
-    return %orig;
-}
-
-%end
-
-
-// ==========================================================
-// الجزء الثالث: اعتراض كتابة ملفات Plist
-// ==========================================================
-
-%hook NSDictionary
-
-- (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile {
-    if ([path containsString:@"Preferences"] && 
-        ([path containsString:@"applovin"] || [path containsString:@"gads"] || [path containsString:@"google"])) {
-        NSLog(@"[AdBypass] Plist write detected: %@", path);
+    // =========================================================
+    // الأولوية الثالثة: البحث عن زر "Other ways to earn"
+    // =========================================================
+    UIButton *otherWaysBtn = findButtonWithText(currentView, @"Other ways to earn");
+    if (otherWaysBtn) {
+        simulateButtonTap(otherWaysBtn);
+        return;
     }
-    
-    return %orig;
 }
 
 %end
