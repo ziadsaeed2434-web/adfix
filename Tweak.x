@@ -22,7 +22,7 @@ static void simulateTapOnView(UIView *view) {
     }
 }
 
-// دالة بحث آمنة وشاملة لكل عناصر الإغلاق المحتملة
+// دالة بحث آمنة وشاملة تستمر بالضغط على كل أزرار الإغلاق المتاحة
 static void safeDismissAd(UIView *view) {
     if (!view || ![view isKindOfClass:[UIView class]]) return;
     
@@ -71,11 +71,11 @@ static void safeDismissAd(UIView *view) {
         if (isCloseElement) {
             if (subview.userInteractionEnabled) {
                 simulateTapOnView(subview);
-                return;
+                // تم إزالة الـ return هنا لكي لا يتوقف ويستمر في البحث عن بقية الأزرار وضغطها
             }
         }
         
-        // استدعاء تداخلي آمن للأبناء
+        // استدعاء تداخلي آمن للأبناء لمتابعة الفحص في كل الطبقات
         safeDismissAd(subview);
     }
 }
@@ -97,7 +97,7 @@ static void safeDismissAd(UIView *view) {
         return;
     }
     
-    // 2. فحص الإعلانات بعد ثانية واحدة فقط
+    // 2. فحص الإعلانات بعد ثانية واحدة واستمرار تفقد كل العناصر
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
             safeDismissAd(viewControllerToPresent.view);
