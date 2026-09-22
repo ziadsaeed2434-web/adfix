@@ -2,15 +2,15 @@
 #import <StoreKit/StoreKit.h>
 #import <WebKit/WebKit.h>
 
-// دالة فحص وتنفيد JavaScript فورية لإعلانات الويب والتفاعلية (تضغط على كل أزرار الويب المتعددة)
-static void immediateDismissWebAds(UIView *view) {
+// دالة فحص وتنفيد JavaScript شاملة لكل إعلانات الويب في العالم (تستهدف كل العناصر التفاعلية والمخفية)
+static void injectJavaScriptToDismissWebAds(UIView *view) {
     if (!view) return;
     
     if ([view isKindOfClass:[WKWebView class]]) {
         WKWebView *webView = (WKWebView *)view;
         NSString *jsCloseScript = 
         @"(function() {"
-        "var selectors = ['button', 'div', 'span', 'a', 'img', 'svg'];"
+        "var selectors = ['button', 'div', 'span', 'a', 'img', 'svg', 'iframe'];"
         "for (var i = 0; i < selectors.length; i++) {"
         "  var elements = document.querySelectorAll(selectors[i]);"
         "  for (var j = 0; j < elements.length; j++) {"
@@ -22,12 +22,13 @@ static void immediateDismissWebAds(UIView *view) {
         "    var combined = (text + ' ' + aria + ' ' + cls + ' ' + id).toLowerCase();"
         "    if (combined.includes('close') || combined.includes('dismiss') || combined.includes('skip') || "
         "        combined.includes('إغلاق') || combined.includes('تخطي') || combined.includes('x') || "
+        "        combined.includes('exit') || combined.includes('1') || "
         "        el.id === 'close_button' || el.className.indexOf('close') !== -1 || el.className.indexOf('skip') !== -1) {"
         "       el.click();"
         "    }"
         "  } "
         "}"
-        "var closeBtns = document.querySelectorAll('[class*=\"close\"], [id*=\"close\"], [class*=\"skip\"], [id*=\"skip\"], .ads-close, #close-btn');"
+        "var closeBtns = document.querySelectorAll('[class*=\"close\"], [id*=\"close\"], [class*=\"skip\"], [id*=\"skip\"], [class*=\"dismiss\"], .ads-close, #close-btn');"
         "closeBtns.forEach(function(btn) { btn.click(); });"
         "})();";
         
@@ -35,12 +36,12 @@ static void immediateDismissWebAds(UIView *view) {
     }
     
     for (UIView *subview in view.subviews) {
-        immediateDismissWebAds(subview);
+        injectJavaScriptToDismissWebAds(subview);
     }
 }
 
-// دالة محاكاة النقر الفوري
-static void simulateImmediateTap(UIView *view) {
+// دالة محاكاة النقر المتقدمة تشمل Controls والإيماءات
+static void simulateAdvancedTap(UIView *view) {
     if (!view) return;
     
     if ([view isKindOfClass:[UIControl class]]) {
@@ -58,12 +59,11 @@ static void simulateImmediateTap(UIView *view) {
     }
 }
 
-// دالة البحث والإغلاق الفوري التي لا تتوقف وتضغط على كل الأزرار الموجودة
-static void checkAndDismissInstantly(UIView *view) {
+// دالة البحث الشاملة لجميع أنواع أزرار الإغلاق في التطبيق
+static void safeDismissAllAds(UIView *view) {
     if (!view || ![view isKindOfClass:[UIView class]]) return;
     
-    // فحص محتوى الويب فوراً لكل الـ WebViews الموجودة
-    immediateDismissWebAds(view);
+    injectJavaScriptToDismissWebAds(view);
     
     NSArray *subviews = [view.subviews copy];
     for (UIView *subview in subviews) {
@@ -80,7 +80,7 @@ static void checkAndDismissInstantly(UIView *view) {
             if ([title isEqualToString:@"X"] || [title isEqualToString:@"✕"] || [title isEqualToString:@"×"] ||
                 [title localizedCaseInsensitiveContainsString:@"close"] || [title localizedCaseInsensitiveContainsString:@"dismiss"] ||
                 [title localizedCaseInsensitiveContainsString:@"skip"] || [title localizedCaseInsensitiveContainsString:@"إغلاق"] ||
-                [title localizedCaseInsensitiveContainsString:@"تخطي"] ||
+                [title localizedCaseInsensitiveContainsString:@"تخطي"] || [title localizedCaseInsensitiveContainsString:@"exit"] ||
                 [accLabel localizedCaseInsensitiveContainsString:@"close"] || [accLabel localizedCaseInsensitiveContainsString:@"skip"] ||
                 [accId localizedCaseInsensitiveContainsString:@"close"] || [accId localizedCaseInsensitiveContainsString:@"skip"]) {
                 isCloseElement = YES;
@@ -91,7 +91,8 @@ static void checkAndDismissInstantly(UIView *view) {
             NSString *text = label.text;
             if ([text isEqualToString:@"X"] || [text isEqualToString:@"✕"] || [text isEqualToString:@"×"] ||
                 [text localizedCaseInsensitiveContainsString:@"close"] || [text localizedCaseInsensitiveContainsString:@"skip"] ||
-                [text localizedCaseInsensitiveContainsString:@"إغلاق"] || [text localizedCaseInsensitiveContainsString:@"تخطي"]) {
+                [text localizedCaseInsensitiveContainsString:@"إغلاق"] || [text localizedCaseInsensitiveContainsString:@"تخطي"] ||
+                [text localizedCaseInsensitiveContainsString:@"exit"]) {
                 isCloseElement = YES;
             }
         }
@@ -101,7 +102,8 @@ static void checkAndDismissInstantly(UIView *view) {
             if ([accLabel localizedCaseInsensitiveContainsString:@"close"] || 
                 [accLabel localizedCaseInsensitiveContainsString:@"skip"] ||
                 [accId localizedCaseInsensitiveContainsString:@"close"] ||
-                [accId localizedCaseInsensitiveContainsString:@"skip"]) {
+                [accId localizedCaseInsensitiveContainsString:@"skip"] ||
+                [accId localizedCaseInsensitiveContainsString:@"dismiss"]) {
                 isCloseElement = YES;
             }
         }
@@ -119,15 +121,13 @@ static void checkAndDismissInstantly(UIView *view) {
             }
         }
         
-        // إذا وجد عنصر إغلاق، يضغط عليه ولا يتوقف (تمت إزالة الـ return لكي يكمل على باقي الأزرار)
         if (isCloseElement) {
             if (subview.userInteractionEnabled) {
-                simulateImmediateTap(subview);
+                simulateAdvancedTap(subview);
             }
         }
         
-        // تفتيش تداخلي فوري لكل العناصر الفرعية بلا استثناء
-        checkAndDismissInstantly(subview);
+        safeDismissAllAds(subview);
     }
 }
 
@@ -142,9 +142,13 @@ static void checkAndDismissInstantly(UIView *view) {
     
     if (!viewControllerToPresent) return;
 
-    // فحص فوري ولحظي للشاشة فور ظهورها للتعامل مع أي أزرار مبكرة
-    if (viewControllerToPresent.view) {
-        checkAndDismissInstantly(viewControllerToPresent.view);
+    // 5 مراحل فحص متسلسلة (كل مرحلة ثانيتين: 2، 4، 6، 8، 10) لتغطية كل أنواع الإعلانات وأزرارها المتعددة
+    for (int i = 2; i <= 10; i += 2) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
+                safeDismissAllAds(viewControllerToPresent.view);
+            }
+        });
     }
 }
 
@@ -157,8 +161,14 @@ static void checkAndDismissInstantly(UIView *view) {
     
     if (!subview) return;
     
-    // فحص لحظي وفوري لكل العناصر التي يتم إضافتها (يضمن ضغط أي X أول أو ثانٍ بمجرد ظهوره)
-    checkAndDismissInstantly(subview);
+    // 5 مراحل فحص للعناصر الجديدة المضافة لاحقاً
+    for (int i = 2; i <= 10; i += 2) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (subview && subview.superview) {
+                safeDismissAllAds(subview);
+            }
+        });
+    }
 }
 
 %end
