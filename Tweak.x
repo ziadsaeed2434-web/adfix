@@ -14,23 +14,20 @@ static void simulateAdvancedTap(UIView *view) {
         }
     }
     
-    // 2. البحث عن الـ Gesture Recognizers وتفعيلها (مهم جداً للإعلانات التفاعلية و WebViews الحديثة)
+    // 2. البحث عن الـ Gesture Recognizers وتفعيلها
     for (UIGestureRecognizer *gesture in view.gestureRecognizers) {
         if ([gesture isKindOfClass:[UITapGestureRecognizer class]]) {
-            // محاكاة استهداف الـ View وتنفيذ الإيماءة برمجياً
             [view.superview bringSubviewToFront:view];
-            // إرسال الأحداث عبر الـ target إن أمكن أو تحفيز الـ action
         }
     }
     
-    // 3. محاكاة لمسة مركزية مباشرة على الإحداثيات في حال كان عنصراً تفاعلياً مخصصاً
-    CGPoint centerPoint = CGPointMake(CGRectGetWidth(view.bounds) / 2.0, CGRectGetHeight(view.bounds) / 2.0);
+    // 3. محاكاة لمسة مركزية مباشرة على الإحداثيات
     UIEvent *event = [[UIEvent alloc] init];
     [view touchesBegan:[NSSet setWithObject:[[UITouch alloc] init]] withEvent:event];
     [view touchesEnded:[NSSet setWithObject:[[UITouch alloc] init]] withEvent:event];
 }
 
-// دالة بحث شاملة تشمل جميع أنواع الإعلانات (نصوص، رموز، صور، أزرار إغلاق مخفية، وتطبيقات الويب)
+// دالة بحث شاملة تشمل جميع أنواع الإعلانات
 static void safeDismissAllAds(UIView *view) {
     if (!view || ![view isKindOfClass:[UIView class]]) return;
     
@@ -57,7 +54,7 @@ static void safeDismissAllAds(UIView *view) {
                 isCloseElement = YES;
             }
         } 
-        // ب) فحص النصوص العادية (UILabel) التي تستخدم للإغلاق
+        // ب) فحص النصوص العادية (UILabel)
         else if ([subview isKindOfClass:[UILabel class]]) {
             UILabel *label = (UILabel *)subview;
             NSString *text = label.text;
@@ -67,7 +64,7 @@ static void safeDismissAllAds(UIView *view) {
                 isCloseElement = YES;
             }
         }
-        // ج) فحص الصور أو الأيقونات التي تمثل زر إغلاق (UIImageView)
+        // ج) فحص الصور أو الأيقونات (UIImageView)
         else if ([subview isKindOfClass:[UIImageView class]]) {
             NSString *accLabel = subview.accessibilityLabel;
             NSString *accId = subview.accessibilityIdentifier;
@@ -79,7 +76,7 @@ static void safeDismissAllAds(UIView *view) {
             }
         }
         
-        // د) الفحص العام للـ Accessibility لأي عنصر آخر على الشاشة
+        // د) الفحص العام للـ Accessibility
         if (!isCloseElement) {
             NSString *accLabel = subview.accessibilityLabel;
             NSString *accId = subview.accessibilityIdentifier;
@@ -99,7 +96,7 @@ static void safeDismissAllAds(UIView *view) {
             }
         }
         
-        // استمرار التفتيش التداخلي في كل الطبقات الفرعية (الوصول لكل أنواع الإعلانات الداخلية)
+        // استمرار التفتيش التداخلي
         safeDismissAllAds(subview);
     }
 }
@@ -107,7 +104,6 @@ static void safeDismissAllAds(UIView *view) {
 %hook UIViewController
 
 - (void)presentViewController:(UIViewController * )viewControllerToPresent animated:(BOOL)flag completion:(void (^)(void))completion {
-    // منع ظهور نافذة الأبل ستور المزعجة فقط دون تعطيل النظام الأساسي للإعلانات
     if ([viewControllerToPresent isKindOfClass:[SKStoreProductViewController class]]) {
         return; 
     }
@@ -116,7 +112,6 @@ static void safeDismissAllAds(UIView *view) {
     
     if (!viewControllerToPresent) return;
 
-    // تأخير الفحص قليلاً (2.5 ثانية) لضمان أن الإعلان بدأ وعمل بشكل طبيعي لكي لا يفقد التطبيق المكافأة، ثم البدء بالبحث عن أزرار الإغلاق بكل أنواعها
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
             safeDismissAllAds(viewControllerToPresent.view);
@@ -133,7 +128,6 @@ static void safeDismissAllAds(UIView *view) {
     
     if (!subview) return;
     
-    // فحص دوري وآمن للعناصر المضافة حديثاً بعد تأخير بسيط ليأخذ الإعلان وقته
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (subview && subview.superview) {
             safeDismissAllAds(subview);
