@@ -17,12 +17,9 @@ static void simulateTapOnView(UIView *view) {
     // 2. إرسال Tap Gesture Recognizers إذا وجدت
     for (UIGestureRecognizer *gesture in view.gestureRecognizers) {
         if ([gesture isKindOfClass:[UITapGestureRecognizer class]]) {
-            // تنفيذ الـ target الخاص بالـ Gesture إن أمكن، أو إرسال الحدث للـ View
             [view.superview bringSubviewToFront:view];
         }
     }
-    
-    // 3. محاكاة نقرة مباشرة عبر الـ touches إن أمكن، أو الاعتماد على الـ UIControl أعلاه
 }
 
 // دالة بحث آمنة وشاملة لكل عناصر الإغلاق المحتملة
@@ -100,14 +97,12 @@ static void safeDismissAd(UIView *view) {
         return;
     }
     
-    // 2. فحص الإعلانات على دفعات زمنية
-    for (double delay = 1.0; delay <= 3.5; delay += 1.0) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
-                safeDismissAd(viewControllerToPresent.view);
-            }
-        });
-    }
+    // 2. فحص الإعلانات بعد ثانية واحدة فقط
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
+            safeDismissAd(viewControllerToPresent.view);
+        }
+    });
 }
 
 %end
@@ -119,7 +114,7 @@ static void safeDismissAd(UIView *view) {
     
     if (!subview) return;
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (subview && subview.superview) {
             safeDismissAd(subview);
         }
