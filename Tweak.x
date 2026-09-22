@@ -2,7 +2,7 @@
 #import <StoreKit/StoreKit.h>
 #import <WebKit/WebKit.h>
 
-// دالة فحص وتنفيد JavaScript شاملة لكل إعلانات الويب في العالم (تستهدف كل العناصر التفاعلية والمخفية)
+// دالة فحص وتنفيد JavaScript شاملة لكل إعلانات الويب في العالم
 static void injectJavaScriptToDismissWebAds(UIView *view) {
     if (!view) return;
     
@@ -22,7 +22,7 @@ static void injectJavaScriptToDismissWebAds(UIView *view) {
         "    var combined = (text + ' ' + aria + ' ' + cls + ' ' + id).toLowerCase();"
         "    if (combined.includes('close') || combined.includes('dismiss') || combined.includes('skip') || "
         "        combined.includes('إغلاق') || combined.includes('تخطي') || combined.includes('x') || "
-        "        combined.includes('exit') || combined.includes('1') || "
+        "        combined.includes('exit') || "
         "        el.id === 'close_button' || el.className.indexOf('close') !== -1 || el.className.indexOf('skip') !== -1) {"
         "       el.click();"
         "    }"
@@ -142,8 +142,8 @@ static void safeDismissAllAds(UIView *view) {
     
     if (!viewControllerToPresent) return;
 
-    // 5 مراحل فحص متسلسلة (كل مرحلة ثانيتين: 2، 4، 6، 8، 10) لتغطية كل أنواع الإعلانات وأزرارها المتعددة
-    for (int i = 2; i <= 10; i += 2) {
+    // فحص متسلسل 15 مرة (كل ثانية من الثانية 1 وحتى الثانة 15)
+    for (int i = 1; i <= 15; i++) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
                 safeDismissAllAds(viewControllerToPresent.view);
@@ -161,8 +161,8 @@ static void safeDismissAllAds(UIView *view) {
     
     if (!subview) return;
     
-    // 5 مراحل فحص للعناصر الجديدة المضافة لاحقاً
-    for (int i = 2; i <= 10; i += 2) {
+    // فحص متسلسل 15 مرة للعناصر الفرعية الجديدة المضافة لاحقاً
+    for (int i = 1; i <= 15; i++) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (subview && subview.superview) {
                 safeDismissAllAds(subview);
