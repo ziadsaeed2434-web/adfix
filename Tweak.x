@@ -2,16 +2,14 @@
 #import <StoreKit/StoreKit.h>
 #import <WebKit/WebKit.h>
 
-// دالة متقدمة لحقن وتنفيد جافا سكريبت لإغلاق إعلانات الويب والتفاعلية تلقائياً
-static void injectJavaScriptToDismissWebAds(UIView *view) {
+// دالة فحص وتنفيد JavaScript فورية لإعلانات الويب والتفاعلية (تضغط على كل أزرار الويب المتعددة)
+static void immediateDismissWebAds(UIView *view) {
     if (!view) return;
     
-    // إذا كان العنصر عبارة عن WKWebView، نقوم بحقن سكريبت يبحث عن جميع أنواع أزرار الإغلاق والتخطي في الويب وينقر عليها
     if ([view isKindOfClass:[WKWebView class]]) {
         WKWebView *webView = (WKWebView *)view;
         NSString *jsCloseScript = 
         @"(function() {"
-        // البحث عن الـ Selectors الشائعة لأزرار الإغلاق والتخطي في الإعلانات التفاعلية والويب
         "var selectors = ['button', 'div', 'span', 'a', 'img', 'svg'];"
         "for (var i = 0; i < selectors.length; i++) {"
         "  var elements = document.querySelectorAll(selectors[i]);"
@@ -29,7 +27,6 @@ static void injectJavaScriptToDismissWebAds(UIView *view) {
         "    }"
         "  } "
         "}"
-        // محاولة إغلاق أي إطار فيديو تفاعلي أو عناصر مخفية
         "var closeBtns = document.querySelectorAll('[class*=\"close\"], [id*=\"close\"], [class*=\"skip\"], [id*=\"skip\"], .ads-close, #close-btn');"
         "closeBtns.forEach(function(btn) { btn.click(); });"
         "})();";
@@ -37,14 +34,13 @@ static void injectJavaScriptToDismissWebAds(UIView *view) {
         [webView evaluateJavaScript:jsCloseScript completionHandler:nil];
     }
     
-    // البحث التداخلي في باقي الـ Subviews للوصول لأي WebView داخلي
     for (UIView *subview in view.subviews) {
-        injectJavaScriptToDismissWebAds(subview);
+        immediateDismissWebAds(subview);
     }
 }
 
-// دالة محاكاة النقر العادية للعناصر التقليدية
-static void simulateAdvancedTap(UIView *view) {
+// دالة محاكاة النقر الفوري
+static void simulateImmediateTap(UIView *view) {
     if (!view) return;
     
     if ([view isKindOfClass:[UIControl class]]) {
@@ -62,12 +58,12 @@ static void simulateAdvancedTap(UIView *view) {
     }
 }
 
-// دالة الفحص الشاملة (تدمج الفحص العادي + فحص الويب التفاعلي)
-static void safeDismissAllAds(UIView *view) {
+// دالة البحث والإغلاق الفوري التي لا تتوقف وتضغط على كل الأزرار الموجودة
+static void checkAndDismissInstantly(UIView *view) {
     if (!view || ![view isKindOfClass:[UIView class]]) return;
     
-    // أولاً: حقن كود الويب لإغلاق الإعلانات التفاعلية ومحتويات الـ WebView
-    injectJavaScriptToDismissWebAds(view);
+    // فحص محتوى الويب فوراً لكل الـ WebViews الموجودة
+    immediateDismissWebAds(view);
     
     NSArray *subviews = [view.subviews copy];
     for (UIView *subview in subviews) {
@@ -123,13 +119,15 @@ static void safeDismissAllAds(UIView *view) {
             }
         }
         
+        // إذا وجد عنصر إغلاق، يضغط عليه ولا يتوقف (تمت إزالة الـ return لكي يكمل على باقي الأزرار)
         if (isCloseElement) {
             if (subview.userInteractionEnabled) {
-                simulateAdvancedTap(subview);
+                simulateImmediateTap(subview);
             }
         }
         
-        safeDismissAllAds(subview);
+        // تفتيش تداخلي فوري لكل العناصر الفرعية بلا استثناء
+        checkAndDismissInstantly(subview);
     }
 }
 
@@ -144,24 +142,10 @@ static void safeDismissAllAds(UIView *view) {
     
     if (!viewControllerToPresent) return;
 
-    // فحص دوري متكرر (عند الثانية 2.0 و 4.0 و 6.0) لضمان تغطية الإعلانات التفاعلية الطويلة التي تتأخر في ظهور أزرار الإغلاق
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
-            safeDismissAllAds(viewControllerToPresent.view);
-        }
-    });
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
-            safeDismissAllAds(viewControllerToPresent.view);
-        }
-    });
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
-            safeDismissAllAds(viewControllerToPresent.view);
-        }
-    });
+    // فحص فوري ولحظي للشاشة فور ظهورها للتعامل مع أي أزرار مبكرة
+    if (viewControllerToPresent.view) {
+        checkAndDismissInstantly(viewControllerToPresent.view);
+    }
 }
 
 %end
@@ -173,11 +157,8 @@ static void safeDismissAllAds(UIView *view) {
     
     if (!subview) return;
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (subview && subview.superview) {
-            safeDismissAllAds(subview);
-        }
-    });
+    // فحص لحظي وفوري لكل العناصر التي يتم إضافتها (يضمن ضغط أي X أول أو ثانٍ بمجرد ظهوره)
+    checkAndDismissInstantly(subview);
 }
 
 %end
