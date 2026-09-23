@@ -72,9 +72,6 @@ static void clearKeychainExceptToken() {
 // تهيئة وإعداد البيئة عند إقلاع التطبيق
 static void executeAppLaunchSetup() {
     @autoreleasepool {
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *homeDir = NSHomeDirectory();
-        
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         id savedToken = [defaults objectForKey:@"tokenKey"] ? [defaults objectForKey:@"tokenKey"] : [defaults objectForKey:@"user_token"];
         
@@ -109,7 +106,7 @@ static void executeAppLaunchSetup() {
         
         [freshDefaults synchronize];
         
-        NSLog(@">>> [Smart-Retry-Fix] Initialized session. IP: %@ | IDFV: %@", currentSessionIP, currentSessionIDFV);
+        NSLog(@">>> [Clean-Fix] Initialized session. IP: %@ | IDFV: %@", currentSessionIP, currentSessionIDFV);
     }
 }
 
@@ -167,9 +164,10 @@ static __attribute__((constructor)) void appLoadConstructor() {
 
 %end
 
+// تصحيح بناء طلبات NSURLRequest لتجنب أي أخطاء ترشيح
 %hook NSURLRequest
 
-+ (instancetype)requestWithURL:(NSURL *)URL {
+- (instancetype)initWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
     NSMutableURLRequest *request = [%orig mutableCopy];
     NSString *stableIP = getSessionIP();
     [request setValue:stableIP forHTTPHeaderField:@"X-Forwarded-For"];
@@ -180,11 +178,10 @@ static __attribute__((constructor)) void appLoadConstructor() {
 
 %end
 
-// --- تفعيل نظام إعادة المحاولة التلقائي والمستمر لكلاس Activator.AdService حتى جلب الإعلان ---
+// --- تفعيل الـ Runtime لكلاس Activator.AdService بأمان تام ---
 %ctor {
     Class targetClass = objc_getClass("Activator.AdService");
     if (targetClass) {
-        // فرض الجاهزية دائماً لكي لا يرفض الكلاس الطلب
         Method isReadyMethod = class_getInstanceMethod(targetClass, sel_registerName("isReady"));
         if (isReadyMethod) {
             method_setImplementation(isReadyMethod, imp_implementationWithBlock(^BOOL(id self) {
@@ -212,19 +209,7 @@ static __attribute__((constructor)) void appLoadConstructor() {
                 return YES;
             }));
         }
-
-        // دالة تكرار محاولة جلب الإعلان باستمرار عند الإقلاع حتى ينجح
-        void (^__block recursiveLoad)(id) = ^(id adInstance) {
-            SEL loadSel = sel_registerName("loadAd");
-            if (adInstance && [adInstance respondsToSelector:loadSel]) {
-                // استدعاء دالة جلب الإعلان
-                ((void (*)(id, SEL))[adInstance methodForSelector:loadSel])(adInstance, loadSel);
-                NSLog(@">>> [Smart-Retry] Attempting to load ad...");
-            }
-        };
-
-        // اعتراض دالة تهيئة الكلاس أو إنشائه لبدء حلقة إعادة المحاولة فوراً
-        // نقوم بالبحث عن أي كائن يتم إنشاؤه من هذا الكلاس وإجبار محاولات الجلب المستمرة
-        NSLog(@">>> [Smart-Retry-Fix] Runtime loaded successfully for Activator.AdService.");
+        
+        NSLog(@">>> [Clean-Fix] Runtime hooks successfully applied to Activator.AdService");
     }
 }
