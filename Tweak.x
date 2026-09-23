@@ -1,44 +1,334 @@
-#import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+#import <AdSupport/AdSupport.h>
+#import <AppTrackingTransparency/AppTrackingTransparency.h>
+#import <objc/runtime.h>
 
-static dispatch_queue_t getUltimateQueue() {
-    static dispatch_queue_t queue;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create("com.tweak.ultimateQueue", DISPATCH_QUEUE_SERIAL);
-    });
-    return queue;
+// إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
+@interface ActivatorAdService : NSObject
+- (void)loadAd;
+- (BOOL)isReady;
+- (BOOL)isAdReady;
+- (BOOL)canShowAd;
+- (BOOL)hasAdLoaded;
+- (void)showRewardAd;
+- (void)presentAdFromViewController:(UIViewController *)viewController;
+@end
+
+// 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على الـ tokenKey
+static void clearKeychainExceptToken() {
+    NSArray *secClasses = @[
+        (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecClassInternetPassword,
+        (__bridge id)kSecClassCertificate,
+        (__bridge id)kSecClassKey,
+        (__bridge id)kSecClassIdentity
+    ];
+    
+    for (id secClass in secClasses) {
+        NSDictionary *spec = @{(__bridge id)kSecClass: secClass};
+        CFArrayRef result = NULL;
+        if (SecItemCopyMatching((__bridge CFDictionaryRef)spec, (CFTypeRef *)&result) == errSecSuccess) {
+            NSArray *items = (__bridge NSArray *)result;
+            for (NSDictionary *item in items) {
+                NSString *account = item[(__bridge id)kSecAttrAccount];
+                NSString *service = item[(__bridge id)kSecAttrService];
+                
+                if (![account isEqualToString:@"tokenKey"]) {
+                    NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
+                    delQuery[(__bridge id)kSecClass] = secClass;
+                    SecItemDelete((__bridge CFDictionaryRef)delQuery);
+                } else {
+                    NSLog(@">>> [Dynamic-Refresh-Omni] tokenKey safely preserved: %@", service);
+                }
+            }
+            if (result) {
+                CFRelease(result);
+            }
+        }
+    }
 }
 
-%hook NSURLSession
+static NSString *randomNewIDFA() {
+    return [[NSUUID UUID] UUIDString];
+}
 
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSString *urlString = [[request URL] absoluteString];
+static NSString *randomEuropeanIP() {
+    return [NSString stringWithFormat:@"82.92.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+}
+
+// دالة مركزية لحقن كل هيدرس الشبكة بالآبي الجديد كلياً وضمان رؤيته
+static void injectIPToRequestHeaders(NSMutableURLRequest *request) {
+    if (!request) return;
+    NSString *fakeIP = randomEuropeanIP();
     
-    if (urlString && [urlString containsString:@"/api/v1/users/additional/"]) {
+    NSArray *ipHeaders = @[
+        @"X-Forwarded-For",
+        @"Client-IP",
+        @"True-Client-IP",
+        @"X-Real-IP",
+        @"X-Cluster-Client-IP",
+        @"Fastly-Client-IP",
+        @"CF-Connecting-IP",
+        @"Via"
+    ];
+    
+    for (NSString *header in ipHeaders) {
+        [request setValue:fakeIP forHTTPHeaderField:header];
+    }
+}
+
+static double randomInactivitySeconds() {
+    return (double)(864000 + arc4random_uniform(4320000));
+}
+
+static NSString *generateFreshTimestamp() {
+    NSDate *now = [NSDate date];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0300'"];
+    return [formatter stringFromDate:now];
+}
+
+// 2. دالة مركزية شاملة لتنظيف البيئة بالكامل وتوليد هوية وجهاز جديد
+static void executeFullEnvironmentRefresh() {
+    @autoreleasepool {
+        // أ) حماية التوكن في الكيشين
+        clearKeychainExceptToken();
+
+        // ب) مسح نطاق الـ NSUserDefaults بالكامل
+        NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+        if (bundleIdentifier) {
+            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+        }
+
+        // ج) تفريغ كاش الشبكة بالكامل
+        [[NSURLCache sharedURLCache] removeAllCachedResponses];
+        [[NSURLCache sharedURLCache] setDiskCapacity:0];
+        [[NSURLCache sharedURLCache] setMemoryCapacity:0];
+
+        NSFileManager *fileManager = [NSFileManager defaultManager];
         
-        // 1. إعطاء استجابة نجاح وهمية وفورية للواجهة لكي تظهر النقاط فوراً ولا يحدث أي تعليق أو أخطاء
-        if (completionHandler) {
-            NSData *fakeData = [@"{\"success\":true,\"status\":\"ok\",\"points\":1}" dataUsingEncoding: NSUTF8StringEncoding];
-            NSHTTPURLResponse *fakeResponse = [[NSHTTPURLResponse alloc] initWithURL:[request URL] statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{}] ;
-            completionHandler(fakeData, fakeResponse, nil);
+        // د) مسح الـ Sandbox الرئيسي بالكامل
+        NSString *homeDir = NSHomeDirectory();
+        NSError *error = nil;
+        NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
+        for (NSString *item in homeContents) {
+            NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
+            [fileManager removeItemAtPath:fullPath error:&error];
         }
         
-        // 2. أخذ الطلب الحقيقي وتأخير إرساله الفعلي للسيرفر في الخلفية (من دقيقة إلى دقيقتين) للحماية من الحظر
-        u_int32_t randomDelay = 60 + arc4random_uniform(61);
-        NSURLRequest *savedRequest = [request copy];
+        // هـ) مسح كل الـ App Groups المرتبطة
+        NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
+        if ([fileManager fileExistsAtPath:groupDirBase]) {
+            NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
+            for (NSString *groupFolder in groupFolders) {
+                NSString *groupPath = [groupDirBase stringByAppendingPathComponent:groupFolder];
+                [fileManager removeItemAtPath:groupPath error:nil];
+            }
+        }
+
+        // و) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد تماماً
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        NSString *freshID = randomNewIDFA();
+        NSString *freshDate = generateFreshTimestamp();
+        double dynamicInactivityTime = randomInactivitySeconds();
         
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), getUltimateQueue(), ^{
-            NSURLSessionDataTask *bgTask = [[NSURLSession sharedSession] dataTaskWithRequest:savedRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                // إرسال الطلب الحقيقي صامتاً في الخلفية بعد انتهاء الوقت
-            }];
-            [bgTask resume];
+        [defaults setObject:freshID forKey:@"device.id.key"];
+        [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
+        [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
+        [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
+        
+        [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
+        [defaults setInteger:0 forKey:@"ump_status"];
+        [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
+        
+        [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
+        [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
+        [defaults setInteger:1 forKey:@"AppsFlyerLaunchKey"];
+        
+        [defaults setObject:freshDate forKey:@"AppsFlyerInstallDate"];
+        [defaults setObject:freshDate forKey:@"AppsFlyerFirstLaunchDate"];
+        [defaults setObject:freshDate forKey:@"AppsFlyerInstallTimestamp"];
+        
+        [defaults setDouble:0.0 forKey:@"AppsFlyerLastSessionDuration"];
+        [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
+        [defaults setDouble:dynamicInactivityTime forKey:@"time_passed_since_last_session"];
+        [defaults setDouble:dynamicInactivityTime forKey:@"last_activity_interval"];
+        
+        [defaults synchronize];
+        
+        NSLog(@">>> [Dynamic-Refresh-Omni] Full environment wiped & fresh ID spawned: %@", freshID);
+    }
+}
+
+// تشغيل التطهير تلقائياً مع كل إقلاع للتطبيق
+static __attribute__((constructor)) void initialAppLaunchSetup() {
+    executeFullEnvironmentRefresh();
+}
+
+// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
+%hook ATTrackingManager
++ (NSUInteger)trackingAuthorizationStatus {
+    return 2;
+}
+%end
+
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
+    return [NSUUID UUID];
+}
+%end
+
+%hook ASIdentifierManager
+- (NSUUID *)advertisingIdentifier {
+    return [NSUUID UUID];
+}
+- (BOOL)isAdvertisingTrackingEnabled {
+    return NO;
+}
+%end
+
+// اعتراض وتعديل أي قيمة محاولة لتغيير الهيدرز ليضمن حقن الأيبي المزيف دائماً
+%hook NSMutableURLRequest
+- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
+    NSArray *ipHeaders = @[@"X-Forwarded-For", @"Client-IP", @"True-Client-IP", @"X-Real-IP", @"X-Cluster-Client-IP", @"Fastly-Client-IP", @"CF-Connecting-IP", @"Via"];
+    if ([ipHeaders containsObject:field]) {
+        value = randomEuropeanIP();
+    }
+    %orig(value, field);
+}
+%end
+
+// ==========================================
+// 4. نظام التحكم الخارق في NSURLSession واعتراض مستوى الإنشاء العام
+// ==========================================
+%hook NSURLSession
+
+// اعتراض المستوى العام لإنشاء أي مهمة تعتمد على Request (يشمل Data, Download, Upload وغيرها مهما كان نوعها)
+- (NSURLSessionTask *)taskWithRequest:(NSURLRequest *)request {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    injectIPToRequestHeaders(mutableReq);
+    NSURLSessionTask *task = %orig(mutableReq);
+    if (task) {
+        [task resume]; // ضمان التشغيل التلقائي والآلي لأي نوع مهمة
+    }
+    return task;
+}
+
+- (NSURLSessionTask *)dataTaskWithRequest:(NSURLRequest *)request {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    injectIPToRequestHeaders(mutableReq);
+    NSURLSessionTask *task = %orig(mutableReq);
+    if (task) {
+        [task resume];
+    }
+    return task;
+}
+
+- (NSURLSessionTask *)downloadTaskWithRequest:(NSURLRequest *)request {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    injectIPToRequestHeaders(mutableReq);
+    NSURLSessionTask *task = %orig(mutableReq);
+    if (task) {
+        [task resume];
+    }
+    return task;
+}
+
+- (NSURLSessionTask *)uploadTaskWithRequest:(NSURLRequest *)request fromData:(NSData *)bodyData {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    injectIPToRequestHeaders(mutableReq);
+    NSURLSessionTask *task = %orig(mutableReq, bodyData);
+    if (task) {
+        [task resume];
+    }
+    return task;
+}
+
+// في حال تم إنشاء الطلب عبر URL مباشر فقط دون كائن Request
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url {
+    NSMutableURLRequest *mutableReq = [NSMutableURLRequest requestWithURL:url];
+    injectIPToRequestHeaders(mutableReq);
+    NSURLSessionDataTask *task = %orig(mutableReq.copy);
+    if (task) {
+        [task resume];
+    }
+    return task;
+}
+
+%end
+
+// ==========================================
+// 5. التحصين المطلق لـ ActivatorAdService وجلب الإعلانات وتجديد البيئة
+// ==========================================
+%hook ActivatorAdService
+
+- (BOOL)isReady {
+    return YES;
+}
+
+- (BOOL)isAdReady {
+    return YES;
+}
+
+- (BOOL)canShowAd {
+    return YES;
+}
+
+- (BOOL)hasAdLoaded {
+    return YES;
+}
+
+- (void)loadAd {
+    %orig;
+    id targetSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+            [targetSelf loadAd];
+        }
+    });
+}
+
+- (void)showRewardAd {
+    @try {
+        %orig;
+        NSLog(@">>> [Dynamic-Refresh-Omni] showRewardAd executed. Refreshing environment & auto-resuming tasks.");
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            executeFullEnvironmentRefresh();
+            
+            if ([self respondsToSelector:@selector(loadAd)]) {
+                [self loadAd];
+            }
         });
         
-        return %orig(request, nil);
+    } @catch (NSException *exception) {
+        NSLog(@">>> [Dynamic-Refresh-Omni] Exception in showRewardAd: %@", exception.reason);
     }
-    
-    return %orig(request, completionHandler);
+}
+
+- (void)presentAdFromViewController:(UIViewController *)viewController {
+    @try {
+        %orig;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            executeFullEnvironmentRefresh();
+            
+            if ([self respondsToSelector:@selector(loadAd)]) {
+                [self loadAd];
+            }
+        });
+    } @catch (NSException *exception) {
+        NSLog(@">>> [Dynamic-Refresh-Omni] Exception caught in presentAdFromViewController: %@", exception.reason);
+    }
+}
+
+- (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
+    NSLog(@">>> [Dynamic-Refresh-Omni] Ad error intercepted, refreshing environment and re-loading.");
+    executeFullEnvironmentRefresh();
+    id targetSelf = self;
+    if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+        [targetSelf loadAd];
+    }
 }
 
 %end
