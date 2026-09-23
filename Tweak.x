@@ -1,18 +1,17 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 
-static dispatch_queue_t getStrictQueue() {
+static dispatch_queue_t getDelayQueue() {
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create("com.tweak.strictQueue", DISPATCH_QUEUE_SERIAL);
+        queue = dispatch_queue_create("com.tweak.delayQueue", DISPATCH_QUEUE_SERIAL);
     });
     return queue;
 }
 
 %hook NSURLSessionTask
 
-// اعتراض عملية "بدء أو إرسال" أي طلب شبكة في النظام لحظة تنفيذه
 - (void)resume {
     NSURLRequest *request = self.currentRequest;
     if (!request) {
@@ -21,24 +20,19 @@ static dispatch_queue_t getStrictQueue() {
     
     NSString *urlString = [[request URL] absoluteString];
     
+    // فحص الطلب الخاص بالمكافآت
     if (urlString && [urlString containsString:@"/api/v1/users/additional/"]) {
         
-        // إلغاء الإرسال الفوري للسيرفر لمنع ظهوره في أداة الفحص والتسبب بالحظر
-        %orig; // أو يمكننا عمل cancel لمنع الطلب الأصلي تماماً وإعادة توجيهه
-        [self cancel];
-        
-        // توليد وقت التأخير العشوائي في الخلفية (بين دقيقة إلى دقيقتين)
+        // توليد وقت تأخير عشوائي وآمن من دقيقة إلى دقيقتين (60 إلى 120 ثانية)
         u_int32_t randomDelay = 60 + arc4random_uniform(61);
-        NSURLRequest *savedRequest = [request copy];
         
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), getStrictQueue(), ^{
-            NSURLSessionDataTask *delayedTask = [[NSURLSession sharedSession] dataTaskWithRequest:savedRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                // إرسال الطلب بشكل صامت ومتأخر في الخلفية
-            }];
-            [delayedTask resume];
+        // تأخير تنفيذ الطلب الأصلي نفسه في الخلفية
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), getDelayQueue(), ^{
+            // استدعاء %orig الحقيقية لتنفيذ الطلب الأصلي بعد انتهاء الوقت المحدد
+            %orig;
         });
         
-        return;
+        return; // منع التشغيل الفوري وإبقاء الطلب معلقاً للمدة المحددة
     }
     
     %orig;
