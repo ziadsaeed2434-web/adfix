@@ -1,80 +1,47 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 
-// طابور خلفي آمن وموحد لإدارة وتأخير الطلبات
-static dispatch_queue_t getMasterQueue() {
+static dispatch_queue_t getStrictQueue() {
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create("com.tweak.masterQueue", DISPATCH_QUEUE_SERIAL);
+        queue = dispatch_queue_create("com.tweak.strictQueue", DISPATCH_QUEUE_SERIAL);
     });
     return queue;
 }
 
-// دالة موحدة لتأخير الطلب وإرساله صامتاً في الخلفية بعد وقت عشوائي آمن (60 إلى 120 ثانية)
-static void delayAndSendRequest(NSURLRequest *originalRequest) {
-    u_int32_t randomDelay = 60 + arc4random_uniform(61);
-    NSURLRequest *savedRequest = [originalRequest copy];
+%hook NSURLSessionTask
+
+// اعتراض عملية "بدء أو إرسال" أي طلب شبكة في النظام لحظة تنفيذه
+- (void)resume {
+    NSURLRequest *request = self.currentRequest;
+    if (!request) {
+        request = [self valueForKey:@"originalRequest"];
+    }
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), getMasterQueue(), ^{
-        NSURLSessionDataTask *bgTask = [[NSURLSession sharedSession] dataTaskWithRequest:savedRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            // إرسال صامت في الخلفية
-        }];
-        [bgTask resume];
-    });
-}
-
-// --- الطبقة الأولى: اعتراض NSURLSession القياسية ---
-%hook NSURLSession
-
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     NSString *urlString = [[request URL] absoluteString];
     
-    if ([urlString containsString:@"/api/v1/users/additional/"]) {
-        delayAndSendRequest(request);
+    if (urlString && [urlString containsString:@"/api/v1/users/additional/"]) {
         
-        if (completionHandler) {
-            NSData *fakeData = [@"{\"success\":true,\"status\":\"ok\"}" dataUsingEncoding:NSUTF8StringEncoding];
-            NSHTTPURLResponse *fakeResponse = [[NSHTTPURLResponse alloc] initWithURL:[request URL] statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{}] ;
-            completionHandler(fakeData, fakeResponse, nil);
-        }
-        return %orig(request, nil);
-    }
-    return %orig(request, completionHandler);
-}
-
-%end
-
-// --- الطبقة الثانية: اعتراض NSURLRequest عند توليد الروابط ---
-%hook NSURLRequest
-
-+ (id)requestWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
-    NSString *urlString = [URL absoluteString];
-    if ([urlString containsString:@"/api/v1/users/additional/"]) {
-        NSURLRequest *origReq = %orig;
-        if (origReq) {
-            delayAndSendRequest(origReq);
-        }
-    }
-    return %orig;
-}
-
-%end
-
-// --- الطبقة الثالثة: اعتراض الـ NSURL من الجذور لضمان عدم هروب أي طلب ---
-%hook NSURL
-
-- (instancetype)initWithString:(NSString *)URLString {
-    if ([URLString containsString:@"/api/v1/users/additional/"]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60.0 * NSEC_PER_SEC)), getMasterQueue(), ^{
-            NSURL *url = [NSURL URLWithString:URLString];
-            if (url) {
-                NSURLRequest *req = [NSURLRequest requestWithURL:url];
-                [[[NSURLSession sharedSession] dataTaskWithRequest:req] resume];
-            }
+        // إلغاء الإرسال الفوري للسيرفر لمنع ظهوره في أداة الفحص والتسبب بالحظر
+        %orig; // أو يمكننا عمل cancel لمنع الطلب الأصلي تماماً وإعادة توجيهه
+        [self cancel];
+        
+        // توليد وقت التأخير العشوائي في الخلفية (بين دقيقة إلى دقيقتين)
+        u_int32_t randomDelay = 60 + arc4random_uniform(61);
+        NSURLRequest *savedRequest = [request copy];
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), getStrictQueue(), ^{
+            NSURLSessionDataTask *delayedTask = [[NSURLSession sharedSession] dataTaskWithRequest:savedRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                // إرسال الطلب بشكل صامت ومتأخر في الخلفية
+            }];
+            [delayedTask resume];
         });
+        
+        return;
     }
-    return %orig;
+    
+    %orig;
 }
 
 %end
