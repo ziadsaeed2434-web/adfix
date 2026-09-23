@@ -77,7 +77,7 @@ static NSString *getActiveUserAgent() {
 }
 
 // ============================================================================
-// [SECTION 03: AGGRESSIVE LOCAL PURGE & FRESH RE-INIT ENGINE (1000-LINE DEPTH)]
+// [SECTION 03: AGGRESSIVE LOCAL PURGE & FRESH RE-INIT ENGINE]
 // ============================================================================
 
 static void performDeepAggressivePurgeAndReinit() {
@@ -338,7 +338,6 @@ static void injectEnterprisePayloadHeaders(NSMutableURLRequest *request) {
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         
-        // مصفوفة شاملة تغطي كل كلاسات الإعلانات العالمية والمحلية المحتملة
         NSArray *targetAdClasses = @[
             @"Activator.AdService",
             @"AdManager",
@@ -365,7 +364,6 @@ static void injectEnterprisePayloadHeaders(NSMutableURLRequest *request) {
         for (NSString *className in targetAdClasses) {
             Class targetClass = objc_getClass([className UTF8String]);
             if (targetClass) {
-                // فرض الجاهزية المطلقة وإرجاع YES دائماً لكل دوال الفحص والتحقق
                 NSArray *selectors = @[
                     @"isReady", @"isAdReady", @"canShowAd", 
                     @"hasAdLoaded", @"isAvailable", @"checkAdStatus", 
@@ -383,7 +381,7 @@ static void injectEnterprisePayloadHeaders(NSMutableURLRequest *request) {
                     }
                 }
                 
-                NSLog(@TYPE_LOG(@">>> [Enterprise-1000L-Engine] Overrode selectors for ad class: %@"), className);
+                NSLog(@">>> [Enterprise-1000L-Engine] Overrode selectors for ad class: %@", className);
             }
         }
         
