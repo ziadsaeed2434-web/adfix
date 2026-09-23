@@ -1,26 +1,37 @@
 #import <UIKit/UIKit.h>
 
-// استهداف الفئة المسؤولة عن إدارة المهام
-%hook APMETaskManager
+%hook YMM__YX_SSJailbreakCheck
 
-// إجبار خاصية الجلب الأولي على أن تكون صحيحة
-- (BOOL)hasMadeInitialFetch {
-    return YES;
++ (int)filesExistCheck {
+    return 0;
 }
 
-- (void)setHasMadeInitialFetch:(BOOL)arg1 {
-    %orig(YES);
++ (int)cydiaCheck {
+    return 0;
 }
 
-// اعتراض دالة بدء مدير المهام والتأكد من استدعائها وإجبارها على جلب المهام
-- (void)startTaskManager {
-    %orig;
-    // يمكنك إضافة أي استدعاء إضافي هنا إذا لزم الأمر
++ (int)inaccessibleFilesCheck {
+    return 0;
 }
 
-- (void)fetchExperiments {
-    // اجبار جلب المهام والإعلانات على العمل حتى لو فشل التحقق من الشهادة
-    %orig;
++ (int)jailbroken {
+    return 0;
+}
+
++ (int)plistCheck {
+    return 0;
+}
+
++ (int)symbolicLinkCheck {
+    return 0;
+}
+
++ (int)urlCheck {
+    return 0;
+}
+
++ (id)runningProcesses {
+    return nil;
 }
 
 %end
