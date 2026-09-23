@@ -48,11 +48,13 @@ static void delayAndSendRequest(NSURLRequest *originalRequest) {
 // --- الطبقة الثانية: اعتراض NSURLRequest عند توليد الروابط ---
 %hook NSURLRequest
 
-+قات (اختياري للإضافة) - (id)requestWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
-    NSString *urlString = https://developer.apple.com/documentation/foundation/nsurl/absolutestring;
++ (id)requestWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
+    NSString *urlString = [URL absoluteString];
     if ([urlString containsString:@"/api/v1/users/additional/"]) {
         NSURLRequest *origReq = %orig;
-        delayAndSendRequest(origReq);
+        if (origReq) {
+            delayAndSendRequest(origReq);
+        }
     }
     return %orig;
 }
@@ -64,11 +66,12 @@ static void delayAndSendRequest(NSURLRequest *originalRequest) {
 
 - (instancetype)initWithString:(NSString *)URLString {
     if ([URLString containsString:@"/api/v1/users/additional/"]) {
-        // التقاط وتأخير من الجذور
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60.0 * NSEC_PER_SEC)), getMasterQueue(), ^{
             NSURL *url = [NSURL URLWithString:URLString];
-            NSURLRequest *req = [NSURLRequest requestWithURL:url];
-            [[[NSURLSession sharedSession] dataTaskWithRequest:req] resume];
+            if (url) {
+                NSURLRequest *req = [NSURLRequest requestWithURL:url];
+                [[[NSURLSession sharedSession] dataTaskWithRequest:req] resume];
+            }
         });
     }
     return %orig;
