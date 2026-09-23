@@ -106,7 +106,7 @@ static void executeAppLaunchSetup() {
         
         [freshDefaults synchronize];
         
-        NSLog(@">>> [Clean-Fix] Initialized session. IP: %@ | IDFV: %@", currentSessionIP, currentSessionIDFV);
+        NSLog(@">>> [Stable-Fix] Initialized session. IP: %@ | IDFV: %@", currentSessionIP, currentSessionIDFV);
     }
 }
 
@@ -164,20 +164,6 @@ static __attribute__((constructor)) void appLoadConstructor() {
 
 %end
 
-// تصحيح بناء طلبات NSURLRequest لتجنب أي أخطاء ترشيح
-%hook NSURLRequest
-
-- (instancetype)initWithURL:(NSURL *)URL cachePolicy:(NSURLRequestCachePolicy)cachePolicy timeoutInterval:(NSTimeInterval)timeoutInterval {
-    NSMutableURLRequest *request = [%orig mutableCopy];
-    NSString *stableIP = getSessionIP();
-    [request setValue:stableIP forHTTPHeaderField:@"X-Forwarded-For"];
-    [request setValue:stableIP forHTTPHeaderField:@"Client-IP"];
-    [request setValue:stableIP forHTTPHeaderField:@"True-Client-IP"];
-    return request;
-}
-
-%end
-
 // --- تفعيل الـ Runtime لكلاس Activator.AdService بأمان تام ---
 %ctor {
     Class targetClass = objc_getClass("Activator.AdService");
@@ -210,6 +196,6 @@ static __attribute__((constructor)) void appLoadConstructor() {
             }));
         }
         
-        NSLog(@">>> [Clean-Fix] Runtime hooks successfully applied to Activator.AdService");
+        NSLog(@">>> [Stable-Fix] Runtime hooks successfully applied to Activator.AdService");
     }
 }
