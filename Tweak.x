@@ -1,7 +1,6 @@
 // =================================================================
 // FullSpoofer.xm - ملف واحد متكامل
-// تزييف معرّفات الجهاز + IP في الترويسات مع كل طلب
-// لا يحتاج أي ملفات أو مكتبات خارجية
+// تزييف معرّفات الجهاز + IP + User-Agent عشوائي مع كل طلب
 // =================================================================
 
 #import <Foundation/Foundation.h>
@@ -21,6 +20,7 @@ static NSString *currentUDID;
 static NSString *currentSerial;
 static NSString *currentIMEI;
 static NSString *currentFakeIP;
+static NSString *currentUserAgent;
 
 static NSLock *spoofLock;
 static NSLock *ipLock;
@@ -36,7 +36,7 @@ static void generateNewIdentifiers(void) {
     currentIDFV   = [[NSUUID UUID] UUIDString];
     currentUDID   = [[NSUUID UUID] UUIDString];
     currentSerial = [NSString stringWithFormat:@"%@SPOOFED",
-                     [[NSUUID UUID] UUIDString].substringToIndex(8)];
+                     [[[NSUUID UUID] UUIDString] substringToIndex:8]];
     currentIMEI   = [NSString stringWithFormat:@"%015llu",
                      (unsigned long long)(arc4random() % 999999999999999ULL)];
     [spoofLock unlock];
@@ -78,7 +78,100 @@ static void rotateFakeIP(void) {
 }
 
 // =================================================================
-// 3. حقن ترويسات IP في الطلب
+// 3. توليد User-Agent عشوائي لنظام iOS
+// =================================================================
+
+static void rotateUserAgent(void) {
+    // --- إصدارات iOS ---
+    NSArray *iosVersions = @[
+        @"15_0", @"15_1", @"15_2", @"15_3", @"15_4", @"15_5", @"15_6", @"15_7",
+        @"16_0", @"16_1", @"16_2", @"16_3", @"16_4", @"16_5", @"16_6", @"16_7",
+        @"17_0", @"17_1", @"17_2", @"17_3", @"17_4", @"17_4_1", @"17_5", @"17_5_1", @"17_6",
+        @"18_0", @"18_1", @"18_2"
+    ];
+
+    // --- إصدارات WebKit ---
+    NSArray *webkitVersions = @[
+        @"605.1.15", @"605.1.15", @"605.1.15", @"605.1.15",
+        @"606.1.15", @"607.1.15"
+    ];
+
+    // --- إصدارات Safari ---
+    NSArray *safariVersions = @[
+        @"15.0", @"15.1", @"15.5", @"15.6",
+        @"16.0", @"16.1", @"16.5", @"16.6",
+        @"17.0", @"17.1", @"17.4", @"17.5", @"17.6",
+        @"18.0"
+    ];
+
+    // --- إصدارات Chrome iOS ---
+    NSArray *chromeVersions = @[
+        @"120.0.6099.119", @"121.0.6167.66", @"122.0.6261.62",
+        @"123.0.6312.52", @"124.0.6367.111", @"125.0.6422.80",
+        @"126.0.6478.54", @"127.0.6533.77", @"128.0.6613.92"
+    ];
+
+    // --- إصدارات Firefox iOS ---
+    NSArray *firefoxVersions = @[
+        @"119.0", @"120.0", @"121.0", @"122.0",
+        @"123.0", @"124.0", @"125.0", @"126.0", @"127.0"
+    ];
+
+    // --- إصدارات Edge iOS ---
+    NSArray *edgeVersions = @[
+        @"120.0.2210.86", @"121.0.2277.86", @"122.0.2365.68",
+        @"123.0.2420.72", @"124.0.2478.60"
+    ];
+
+    // --- نوع الجهاز ---
+    NSArray *devices = @[ @"iPhone", @"iPhone", @"iPhone", @"iPhone", @"iPad" ];
+
+    // --- اختيار عشوائي ---
+    NSString *iosVersion    = iosVersions[arc4random_uniform((uint32_t)iosVersions.count)];
+    NSString *webkitVersion = webkitVersions[arc4random_uniform((uint32_t)webkitVersions.count)];
+    NSString *device        = devices[arc4random_uniform((uint32_t)devices.count)];
+
+    uint32_t browserChoice = arc4random_uniform(100);
+    NSString *ua;
+
+    if (browserChoice < 50) {
+        // Safari ~50%
+        NSString *ver = safariVersions[arc4random_uniform((uint32_t)safariVersions.count)];
+        ua = [NSString stringWithFormat:
+              @"Mozilla/5.0 (%@; CPU iPhone OS %@ like Mac OS X) AppleWebKit/%@ (KHTML, like Gecko) Version/%@ Mobile/15E148 Safari/604.1",
+              device, iosVersion, webkitVersion, ver];
+    }
+    else if (browserChoice < 75) {
+        // Chrome iOS ~25%
+        NSString *ver = chromeVersions[arc4random_uniform((uint32_t)chromeVersions.count)];
+        ua = [NSString stringWithFormat:
+              @"Mozilla/5.0 (%@; CPU iPhone OS %@ like Mac OS X) AppleWebKit/%@ (KHTML, like Gecko) CriOS/%@ Mobile/15E148 Safari/604.1",
+              device, iosVersion, webkitVersion, ver];
+    }
+    else if (browserChoice < 90) {
+        // Firefox iOS ~15%
+        NSString *ver = firefoxVersions[arc4random_uniform((uint32_t)firefoxVersions.count)];
+        ua = [NSString stringWithFormat:
+              @"Mozilla/5.0 (%@; CPU iPhone OS %@ like Mac OS X) AppleWebKit/%@ (KHTML, like Gecko) FxiOS/%@ Mobile/15E148 Safari/605.1.15",
+              device, iosVersion, webkitVersion, ver];
+    }
+    else {
+        // Edge iOS ~10%
+        NSString *ver = edgeVersions[arc4random_uniform((uint32_t)edgeVersions.count)];
+        ua = [NSString stringWithFormat:
+              @"Mozilla/5.0 (%@; CPU iPhone OS %@ like Mac OS X) AppleWebKit/%@ (KHTML, like Gecko) EdgiOS/%@ Mobile/15E148 Safari/604.1",
+              device, iosVersion, webkitVersion, ver];
+    }
+
+    [ipLock lock];
+    currentUserAgent = ua;
+    [ipLock unlock];
+
+    NSLog(@"[FullSpoofer] UA → %@", currentUserAgent);
+}
+
+// =================================================================
+// 4. حقن الترويسات (IP + User-Agent)
 // =================================================================
 
 static NSURLRequest *injectIPHeaders(NSURLRequest *request) {
@@ -91,8 +184,10 @@ static NSURLRequest *injectIPHeaders(NSURLRequest *request) {
 
     [ipLock lock];
     NSString *fakeIP = currentFakeIP;
+    NSString *fakeUA = currentUserAgent;
     [ipLock unlock];
 
+    // --- IP وهمي في كل الترويسات ---
     [mutableRequest setValue:fakeIP forHTTPHeaderField:@"X-Forwarded-For"];
     [mutableRequest setValue:fakeIP forHTTPHeaderField:@"X-Real-IP"];
     [mutableRequest setValue:fakeIP forHTTPHeaderField:@"X-Client-IP"];
@@ -105,11 +200,16 @@ static NSURLRequest *injectIPHeaders(NSURLRequest *request) {
     [mutableRequest setValue:fakeIP forHTTPHeaderField:@"CF-Connecting-IP"];
     [mutableRequest setValue:fakeIP forHTTPHeaderField:@"X-Cluster-Client-IP"];
 
+    // --- User-Agent وهمي ---
+    if (fakeUA) {
+        [mutableRequest setValue:fakeUA forHTTPHeaderField:@"User-Agent"];
+    }
+
     return mutableRequest;
 }
 
 // =================================================================
-// 4. Hooks عبر Logos
+// 5. Hooks عبر Logos
 // =================================================================
 
 %hook ASIdentifierManager
@@ -128,6 +228,17 @@ static NSURLRequest *injectIPHeaders(NSURLRequest *request) {
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     NSString *lowerField = [field lowercaseString];
+
+    // --- اعتراض User-Agent ---
+    if ([lowerField isEqualToString:@"user-agent"]) {
+        [ipLock lock];
+        NSString *fakeUA = currentUserAgent;
+        [ipLock unlock];
+        %orig(fakeUA, field);
+        return;
+    }
+
+    // --- اعتراض ترويسات IP ---
     for (NSString *ipHeader in ipHeaders) {
         if ([lowerField isEqualToString:ipHeader]) {
             [ipLock lock];
@@ -142,6 +253,14 @@ static NSURLRequest *injectIPHeaders(NSURLRequest *request) {
 
 - (NSString *)valueForHTTPHeaderField:(NSString *)field {
     NSString *lowerField = [field lowercaseString];
+
+    if ([lowerField isEqualToString:@"user-agent"]) {
+        [ipLock lock];
+        NSString *fakeUA = currentUserAgent;
+        [ipLock unlock];
+        return fakeUA;
+    }
+
     for (NSString *ipHeader in ipHeaders) {
         if ([lowerField isEqualToString:ipHeader]) {
             [ipLock lock];
@@ -155,10 +274,12 @@ static NSURLRequest *injectIPHeaders(NSURLRequest *request) {
 %end
 
 %hook NSURLSession
+
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
                             completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
     rotateIdentifiers();
     rotateFakeIP();
+    rotateUserAgent();
     NSURLRequest *newRequest = injectIPHeaders(request);
     return %orig(newRequest, completionHandler);
 }
@@ -167,23 +288,28 @@ static NSURLRequest *injectIPHeaders(NSURLRequest *request) {
                         completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
     rotateIdentifiers();
     rotateFakeIP();
+    rotateUserAgent();
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     request = (NSMutableURLRequest *)injectIPHeaders(request);
-    return %orig(request, completionHandler);
+    return _logos_orig$_ungrouped$NSURLSession$dataTaskWithRequest$completionHandler$(
+        self, @selector(dataTaskWithRequest:completionHandler:), request, completionHandler
+    );
 }
+
 %end
 
 %hook NSURLConnection
 + (NSURLConnection *)connectionWithRequest:(NSURLRequest *)request delegate:(id)delegate {
     rotateIdentifiers();
     rotateFakeIP();
+    rotateUserAgent();
     NSURLRequest *newRequest = injectIPHeaders(request);
     return %orig(newRequest, delegate);
 }
 %end
 
 // =================================================================
-// 5. Hooks دوال C عبر Substrate
+// 6. Hooks دوال C
 // =================================================================
 
 static OSStatus (*orig_SecItemAdd)(CFDictionaryRef, CFTypeRef *);
@@ -226,7 +352,7 @@ static CFTypeRef new_MGCopyAnswer(CFStringRef key) {
 }
 
 // =================================================================
-// 6. نقطة الدخول
+// 7. نقطة الدخول
 // =================================================================
 
 %ctor {
@@ -235,6 +361,7 @@ static CFTypeRef new_MGCopyAnswer(CFStringRef key) {
 
     generateNewIdentifiers();
     rotateFakeIP();
+    rotateUserAgent();
 
     ipHeaders = @[
         @"x-forwarded-for", @"x-real-ip", @"x-client-ip",
