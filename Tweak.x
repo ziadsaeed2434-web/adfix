@@ -56,13 +56,13 @@ static NSString *generateRandomIP(void) {
     do {
         ip = arc4random();
     } while (
-        ((ip & 0xFF000000) == 0x0A000000) ||
-        ((ip & 0xFFF00000) == 0xAC100000) ||
-        ((ip & 0xFFFF0000) == 0xC0A80000) ||
-        ((ip & 0xFF000000) == 0x7F000000) ||
-        ((ip & 0xFF000000) == 0xE0000000) ||
-        ((ip & 0xFF000000) == 0x00000000) ||
-        ((ip & 0xFF000000) == 0xFFFFFFFF)
+        ((ip & 0xFF000000) == 0x0A000000) || // 10.0.0.0/8
+        ((ip & 0xFFF00000) == 0xAC100000) || // 172.16.0.0/12
+        ((ip & 0xFFFF0000) == 0xC0A80000) || // 192.168.0.0/16
+        ((ip & 0xFF000000) == 0x7F000000) || // 127.0.0.0/8
+        ((ip & 0xFF000000) == 0xE0000000) || // Multicast
+        ((ip & 0xFF000000) == 0x00000000) || // 0.0.0.0/8
+        (ip == 0xFFFFFFFF)                   // Broadcast
     );
 
     return [NSString stringWithFormat:@"%u.%u.%u.%u",
