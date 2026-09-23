@@ -15,7 +15,7 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// 1. حماية الـ Keychain بحذر شديد
+// 1. حماية الـ Keychain بحذر شديد مع إزالة المتغيرات غير المستخدمة
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -32,10 +32,9 @@ static void clearKeychainExceptToken() {
             NSArray *items = (__bridge NSArray *)result;
             for (NSDictionary *item in items) {
                 NSString *account = item[(__bridge id)kSecAttrAccount];
-                NSString *service = item[(__bridge id)kSecAttrService];
                 
                 if (account && ([account containsString:@"token"] || [account containsString:@"auth"] || [account isEqualToString:@"tokenKey"])) {
-                    // الحفاظ على التوكن وعدم مسحه لكي لا ينطرد الحساب
+                    // الحفاظ على التوكن وعدم مسحه
                 } else {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                     delQuery[(__bridge id)kSecClass] = secClass;
@@ -59,34 +58,29 @@ static NSString *randomEuropeanIP() {
 
 // توليد تأخير زمني عشوائي (Jitter) لتجنب الرصد الآلي من السيرفر
 static double randomJitterDelay() {
-    return 2.0 + ((double)(arc4random_uniform(300)) / 100.0); // ما بين 2.0 إلى 5.0 ثوانٍ بشكل عشوائي تماماً كالبشر
+    return 2.0 + ((double)(arc4random_uniform(300)) / 100.0);
 }
 
-// 2. دالة تنظيف الـ Sandbox مع حماية الـ Token وملفات الحساب الأساسية
+// 2. دالة تنظيف الـ Sandbox مع حماية الـ Token
 static void executeStealthEnvironmentRefresh() {
     @autoreleasepool {
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *homeDir = NSHomeDirectory();
         
-        // استخراج التوكن الحالي من الـ NSUserDefaults لحفظه وإعادته فوراً
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         id savedToken = [defaults objectForKey:@"tokenKey"] ? [defaults objectForKey:@"tokenKey"] : [defaults objectForKey:@"user_token"];
         
-        // أ) تنظيف الـ Keychain مع استثناء التوكن
         clearKeychainExceptToken();
 
-        // ب) مسح نطاق الـ NSUserDefaults بالكامل
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [defaults removePersistentDomainForName:bundleIdentifier];
         }
 
-        // ج) تفريغ كاش الشبكة بالكامل
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
-        // د) مسح الـ Sandbox الرئيسي (مع الحفاظ على مسارات التوكن وتفضيلات الجلسة لكي لا يكتشف السيرفر أي خلل برمجي)
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
@@ -104,18 +98,15 @@ static void executeStealthEnvironmentRefresh() {
             }
         }
         
-        // هـ) مسح الـ App Groups المرتبطة بإعلانات التطبيق
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fileManager fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
             for (NSString *groupFolder in groupFolders) {
-                // استثناء مجلدات النظام الحساسة وحذف الباقي لتوليد بيئة نظيفة للإعلانات
                 NSString *groupPath = [groupDirBase stringByAppendingPathComponent:groupFolder];
                 [fileManager removeItemAtPath:groupPath error:nil];
             }
         }
 
-        // و) حقن هويات وبصمات جديدة بالكامل وإعادة وضع التوكن الخاص بك
         NSString *freshID = randomNewIDFA();
         NSUserDefaults *freshDefaults = [NSUserDefaults standardUserDefaults];
         
@@ -136,17 +127,15 @@ static void executeStealthEnvironmentRefresh() {
     }
 }
 
-// تشغيل التطهير عند الإقلاع بمهلة عشوائية آمنة
 static __attribute__((constructor)) void initialAppLaunchSetup() {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         executeStealthEnvironmentRefresh();
     });
 }
 
-// 3. طريقة حقن آمنة وصامتة لـ ATTrackingManager و UIDevice لتجنب رصد السيرفر
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 2; // رفض التتبع المدمج
+    return 2;
 }
 %end
 
@@ -174,7 +163,6 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 }
 %end
 
-// --- التحصين الخفي لمدير الإعلانات (Stealth Ad Service Hooks) ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -206,9 +194,6 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Stealth-Refresh] showRewardAd executed. Scheduling stealth environment wipe.");
-        
-        // استخدام تأخير زمني عشوائي (Jitter) لتجنب الكشف الآلي من السيرفر عند تكرار جلب الإعلانات
         double dynamicDelay = randomJitterDelay();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(dynamicDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             executeStealthEnvironmentRefresh();
@@ -217,7 +202,6 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
                 [self loadAd];
             }
         });
-        
     } @catch (NSException *exception) {
         NSLog(@">>> [Stealth-Refresh] Exception in showRewardAd: %@", exception.reason);
     }
@@ -241,7 +225,6 @@ static __attribute__((constructor)) void initialAppLaunchSetup() {
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
     %orig;
-    NSLog(@">>> [Stealth-Refresh] Ad error intercepted, executing stealth refresh and retrying.");
     executeStealthEnvironmentRefresh();
     id targetSelf = self;
     if (targetSelf && [targetSelf respondsToSelector:@selector(loadAd)]) {
