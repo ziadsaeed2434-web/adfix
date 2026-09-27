@@ -28,11 +28,8 @@ static void updateKeychainItem(NSString *service, NSString *account, NSString *n
     }
 }
 
-// دالة لتوليد وتطبيق نفس الـ UDID الجديد على العنصرين
+// دالة لتوليد وتطبيق نفس الـ UDID الجديد على العنصرين في كل فتحة تطبيق جديدة
 static void refreshDeviceIDsOncePerLaunch() {
-    // نستخدم متغير للتأكد من تغييرها مع كل تشغيل جديد للتطبيق
-    static dispatch_once_t onceToken;
-    // إذا أردت أن تتغير في كل مرة تفتح فيها التطبيق من جديد، سنقوم بتوليد قيمة جديدة عند تشغيل الـdidFinishLaunching
     NSString *newUDID = generateRandomUUID();
     
     updateKeychainItem(@"unique_device_id", @"unique_device_id", newUDID);
@@ -42,8 +39,7 @@ static void refreshDeviceIDsOncePerLaunch() {
 %hook AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    // هذه الدالة لا يتم استدعاؤها إلا عندما تفتح التطبيق بعد إغلاقه نهائياً (Kill)
-    // لذلك في كل مرة تخرج نهائياً وتفتحه، سيتغير الـ UDID لقيمة جديدة ومتطابقة تماماً
+    // يتم تنفيذه فور فتح التطبيق بعد إغلاقه نهائياً، لتغيير القيم بقيم جديدة ومتطابقة
     refreshDeviceIDsOncePerLaunch();
     
     return %orig;
