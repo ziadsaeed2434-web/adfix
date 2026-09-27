@@ -347,13 +347,13 @@ static UIWindow *gFloatingWindow = nil;
 }
 
 - (void)setObject:(id)value forKey:(NSString *)defaultName {
+    // تعديل القيمة فقط، ثم استدعاء %orig مرة واحدة فقط
     if (currentDeviceToken && [defaultName isEqualToString:@"PingMe_Device_Token"]) {
-        %orig(currentDeviceToken, defaultName); return;
+        value = currentDeviceToken;
+    } else if (currentVoipToken && [defaultName isEqualToString:@"PingMe_VOIP_Token"]) {
+        value = currentVoipToken;
     }
-    if (currentVoipToken   && [defaultName isEqualToString:@"PingMe_VOIP_Token"]) {
-        %orig(currentVoipToken, defaultName); return;
-    }
-    %orig;
+    %orig(value, defaultName);
 }
 
 %end
