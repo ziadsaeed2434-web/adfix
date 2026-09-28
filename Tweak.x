@@ -39,7 +39,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@">>> [Every-Launch-Wipe] tokenKey safely preserved: %@", service);
+                    NSLog(@">>> [Loop-Wipe] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -68,8 +68,8 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. التنفيذ في كل إقلاع للتطبيق (Constructor يعمل مع كل فتحه جديدة)
-static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaunch() {
+// 2. دالة التنفيذ والتصفير الشاملة (التي ستتكرر كل 30 ثانية)
+static void performPeriodicWipeAndSpawn() {
     @autoreleasepool {
         // أ) حماية التوكن في الكيشين
         clearKeychainExceptToken();
@@ -87,26 +87,30 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
         
-        // د) مسح الـ Sandbox الرئيسي بالكامل في كل إقلاع
+        // د) مسح الـ Sandbox الرئيسي بالكامل (مجلدات التطبيق الداخلية المؤقتة)
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
+            // استثناء المجلدات الأساسية التي قد تسبب كراش لو مُسحت بالكامل (مثل Documents الحساسة أو Library إذا لزم)
+            if ([item isEqualToString:@"Documents"] || [item isEqualToString:@"Library"]) {
+                // مسح محتويات الـ Documents و Library داخلياً بدلاً من حذف المجلد نفسه لتجنب الانهيار
+                NSString *subPath = [homeDir stringByAppendingPathComponent:item];
+                NSArray *subContents = [fileManager contentsOfDirectoryAtPath:subPath error:nil];
+                for (NSString *subItem in subContents) {
+                    // لا تحذف ملف التوكن أو قاعدة البيانات الخاصة بتسجيل الدخول إن وجدت هنا
+                    if (![subItem containsString:@"token"] && ![subItem containsString:@"auth"]) {
+                        [fileManager removeItemAtPath:[subPath stringByAppendingPathComponent:subItem] error:nil];
+                    }
+                }
+                continue;
+            }
+            
             NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
             [fileManager removeItemAtPath:fullPath error:&error];
         }
         
-        // هـ) مسح كل الـ App Groups المرتبطة في كل إقلاع
-        NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
-        if ([fileManager fileExistsAtPath:groupDirBase]) {
-            NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
-            for (NSString *groupFolder in groupFolders) {
-                NSString *groupPath = [groupDirBase stringByAppendingPathComponent:groupFolder];
-                [fileManager removeItemAtPath:groupPath error:nil];
-            }
-        }
-
-        // و) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد مع كل إقلاع
+        // هـ) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshDate = generateFreshTimestamp();
@@ -136,11 +140,29 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         
         [defaults synchronize];
         
-        NSLog(@">>> [Every-Launch-Wipe] Sandbox, App Groups & Caches wiped successfully. Fresh environment spawned with ID: %@", freshID);
+        // إرسال إشعار تنشيط النظام لتحديث الواجهة ومزود الإعلانات داخلياً
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter] postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+            [[NSNotificationCenter defaultCenter] postNotificationName:UIApplicationWillEnterForegroundNotification object:nil];
+        });
+
+        NSLog(@">>> [Loop-Wipe] Periodic wipe executed successfully. Fresh environment spawned with ID: %@", freshID);
     }
 }
 
-// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
+// 3. جدولة التنفيذ كل 30 ثانية تلقائياً بعد إقلاع التطبيق
+%ctor {
+    @autoreleasepool {
+        // الانتظار 5 ثوانٍ بعد فتح التطبيق أول مرة، ثم تكرار العملية كل 30 ثانية بدقة
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [NSTimer scheduledTimerWithTimeInterval:30.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
+                performPeriodicWipeAndSpawn();
+            }];
+        });
+    }
+}
+
+// 4. فرض حالة رفض التتبع وتجاوز فحص الشبكة
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
     return 2;
@@ -171,7 +193,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// --- التحصين المطلق لإعلانات مضمونة ولا نهائية في كل إقلاع ---
+// --- التحصين المطلق لإعلانات مضمونة ولا نهائية ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
@@ -203,7 +225,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Every-Launch-Ads] showRewardAd executed. Pre-fetching next ad instantly.");
+        NSLog(@">>> [Loop-Ads] showRewardAd executed. Pre-fetching next ad instantly.");
         
         id targetSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -213,7 +235,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         });
         
     } @catch (NSException *exception) {
-        NSLog(@">>> [Every-Launch-Ads] Exception in showRewardAd: %@", exception.reason);
+        NSLog(@">>> [Loop-Ads] Exception in showRewardAd: %@", exception.reason);
     }
 }
 
@@ -221,12 +243,12 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
     @try {
         %orig;
     } @catch (NSException *exception) {
-        NSLog(@">>> [Every-Launch-Ads] Exception caught in presentAdFromViewController: %@", exception.reason);
+        NSLog(@">>> [Loop-Ads] Exception caught in presentAdFromViewController: %@", exception.reason);
     }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Every-Launch-Ads] Ad error intercepted, forcing instant re-load.");
+    NSLog(@">>> [Loop-Ads] Ad error intercepted, forcing instant re-load.");
     id targetSelf = self;
     if ([targetSelf respondsToSelector:@selector(loadAd)]) {
         [targetSelf loadAd];
