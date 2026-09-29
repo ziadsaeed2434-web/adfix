@@ -1,257 +1,180 @@
-#import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <AdSupport/AdSupport.h>
-#import <AppTrackingTransparency/AppTrackingTransparency.h>
-#import <objc/runtime.h>
+#import <StoreKit/StoreKit.h>
+#import <WebKit/WebKit.h>
 
-// إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
-@interface ActivatorAdService : NSObject
-- (void)loadAd;
-- (BOOL)isReady;
-- (BOOL)isAdReady;
-- (BOOL)canShowAd;
-- (BOOL)hasAdLoaded;
-- (void)showRewardAd;
-- (void)presentAdFromViewController:(UIViewController *)viewController;
-@end
-
-// 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على الـ tokenKey
-static void clearKeychainExceptToken() {
-    NSArray *secClasses = @[
-        (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecClassInternetPassword,
-        (__bridge id)kSecClassCertificate,
-        (__bridge id)kSecClassKey,
-        (__bridge id)kSecClassIdentity
-    ];
+// دالة فحص وتنفيد JavaScript شاملة لكل إعلانات الويب في العالم
+static void injectJavaScriptToDismissWebAds(UIView *view) {
+    if (!view) return;
     
-    for (id secClass in secClasses) {
-        NSDictionary *spec = @{(__bridge id)kSecClass: secClass};
-        CFArrayRef result = NULL;
-        if (SecItemCopyMatching((__bridge CFDictionaryRef)spec, (CFTypeRef *)&result) == errSecSuccess) {
-            NSArray *items = (__bridge NSArray *)result;
-            for (NSDictionary *item in items) {
-                NSString *account = item[(__bridge id)kSecAttrAccount];
-                NSString *service = item[(__bridge id)kSecAttrService];
-                
-                if (![account isEqualToString:@"tokenKey"]) {
-                    NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
-                    delQuery[(__bridge id)kSecClass] = secClass;
-                    SecItemDelete((__bridge CFDictionaryRef)delQuery);
-                } else {
-                    NSLog(@">>> [Loop-Wipe] tokenKey safely preserved: %@", service);
-                }
-            }
-            if (result) {
-                CFRelease(result);
-            }
+    if ([view isKindOfClass:[WKWebView class]]) {
+        WKWebView *webView = (WKWebView *)view;
+        NSString *jsCloseScript = 
+        @"(function() {"
+        "var selectors = ['button', 'div', 'span', 'a', 'img', 'svg', 'iframe'];"
+        "for (var i = 0; i < selectors.length; i++) {"
+        "  var elements = document.querySelectorAll(selectors[i]);"
+        "  for (var j = 0; j < elements.length; j++) {"
+        "    var el = elements[j];"
+        "    var text = el.innerText || el.textContent || '';"
+        "    var aria = el.getAttribute('aria-label') || '';"
+        "    var cls = el.className || '';"
+        "    var id = el.id || '';"
+        "    var combined = (text + ' ' + aria + ' ' + cls + ' ' + id).toLowerCase();"
+        "    if (combined.includes('close') || combined.includes('dismiss') || combined.includes('skip') || "
+        "        combined.includes('إغلاق') || combined.includes('تخطي') || combined.includes('x') || "
+        "        combined.includes('exit') || "
+        "        el.id === 'close_button' || el.className.indexOf('close') !== -1 || el.className.indexOf('skip') !== -1) {"
+        "       el.click();"
+        "    }"
+        "  } "
+        "}"
+        "var closeBtns = document.querySelectorAll('[class*=\"close\"], [id*=\"close\"], [class*=\"skip\"], [id*=\"skip\"], [class*=\"dismiss\"], .ads-close, #close-btn');"
+        "closeBtns.forEach(function(btn) { btn.click(); });"
+        "})();";
+        
+        [webView evaluateJavaScript:jsCloseScript completionHandler:nil];
+    }
+    
+    for (UIView *subview in view.subviews) {
+        injectJavaScriptToDismissWebAds(subview);
+    }
+}
+
+// دالة محاكاة النقر المتقدمة تشمل Controls والإيماءات
+static void simulateAdvancedTap(UIView *view) {
+    if (!view) return;
+    
+    if ([view isKindOfClass:[UIControl class]]) {
+        UIControl *control = (UIControl *)view;
+        if (control.enabled && control.userInteractionEnabled) {
+            [control sendActionsForControlEvents:UIControlEventTouchUpInside];
+            [control sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
+        }
+    }
+    
+    for (UIGestureRecognizer *gesture in view.gestureRecognizers) {
+        if ([gesture isKindOfClass:[UITapGestureRecognizer class]]) {
+            [view.superview bringSubviewToFront:view];
         }
     }
 }
 
-static NSString *randomNewIDFA() {
-    return [[NSUUID UUID] UUIDString];
-}
-
-static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"76.168.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
-}
-
-static double randomInactivitySeconds() {
-    return (double)(864000 + arc4random_uniform(4320000));
-}
-
-static NSString *generateFreshTimestamp() {
-    NSDate *now = [NSDate date];
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0300'"];
-    return [formatter stringFromDate:now];
-}
-
-// 2. دالة التنفيذ والتصفير الشاملة (التي ستتكرر كل 30 ثانية)
-static void performPeriodicWipeAndSpawn() {
-    @autoreleasepool {
-        // أ) حماية التوكن في الكيشين
-        clearKeychainExceptToken();
-
-        // ب) مسح نطاق الـ NSUserDefaults بالكامل
-        NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleIdentifier) {
-            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
-        }
-
-        // ج) تفريغ كاش الشبكة بالكامل
-        [[NSURLCache sharedURLCache] removeAllCachedResponses];
-        [[NSURLCache sharedURLCache] setDiskCapacity:0];
-        [[NSURLCache sharedURLCache] setMemoryCapacity:0];
-
-        NSFileManager *fileManager = [NSFileManager defaultManager];
+// دالة البحث الشاملة لجميع أنواع أزرار الإغلاق في التطبيق
+static void safeDismissAllAds(UIView *view) {
+    if (!view || ![view isKindOfClass:[UIView class]]) return;
+    
+    injectJavaScriptToDismissWebAds(view);
+    
+    NSArray *subviews = [view.subviews copy];
+    for (UIView *subview in subviews) {
+        if (!subview || subview.hidden || subview.alpha < 0.01) continue;
         
-        // د) مسح الـ Sandbox الرئيسي بالكامل (مجلدات التطبيق الداخلية المؤقتة)
-        NSString *homeDir = NSHomeDirectory();
-        NSError *error = nil;
-        NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
-        for (NSString *item in homeContents) {
-            // استثناء المجلدات الأساسية التي قد تسبب كراش لو مُسحت بالكامل (مثل Documents الحساسة أو Library إذا لزم)
-            if ([item isEqualToString:@"Documents"] || [item isEqualToString:@"Library"]) {
-                // مسح محتويات الـ Documents و Library داخلياً بدلاً من حذف المجلد نفسه لتجنب الانهيار
-                NSString *subPath = [homeDir stringByAppendingPathComponent:item];
-                NSArray *subContents = [fileManager contentsOfDirectoryAtPath:subPath error:nil];
-                for (NSString *subItem in subContents) {
-                    // لا تحذف ملف التوكن أو قاعدة البيانات الخاصة بتسجيل الدخول إن وجدت هنا
-                    if (![subItem containsString:@"token"] && ![subItem containsString:@"auth"]) {
-                        [fileManager removeItemAtPath:[subPath stringByAppendingPathComponent:subItem] error:nil];
-                    }
-                }
-                continue;
-            }
+        BOOL isCloseElement = NO;
+        
+        if ([subview isKindOfClass:[UIButton class]]) {
+            UIButton *button = (UIButton *)subview;
+            NSString *title = [button titleForState:UIControlStateNormal];
+            NSString *accLabel = button.accessibilityLabel;
+            NSString *accId = button.accessibilityIdentifier;
             
-            NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
-            [fileManager removeItemAtPath:fullPath error:&error];
+            if ([title isEqualToString:@"X"] || [title isEqualToString:@"✕"] || [title isEqualToString:@"×"] ||
+                [title localizedCaseInsensitiveContainsString:@"close"] || [title localizedCaseInsensitiveContainsString:@"dismiss"] ||
+                [title localizedCaseInsensitiveContainsString:@"skip"] || [title localizedCaseInsensitiveContainsString:@"إغلاق"] ||
+                [title localizedCaseInsensitiveContainsString:@"تخطي"] || [title localizedCaseInsensitiveContainsString:@"exit"] ||
+                [accLabel localizedCaseInsensitiveContainsString:@"close"] || [accLabel localizedCaseInsensitiveContainsString:@"skip"] ||
+                [accId localizedCaseInsensitiveContainsString:@"close"] || [accId localizedCaseInsensitiveContainsString:@"skip"]) {
+                isCloseElement = YES;
+            }
+        } 
+        else if ([subview isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)subview;
+            NSString *text = label.text;
+            if ([text isEqualToString:@"X"] || [text isEqualToString:@"✕"] || [text isEqualToString:@"×"] ||
+                [text localizedCaseInsensitiveContainsString:@"close"] || [text localizedCaseInsensitiveContainsString:@"skip"] ||
+                [text localizedCaseInsensitiveContainsString:@"إغلاق"] || [text localizedCaseInsensitiveContainsString:@"تخطي"] ||
+                [text localizedCaseInsensitiveContainsString:@"exit"]) {
+                isCloseElement = YES;
+            }
+        }
+        else if ([subview isKindOfClass:[UIImageView class]] || [subview isKindOfClass:[UIControl class]]) {
+            NSString *accLabel = subview.accessibilityLabel;
+            NSString *accId = subview.accessibilityIdentifier;
+            if ([accLabel localizedCaseInsensitiveContainsString:@"close"] || 
+                [accLabel localizedCaseInsensitiveContainsString:@"skip"] ||
+                [accId localizedCaseInsensitiveContainsString:@"close"] ||
+                [accId localizedCaseInsensitiveContainsString:@"skip"] ||
+                [accId localizedCaseInsensitiveContainsString:@"dismiss"]) {
+                isCloseElement = YES;
+            }
         }
         
-        // هـ) حقن هويات وبصمات جديدة بالكامل كأنه جهاز جديد
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSString *freshID = randomNewIDFA();
-        NSString *freshDate = generateFreshTimestamp();
-        double dynamicInactivityTime = randomInactivitySeconds();
+        if (!isCloseElement) {
+            NSString *accLabel = subview.accessibilityLabel;
+            NSString *accId = subview.accessibilityIdentifier;
+            if ([accLabel localizedCaseInsensitiveContainsString:@"close"] || 
+                [accLabel localizedCaseInsensitiveContainsString:@"dismiss"] ||
+                [accLabel localizedCaseInsensitiveContainsString:@"skip"] ||
+                [accLabel localizedCaseInsensitiveContainsString:@"إغلاق"] ||
+                [accId localizedCaseInsensitiveContainsString:@"close"] ||
+                [accId localizedCaseInsensitiveContainsString:@"skip"]) {
+                isCloseElement = YES;
+            }
+        }
         
-        [defaults setObject:freshID forKey:@"device.id.key"];
-        [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
-        [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
-        [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
+        if (isCloseElement) {
+            if (subview.userInteractionEnabled) {
+                simulateAdvancedTap(subview);
+            }
+        }
         
-        [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
-        [defaults setInteger:0 forKey:@"ump_status"];
-        [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
-        
-        [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
-        [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
-        [defaults setInteger:1 forKey:@"AppsFlyerLaunchKey"];
-        
-        [defaults setObject:freshDate forKey:@"AppsFlyerInstallDate"];
-        [defaults setObject:freshDate forKey:@"AppsFlyerFirstLaunchDate"];
-        [defaults setObject:freshDate forKey:@"AppsFlyerInstallTimestamp"];
-        
-        [defaults setDouble:0.0 forKey:@"AppsFlyerLastSessionDuration"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"time_passed_since_last_session"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"last_activity_interval"];
-        
-        [defaults synchronize];
-        
-        // إرسال إشعار تنشيط النظام لتحديث الواجهة ومزود الإعلانات داخلياً
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[NSNotificationCenter defaultCenter] postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
-            [[NSNotificationCenter defaultCenter] postNotificationName:UIApplicationWillEnterForegroundNotification object:nil];
-        });
-
-        NSLog(@">>> [Loop-Wipe] Periodic wipe executed successfully. Fresh environment spawned with ID: %@", freshID);
+        safeDismissAllAds(subview);
     }
 }
 
-// 3. جدولة التنفيذ كل 30 ثانية تلقائياً بعد إقلاع التطبيق
-%ctor {
-    @autoreleasepool {
-        // الانتظار 5 ثوانٍ بعد فتح التطبيق أول مرة، ثم تكرار العملية كل 30 ثانية بدقة
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [NSTimer scheduledTimerWithTimeInterval:30.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
-                performPeriodicWipeAndSpawn();
-            }];
-        });
+%hook UIViewController
+
+- (void)presentViewController:(UIViewController * )viewControllerToPresent animated:(BOOL)flag completion:(void (^)(void))completion {
+    if ([viewControllerToPresent isKindOfClass:[SKStoreProductViewController class]]) {
+        return; 
     }
-}
-
-// 4. فرض حالة رفض التتبع وتجاوز فحص الشبكة
-%hook ATTrackingManager
-+ (NSUInteger)trackingAuthorizationStatus {
-    return 2;
-}
-%end
-
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return [NSUUID UUID];
-}
-%end
-
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    return [NSUUID UUID];
-}
-- (BOOL)isAdvertisingTrackingEnabled {
-    return NO;
-}
-%end
-
-%hook NSMutableURLRequest
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP();
-    }
-    %orig(value, field);
-}
-%end
-
-// --- التحصين المطلق لإعلانات مضمونة ولا نهائية ---
-%hook ActivatorAdService
-
-- (BOOL)isReady {
-    return YES;
-}
-
-- (BOOL)isAdReady {
-    return YES;
-}
-
-- (BOOL)canShowAd {
-    return YES;
-}
-
-- (BOOL)hasAdLoaded {
-    return YES;
-}
-
-- (void)loadAd {
+    
     %orig;
-    id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
+    
+    if (!viewControllerToPresent) return;
+
+    // 15 محاولة فحص متسلسلة (كل ثانية لمدة 15 ثانية)
+    for (int i = 1; i <= 15; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
+                safeDismissAllAds(viewControllerToPresent.view);
+            }
+        });
+    }
+    
+    // محاولة إغلاق إجبارية نهائية (بعد مرور 16 ثانية) إذا ظل الإعلان عالقاً أو لم يظهر زر الخروج
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(16 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (viewControllerToPresent && !viewControllerToPresent.isBeingDismissed) {
+            [viewControllerToPresent dismissViewControllerAnimated:YES completion:nil];
         }
     });
 }
 
-- (void)showRewardAd {
-    @try {
-        %orig;
-        NSLog(@">>> [Loop-Ads] showRewardAd executed. Pre-fetching next ad instantly.");
-        
-        id targetSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-                [targetSelf loadAd];
+%end
+
+%hook UIView
+
+- (void)didAddSubview:(UIView * )subview {
+    %orig;
+    
+    if (!subview) return;
+    
+    // 15 محاولة فحص للعناصر الفرعية الجديدة المضافة لاحقاً
+    for (int i = 1; i <= 15; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (subview && subview.superview) {
+                safeDismissAllAds(subview);
             }
         });
-        
-    } @catch (NSException *exception) {
-        NSLog(@">>> [Loop-Ads] Exception in showRewardAd: %@", exception.reason);
-    }
-}
-
-- (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try {
-        %orig;
-    } @catch (NSException *exception) {
-        NSLog(@">>> [Loop-Ads] Exception caught in presentAdFromViewController: %@", exception.reason);
-    }
-}
-
-- (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Loop-Ads] Ad error intercepted, forcing instant re-load.");
-    id targetSelf = self;
-    if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-        [targetSelf loadAd];
     }
 }
 
