@@ -102,7 +102,7 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. التنفيذ في كل إقلاع للتطبيق (توليد آيبي وجلسة جديدة ثابتة حتى الإغلاق)
+// 2. التنفيذ في كل إقلاع للتطبيق
 static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaunch() {
     @autoreleasepool {
         clearKeychainExceptToken();
@@ -139,7 +139,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         NSString *freshID = randomNewIDFA();
         NSString *freshIMEI = randomIMEI();
         NSString *selectedDNS = randomSpectrumDNS();
-        NSString *selectedIP = randomSpectrumIP(); // آيبي ثابت لهذه الجلسة فقط
+        NSString *selectedIP = randomSpectrumIP();
         NSString *freshDate = generateFreshTimestamp();
         double dynamicInactivityTime = randomInactivitySeconds();
         
@@ -153,7 +153,6 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         [defaults setObject:freshIMEI forKey:@"hardware_imei"];
         [defaults setObject:freshIMEI forKey:@"deviceIdentifier"];
         
-        // تثبيت الآيبي والـ DNS طوال فترة فتح هذه الجلسة
         [defaults setObject:selectedDNS forKey:@"spectrum_dns_spoof"];
         [defaults setObject:selectedIP forKey:@"spectrum_ip_spoof"];
         
@@ -205,13 +204,16 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// 4. استخدام الآيبي الثابت للجلسة الحالية وتطبيق التعديلات على كافة الطلبات والروابط
+// 4. تعديل الطلبات والروابط
 %hook NSMutableURLRequest
 
 - (void)setURL:(NSURL *)url {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
-    if (!sessionIP) return %orig(url);
+    if (!sessionIP) {
+        %orig(url);
+        return;
+    }
     
     NSString *urlString = [url absoluteString];
     if ([urlString containsString:@"ip="]) {
@@ -244,7 +246,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// تغطية جلسات الـ NSURLSession لضمان ثبات الآيبي لكل المكتبات الخارجية
+// تغطية جلسات الـ NSURLSession بالكامل بدون أخطاء توافق أنواع
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -275,6 +277,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
     }
     
+    // تم التصحيح هنا ليمرر mutableReq الصحيح والمتوافق مع التوقيع البرمجي
     return %orig(mutableReq, completionHandler);
 }
 
@@ -307,18 +310,27 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
                 [targetSelf loadAd];
             }
         });
-    } @catch (NSException *exception) {}
+    } @catch (NSException *exception) {
+        NSLog(@">>> [Every-Launch-Ads] Exception in showRewardAd: %@", exception.reason);
+    }
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try { %orig; } @catch (NSException *exception) {}
+    @try { 
+        %orig; 
+    } @catch (NSException *exception) {
+        NSLog(@">>> [Every-Launch-Ads] Exception in presentAd: %@", exception.reason);
+    }
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    id targetSelf = self;
-    if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-        [targetSelf loadAd];
-    }
+    @try {
+        NSLog(@">>> [Every-Launch-Ads] Ad error intercepted, forcing instant re-load.");
+        id targetSelf = self;
+        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+            [targetSelf loadAd];
+        }
+    } @catch (NSException *exception) {}
 }
 
 %end
