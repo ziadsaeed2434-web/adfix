@@ -16,7 +16,7 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على tokenKey الخاص بتسجيل الدخول
+// 1. تنظيف الـ Keychain بالكامل مع الحفاظ حصرياً على مفتاح المصادقة الأساسي
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -39,8 +39,6 @@ static void clearKeychainExceptToken() {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
-                } else {
-                    NSLog(@">>> [Root-Wipe] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -94,19 +92,16 @@ static NSString *generateTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 3. التدمير الجذري الشامل مع كل إقلاع (يتم مسح كل ملفات التطبيق، الكاش، والـ App Groups من جذورها)
+// 3. التدمير الجذري الشامل مع كل إقلاع (مسح ملفات التطبيق، الكاش، والـ App Groups من جذورها)
 static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch() {
     @autoreleasepool {
-        // أ) تنظيف الـ Keychain بالكامل ما عدا الـ tokenKey
         clearKeychainExceptToken();
 
-        // ب) مسح إعدادات التطبيق الافتراضية (NSUserDefaults)
         NSString *bundleId = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleId) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleId];
         }
 
-        // ج) مسح الذاكرة المؤقتة بالكامل (URL Cache)
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
@@ -115,30 +110,24 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
 
-        // د) مسح كافة محتويات مجلد المنزل (Documents, Library, Caches, tmp) من الجذور
         NSArray *homeContents = [fm contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
             NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
-            // استثناء بسيط لكي لا يحدث انهيار فوري للملفات النظامية الأساسية إن وجدت، ويتم حذف محتويات التطبيق بالكامل
             [fm removeItemAtPath:fullPath error:&error];
         }
 
-        // هـ) التدمير الجذري لمجلدات الـ App Groups المرتبطة بالتطبيق بالكامل
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fm fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fm contentsOfDirectoryAtPath:groupDirBase error:nil];
             for (NSString *groupFolder in groupFolders) {
                 NSString *groupPath = [groupDirBase stringByAppendingPathComponent:groupFolder];
                 [fm removeItemAtPath:groupPath error:&error];
-                NSLog(@">>> [Deep-Wipe] App Group destroyed: %@", groupFolder);
             }
         }
-
-        NSLog(@">>> [Deep-Wipe-Engine] All application files, caches, and App Groups successfully destroyed from roots on launch.");
     }
 }
 
-// 4. تزوير الهويات ومعرّفات الأجهزة (UIDevice, IDFV, IDFA, IMEI, OS, Locale)
+// 4. تزوير الهويات ومعرّفات الأجهزة
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
@@ -165,7 +154,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 2; // Restricted
+    return 2;
 }
 %end
 
@@ -178,7 +167,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 %end
 
-// 5. محرك تغيير وتزوير كل طلب شبكي طائراً (IP + DNS + Headers + User-Agent)
+// 5. محرك تغيير وتزوير كل طلب شبكي طائراً
 %hook NSMutableURLRequest
 
 - (void)setURL:(NSURL *)url {
@@ -227,7 +216,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 %end
 
-// 6. التحكم المطلق بجلسات الشبكة وتوليد بصمات فريدة لكل طلب DataTask
+// 6. التحكم المطلق بجلسات الشبكة
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -262,12 +251,12 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
     NSString *urlString = [url absoluteString];
     
     if ([urlString containsString:@"ip="]) {
-        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\{1,3}\\.[0-9]+)" options:0 error:nil];
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
         urlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", dynIP]];
         url = [NSURL URLWithString:urlString] ?: url;
     }
     
-    return %orig(url, confirmationHandler = completionHandler); // التوافق مع الكود الأصلي
+    return %orig(url, completionHandler);
 }
 
 %end
@@ -285,7 +274,6 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
     id targetSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf load_ad_safe]; // تصحيح الاستدعاء التلقائي
             [targetSelf loadAd];
         }
     });
@@ -304,14 +292,18 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try { %orig; } @catch (NSException *exception) {}
+    @try { 
+        %orig; 
+    } @catch (NSException *exception) {}
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    id targetSelf = self;
-    if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-        [targetSelf loadAd];
-    }
+    @try {
+        id targetSelf = self;
+        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+            [targetSelf loadAd];
+        }
+    } @catch (NSException *exception) {}
 }
 
 %end
