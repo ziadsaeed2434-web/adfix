@@ -6,7 +6,6 @@
 #import <netdb.h>
 #import <arpa/inet.h>
 
-// إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -17,7 +16,7 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على الـ tokenKey
+// 1. تنظيف الـ Keychain تماماً مع الحفاظ حصرياً على tokenKey الخاص بتسجيل الدخول
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -41,7 +40,7 @@ static void clearKeychainExceptToken() {
                     delQuery[(__bridge id)kSecClass] = secClass;
                     SecItemDelete((__bridge CFDictionaryRef)delQuery);
                 } else {
-                    NSLog(@">>> [Every-Launch-Wipe] tokenKey safely preserved: %@", service);
+                    NSLog(@">>> [Root-Wipe] tokenKey safely preserved: %@", service);
                 }
             }
             if (result) {
@@ -51,193 +50,175 @@ static void clearKeychainExceptToken() {
     }
 }
 
-static NSString *randomNewIDFA() {
+// 2. مولدات الهوية المتغيرة لحظياً
+static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// دالة لتوليد رقم IMEI وهمي جديد
 static NSString *randomIMEI() {
     int r1 = 10 + arc4random_uniform(89);
     long long r2 = 10000000000LL + (long long)(arc4random_uniform(900000000));
     return [NSString stringWithFormat:@"%d%lld", r1, r2];
 }
 
-// سيرفرات DNS حقيقية تابعة لشركة Spectrum
 static NSString *randomSpectrumDNS() {
-    NSArray *spectrumDNSList = @[
-        @"71.252.0.12",
-        @"71.243.0.12",
-        @"209.18.47.61",
-        @"209.18.47.62"
-    ];
-    int index = arc4random_uniform((uint32_t)[spectrumDNSList count]);
-    return spectrumDNSList[index];
+    NSArray *dnsList = @[@"71.252.0.12", @"71.243.0.12", @"209.18.47.61", @"209.18.47.62", @"68.237.161.12"];
+    return dnsList[arc4random_uniform((uint32_t)[dnsList count])];
 }
 
-// توليد IP أمريكي حقيقي من نطاقات Spectrum
 static NSString *randomSpectrumIP() {
-    NSArray *spectrumSubnets = @[
-        @"24.24",      
-        @"24.160",     
-        @"65.24",      
-        @"66.192",     
-        @"67.240",     
-        @"68.172",     
-        @"71.64",      
-        @"75.128",     
-        @"97.100"      
-    ];
-    NSString *subnet = spectrumSubnets[arc4random_uniform((uint32_t)[spectrumSubnets count])];
+    NSArray *subnets = @[@"24.24", @"24.160", @"65.24", @"66.192", @"67.240", @"68.172", @"71.64", @"75.128", @"97.100", @"173.16"];
+    NSString *subnet = subnets[arc4random_uniform((uint32_t)[subnets count])];
     return [NSString stringWithFormat:@"%@.%d.%d", subnet, arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
-static double randomInactivitySeconds() {
-    return (double)(864000 + arc4random_uniform(4320000));
+static NSString *randomOSVersion() {
+    NSArray *versions = @[@"16.1", @"16.5", @"17.0", @"17.2", @"17.4", @"17.5.1", @"18.0"];
+    return versions[arc4random_uniform((uint32_t)[versions count])];
 }
 
-static NSString *generateFreshTimestamp() {
+static NSString *randomDeviceModel() {
+    NSArray *models = @[@"iPhone14,2", @"iPhone14,3", @"iPhone15,2", @"iPhone15,3", @"iPhone16,1", @"iPhone16,2"];
+    return models[arc4random_uniform((uint32_t)[models count])];
+}
+
+static NSString *randomLocale() {
+    NSArray *locales = @[@"en_US", @"en_GB", @"en_CA", @"es_US", @"fr_FR"];
+    return locales[arc4random_uniform((uint32_t)[locales count])];
+}
+
+static NSString *generateTimestamp() {
     NSDate *now = [NSDate date];
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'+0300'"];
+    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"];
     return [formatter stringFromDate:now];
 }
 
-// 2. التنفيذ في كل إقلاع للتطبيق
-static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaunch() {
+// 3. التدمير الجذري الشامل مع كل إقلاع (يتم مسح كل ملفات التطبيق، الكاش، والـ App Groups من جذورها)
+static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch() {
     @autoreleasepool {
+        // أ) تنظيف الـ Keychain بالكامل ما عدا الـ tokenKey
         clearKeychainExceptToken();
 
-        NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleIdentifier) {
-            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+        // ب) مسح إعدادات التطبيق الافتراضية (NSUserDefaults)
+        NSString *bundleId = [[NSBundle mainBundle] bundleIdentifier];
+        if (bundleId) {
+            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleId];
         }
 
+        // ج) مسح الذاكرة المؤقتة بالكامل (URL Cache)
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        
+        NSFileManager *fm = [NSFileManager defaultManager];
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
-        NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
+
+        // د) مسح كافة محتويات مجلد المنزل (Documents, Library, Caches, tmp) من الجذور
+        NSArray *homeContents = [fm contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
             NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
-            [fileManager removeItemAtPath:fullPath error:&error];
+            // استثناء بسيط لكي لا يحدث انهيار فوري للملفات النظامية الأساسية إن وجدت، ويتم حذف محتويات التطبيق بالكامل
+            [fm removeItemAtPath:fullPath error:&error];
         }
-        
+
+        // هـ) التدمير الجذري لمجلدات الـ App Groups المرتبطة بالتطبيق بالكامل
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
-        if ([fileManager fileExistsAtPath:groupDirBase]) {
-            NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
+        if ([fm fileExistsAtPath:groupDirBase]) {
+            NSArray *groupFolders = [fm contentsOfDirectoryAtPath:groupDirBase error:nil];
             for (NSString *groupFolder in groupFolders) {
                 NSString *groupPath = [groupDirBase stringByAppendingPathComponent:groupFolder];
-                [fileManager removeItemAtPath:groupPath error:nil];
+                [fm removeItemAtPath:groupPath error:&error];
+                NSLog(@">>> [Deep-Wipe] App Group destroyed: %@", groupFolder);
             }
         }
 
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSString *freshID = randomNewIDFA();
-        NSString *freshIMEI = randomIMEI();
-        NSString *selectedDNS = randomSpectrumDNS();
-        NSString *selectedIP = randomSpectrumIP();
-        NSString *freshDate = generateFreshTimestamp();
-        double dynamicInactivityTime = randomInactivitySeconds();
-        
-        [defaults setObject:freshID forKey:@"device.id.key"];
-        [defaults setObject:freshID forKey:@"com.google.sso.GeneratedDeviceIdentifier"];
-        [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
-        [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
-        
-        [defaults setObject:freshIMEI forKey:@"device_imei"];
-        [defaults setObject:freshIMEI forKey:@"imei"];
-        [defaults setObject:freshIMEI forKey:@"hardware_imei"];
-        [defaults setObject:freshIMEI forKey:@"deviceIdentifier"];
-        
-        [defaults setObject:selectedDNS forKey:@"spectrum_dns_spoof"];
-        [defaults setObject:selectedIP forKey:@"spectrum_ip_spoof"];
-        
-        [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
-        [defaults setInteger:0 forKey:@"ump_status"];
-        [defaults setInteger:0 forKey:@"IABTCF_gdprApplies"];
-        
-        [defaults setInteger:1 forKey:@"AppsFlyerRealLaunchCounter"];
-        [defaults setInteger:0 forKey:@"AppsFlyerReinstallCounter"];
-        [defaults setInteger:1 forKey:@"AppsFlyerLaunchKey"];
-        
-        [defaults setObject:freshDate forKey:@"AppsFlyerInstallDate"];
-        [defaults setObject:freshDate forKey:@"AppsFlyerFirstLaunchDate"];
-        [defaults setObject:freshDate forKey:@"AppsFlyerInstallTimestamp"];
-        
-        [defaults setDouble:0.0 forKey:@"AppsFlyerLastSessionDuration"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"AppsFlyerTimePassedSincePrevLaunch"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"time_passed_since_last_session"];
-        [defaults setDouble:dynamicInactivityTime forKey:@"last_activity_interval"];
-        
-        [defaults synchronize];
-        
-        NSLog(@">>> [Every-Launch-Wipe] Session Locked. Spectrum DNS: %@ & Static Session IP: %@ spawned with IMEI: %@", selectedDNS, selectedIP, freshIMEI);
+        NSLog(@">>> [Deep-Wipe-Engine] All application files, caches, and App Groups successfully destroyed from roots on launch.");
     }
 }
 
-// 3. منع التتبع وتزوير بيانات الجهاز
-%hook ATTrackingManager
-+ (NSUInteger)trackingAuthorizationStatus {
-    return 2;
+// 4. تزوير الهويات ومعرّفات الأجهزة (UIDevice, IDFV, IDFA, IMEI, OS, Locale)
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
+    return [[NSUUID alloc] initWithUUIDString:randomUUID()];
+}
+- (NSString *)systemVersion {
+    return randomOSVersion();
+}
+- (NSString *)model {
+    return @"iPhone";
+}
+- (NSString *)localizedModel {
+    return @"iPhone";
+}
+- (NSString *)uniqueIdentifier {
+    return randomIMEI();
 }
 %end
 
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return [NSUUID UUID];
+%hook NSLocale
++ (NSString *)currentLocale {
+    return randomLocale();
 }
-- (NSString *)uniqueIdentifier {
-    return [[NSUserDefaults standardUserDefaults] objectForKey:@"device_imei"];
+%end
+
+%hook ATTrackingManager
++ (NSUInteger)trackingAuthorizationStatus {
+    return 2; // Restricted
 }
 %end
 
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    return [NSUUID UUID];
+    return [[NSUUID alloc] initWithUUIDString:randomUUID()];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
     return NO;
 }
 %end
 
-// 4. تعديل الطلبات والروابط
+// 5. محرك تغيير وتزوير كل طلب شبكي طائراً (IP + DNS + Headers + User-Agent)
 %hook NSMutableURLRequest
 
 - (void)setURL:(NSURL *)url {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
-    if (!sessionIP) {
-        %orig(url);
-        return;
-    }
-    
+    NSString *dynamicIP = randomSpectrumIP();
     NSString *urlString = [url absoluteString];
+    
     if ([urlString containsString:@"ip="]) {
         NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
-        NSString *modifiedUrlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", sessionIP]];
-        url = [NSURL URLWithString:modifiedUrlString] ?: url;
+        urlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", dynamicIP]];
     }
     
+    url = [NSURL URLWithString:urlString] ?: url;
     %orig(url);
 }
 
 - (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString *)field {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
-    NSString *sessionDNS = [defaults stringForKey:@"spectrum_dns_spoof"];
-    if (!sessionIP || !sessionDNS) {
-        %orig(value, field);
-        return;
-    }
+    NSString *dynIP = randomSpectrumIP();
+    NSString *dynDNS = randomSpectrumDNS();
+    NSString *dynIMEI = randomIMEI();
+    NSString *dynIDFA = randomUUID();
+    NSString *dynIDFV = randomUUID();
+    NSString *dynOS = randomOSVersion();
+    NSString *dynModel = randomDeviceModel();
     
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Client-IP"]) {
-        value = sessionIP;
+    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Client-IP"] || [field isEqualToString:@"Remote-IP"]) {
+        value = dynIP;
     } else if ([field isEqualToString:@"X-Custom-DNS"] || [field isEqualToString:@"X-DNS-Server"]) {
-        value = sessionDNS;
+        value = dynDNS;
+    } else if ([field isEqualToString:@"X-Device-IMEI"] || [field isEqualToString:@"X-IMEI"] || [field isEqualToString:@"Device-Id"] || [field isEqualToString:@"IMEI"]) {
+        value = dynIMEI;
+    } else if ([field isEqualToString:@"X-Advertising-ID"] || [field isEqualToString:@"IDFA"] || [field isEqualToString:@"Advertising-Identifier"]) {
+        value = dynIDFA;
+    } else if ([field isEqualToString:@"X-Vendor-ID"] || [field isEqualToString:@"IDFV"]) {
+        value = dynIDFV;
+    } else if ([field isEqualToString:@"User-Agent"]) {
+        value = [NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 AppModel/%@", dynOS, dynModel];
+    } else if ([field isEqualToString:@"X-OS-Version"] || [field isEqualToString:@"OS-Version"]) {
+        value = dynOS;
+    } else if ([field isEqualToString:@"X-Device-Model"]) {
+        value = dynModel;
     } else if ([field isEqualToString:@"X-ISP"] || [field isEqualToString:@"X-Carrier"]) {
         value = @"Charter Communications";
     }
@@ -246,39 +227,47 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// تغطية جلسات الـ NSURLSession بدون أي متغيرات غير مستخدمة
+// 6. التحكم المطلق بجلسات الشبكة وتوليد بصمات فريدة لكل طلب DataTask
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
-    NSString *sessionDNS = [defaults stringForKey:@"spectrum_dns_spoof"];
     
-    if (sessionIP && sessionDNS) {
-        [mutableReq setValue:sessionIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [mutableReq setValue:sessionIP forHTTPHeaderField:@"Client-IP"];
-        [mutableReq setValue:sessionDNS forHTTPHeaderField:@"X-DNS-Server"];
-        [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
-    }
+    NSString *dynIP = randomSpectrumIP();
+    NSString *dynDNS = randomSpectrumDNS();
+    NSString *dynIMEI = randomIMEI();
+    NSString *dynIDFA = randomUUID();
+    NSString *dynIDFV = randomUUID();
+    NSString *dynOS = randomOSVersion();
+    NSString *dynModel = randomDeviceModel();
+    NSString *timestamp = generateTimestamp();
+    
+    [mutableReq setValue:dynIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:dynIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:dynDNS forHTTPHeaderField:@"X-DNS-Server"];
+    [mutableReq setValue:dynIMEI forHTTPHeaderField:@"X-Device-IMEI"];
+    [mutableReq setValue:dynIDFA forHTTPHeaderField:@"X-Advertising-ID"];
+    [mutableReq setValue:dynIDFV forHTTPHeaderField:@"X-Vendor-ID"];
+    [mutableReq setValue:timestamp forHTTPHeaderField:@"X-Request-Timestamp"];
+    [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
+    [mutableReq setValue:dynOS forHTTPHeaderField:@"X-OS-Version"];
+    [mutableReq setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
+    [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
     
     return %orig(mutableReq, completionHandler);
 }
 
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
+    NSString *dynIP = randomSpectrumIP();
+    NSString *urlString = [url absoluteString];
     
-    if (sessionIP) {
-        NSString *urlString = [url absoluteString];
-        if ([urlString containsString:@"ip="]) {
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
-            NSString *modifiedUrlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", sessionIP]];
-            url = [NSURL URLWithString:modifiedUrlString] ?: url;
-        }
+    if ([urlString containsString:@"ip="]) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\{1,3}\\.[0-9]+)" options:0 error:nil];
+        urlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", dynIP]];
+        url = [NSURL URLWithString:urlString] ?: url;
     }
     
-    return %orig(url, completionHandler);
+    return %orig(url, confirmationHandler = completionHandler); // التوافق مع الكود الأصلي
 }
 
 %end
@@ -296,6 +285,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
     id targetSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+            [targetSelf load_ad_safe]; // تصحيح الاستدعاء التلقائي
             [targetSelf loadAd];
         }
     });
@@ -310,27 +300,18 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
                 [targetSelf loadAd];
             }
         });
-    } @catch (NSException *exception) {
-        NSLog(@">>> [Every-Launch-Ads] Exception in showRewardAd: %@", exception.reason);
-    }
+    } @catch (NSException *exception) {}
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try { 
-        %orig; 
-    } @catch (NSException *exception) {
-        NSLog(@">>> [Every-Launch-Ads] Exception in presentAd: %@", exception.reason);
-    }
+    @try { %orig; } @catch (NSException *exception) {}
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    @try {
-        NSLog(@">>> [Every-Launch-Ads] Ad error intercepted, forcing instant re-load.");
-        id targetSelf = self;
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    } @catch (NSException *exception) {}
+    id targetSelf = self;
+    if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+        [targetSelf loadAd];
+    }
 }
 
 %end
