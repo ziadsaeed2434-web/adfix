@@ -4,6 +4,7 @@
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <objc/runtime.h>
 #import <netdb.h>
+#import <arpa/inet.h>
 
 // إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
 @interface ActivatorAdService : NSObject
@@ -54,37 +55,37 @@ static NSString *randomNewIDFA() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// دالة لتوليد رقم IMEI وهمي جديد (15 رقم بمعيار صحيح)
+// دالة لتوليد رقم IMEI وهمي جديد
 static NSString *randomIMEI() {
     int r1 = 10 + arc4random_uniform(89);
     long long r2 = 10000000000LL + (long long)(arc4random_uniform(900000000));
     return [NSString stringWithFormat:@"%d%lld", r1, r2];
 }
 
-// سيرفرات DNS حقيقية تابعة لشركة Spectrum (Charter / Time Warner)
+// سيرفرات DNS حقيقية تابعة لشركة Spectrum
 static NSString *randomSpectrumDNS() {
     NSArray *spectrumDNSList = @[
-        @"71.252.0.12",   // Spectrum / Charter Primary
-        @"71.243.0.12",   // Spectrum / Charter Secondary
-        @"209.18.47.61",  // Spectrum / Time Warner Cable
-        @"209.18.47.62"   // Spectrum / Time Warner Cable
+        @"71.252.0.12",
+        @"71.243.0.12",
+        @"209.18.47.61",
+        @"209.18.47.62"
     ];
     int index = arc4random_uniform((uint32_t)[spectrumDNSList count]);
     return spectrumDNSList[index];
 }
 
-// توليد IP أمريكي حقيقي مأخوذ حصرياً من نطاقات (Subnets) شركة Spectrum (Charter Communications)
+// توليد IP أمريكي حقيقي من نطاقات Spectrum
 static NSString *randomSpectrumIP() {
     NSArray *spectrumSubnets = @[
-        @"24.24",      // Spectrum ASN
-        @"24.160",     // Spectrum ASN
-        @"65.24",      // Spectrum ASN
-        @"66.192",     // Spectrum ASN
-        @"67.240",     // Spectrum ASN
-        @"68.172",     // Spectrum ASN
-        @"71.64",      // Spectrum ASN
-        @"75.128",     // Spectrum ASN
-        @"97.100"      // Spectrum ASN
+        @"24.24",      
+        @"24.160",     
+        @"65.24",      
+        @"66.192",     
+        @"67.240",     
+        @"68.172",     
+        @"71.64",      
+        @"75.128",     
+        @"97.100"      
     ];
     NSString *subnet = spectrumSubnets[arc4random_uniform((uint32_t)[spectrumSubnets count])];
     return [NSString stringWithFormat:@"%@.%d.%d", subnet, arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
@@ -101,7 +102,7 @@ static NSString *generateFreshTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. التنفيذ في كل إقلاع للتطبيق (Constructor يعمل مع كل فتحه جديدة)
+// 2. التنفيذ في كل إقلاع للتطبيق (توليد آيبي وجلسة جديدة ثابتة حتى الإغلاق)
 static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaunch() {
     @autoreleasepool {
         clearKeychainExceptToken();
@@ -138,7 +139,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         NSString *freshID = randomNewIDFA();
         NSString *freshIMEI = randomIMEI();
         NSString *selectedDNS = randomSpectrumDNS();
-        NSString *selectedIP = randomSpectrumIP();
+        NSString *selectedIP = randomSpectrumIP(); // آيبي ثابت لهذه الجلسة فقط
         NSString *freshDate = generateFreshTimestamp();
         double dynamicInactivityTime = randomInactivitySeconds();
         
@@ -152,7 +153,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         [defaults setObject:freshIMEI forKey:@"hardware_imei"];
         [defaults setObject:freshIMEI forKey:@"deviceIdentifier"];
         
-        // حفظ إعدادات شبكة Spectrum
+        // تثبيت الآيبي والـ DNS طوال فترة فتح هذه الجلسة
         [defaults setObject:selectedDNS forKey:@"spectrum_dns_spoof"];
         [defaults setObject:selectedIP forKey:@"spectrum_ip_spoof"];
         
@@ -175,11 +176,11 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         
         [defaults synchronize];
         
-        NSLog(@">>> [Every-Launch-Wipe] Sandbox wiped. Spectrum DNS: %@ & Spectrum IP: %@ spawned with IMEI: %@", selectedDNS, selectedIP, freshIMEI);
+        NSLog(@">>> [Every-Launch-Wipe] Session Locked. Spectrum DNS: %@ & Static Session IP: %@ spawned with IMEI: %@", selectedDNS, selectedIP, freshIMEI);
     }
 }
 
-// 3. فرض حالة رفض التتبع على مستوى النظام
+// 3. منع التتبع وتزوير بيانات الجهاز
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
     return 2;
@@ -204,23 +205,38 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// حقن وتزوير الشبكة لتبدو كعميل Spectrum منزلي حقيقي
+// 4. استخدام الآيبي الثابت للجلسة الحالية وتطبيق التعديلات على كافة الطلبات والروابط
 %hook NSMutableURLRequest
+
+- (void)setURL:(NSURL *)url {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
+    if (!sessionIP) return %orig(url);
+    
+    NSString *urlString = [url absoluteString];
+    if ([urlString containsString:@"ip="]) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
+        NSString *modifiedUrlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", sessionIP]];
+        url = [NSURL URLWithString:modifiedUrlString] ?: url;
+    }
+    
+    %orig(url);
+}
+
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *spoofedIP = [defaults stringForKey:@"spectrum_ip_spoof"] ?: @"24.24.15.99";
-    NSString *spoofedDNS = [defaults stringForKey:@"spectrum_dns_spoof"] ?: @"71.252.0.12";
-    
-    // حقن الآيبي
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Client-IP"]) {
-        value = spoofedIP;
-    } 
-    // حقن الـ DNS
-    else if ([field isEqualToString:@"X-Custom-DNS"] || [field isEqualToString:@"X-DNS-Server"]) {
-        value = spoofedDNS;
+    NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
+    NSString *sessionDNS = [defaults stringForKey:@"spectrum_dns_spoof"];
+    if (!sessionIP || !sessionDNS) {
+        %orig(value, field);
+        return;
     }
-    // إضافة ترويسة مزود الخدمة لمزيد من التخفي (اختياري ولكنه مفيد لبعض شبكات الإعلانات)
-    else if ([field isEqualToString:@"X-ISP"] || [field isEqualToString:@"X-Carrier"]) {
+    
+    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Client-IP"]) {
+        value = sessionIP;
+    } else if ([field isEqualToString:@"X-Custom-DNS"] || [field isEqualToString:@"X-DNS-Server"]) {
+        value = sessionDNS;
+    } else if ([field isEqualToString:@"X-ISP"] || [field isEqualToString:@"X-Carrier"]) {
         value = @"Charter Communications";
     }
 
@@ -228,21 +244,49 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// --- التحصين لإعلانات لا نهائية ---
+// تغطية جلسات الـ NSURLSession لضمان ثبات الآيبي لكل المكتبات الخارجية
+%hook NSURLSession
+
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
+    NSString *sessionDNS = [defaults stringForKey:@"spectrum_dns_spoof"];
+    
+    if (sessionIP && sessionDNS) {
+        [mutableReq setValue:sessionIP forHTTPHeaderField:@"X-Forwarded-For"];
+        [mutableReq setValue:sessionIP forHTTPHeaderField:@"Client-IP"];
+        [mutableReq setValue:sessionDNS forHTTPHeaderField:@"X-DNS-Server"];
+        [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
+    }
+    
+    return %orig(mutableReq, completionHandler);
+}
+
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    NSMutableURLRequest *mutableReq = [NSMutableURLRequest requestWithURL:url];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
+    NSString *sessionDNS = [defaults stringForKey:@"spectrum_dns_spoof"];
+    
+    if (sessionIP && sessionDNS) {
+        [mutableReq setValue:sessionIP forHTTPHeaderField:@"X-Forwarded-For"];
+        [mutableReq setValue:sessionDNS forHTTPHeaderField:@"X-DNS-Server"];
+        [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
+    }
+    
+    return %orig(mutableReq, completionHandler);
+}
+
+%end
+
+// --- التحصين المطلق لإعلانات مضمونة بدون حظر ---
 %hook ActivatorAdService
 
-- (BOOL)isReady {
-    return YES;
-}
-- (BOOL)isAdReady {
-    return YES;
-}
-- (BOOL)canShowAd {
-    return YES;
-}
-- (BOOL)hasAdLoaded {
-    return YES;
-}
+- (BOOL)isReady { return YES; }
+- (BOOL)isAdReady { return YES; }
+- (BOOL)canShowAd { return YES; }
+- (BOOL)hasAdLoaded { return YES; }
 
 - (void)loadAd {
     %orig;
@@ -263,15 +307,11 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
                 [targetSelf loadAd];
             }
         });
-    } @catch (NSException *exception) {
-        NSLog(@">>> [Every-Launch-Ads] Exception in showRewardAd: %@", exception.reason);
-    }
+    } @catch (NSException *exception) {}
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try {
-        %orig;
-    } @catch (NSException *exception) {}
+    @try { %orig; } @catch (NSException *exception) {}
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
