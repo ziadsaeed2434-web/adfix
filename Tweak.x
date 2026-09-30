@@ -246,7 +246,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// تغطية جلسات الـ NSURLSession بالكامل بدون أخطاء توافق أنواع
+// تغطية جلسات الـ NSURLSession بالأنواع الصحيحة 100% بدون أي أخطاء مطبعية
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -266,19 +266,21 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSMutableURLRequest *mutableReq = [NSMutableURLRequest requestWithURL:url];
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
     NSString *sessionDNS = [defaults stringForKey:@"spectrum_dns_spoof"];
     
-    if (sessionIP && sessionDNS) {
-        [mutableReq setValue:sessionIP forHTTPHeaderField:@"X-Forwarded-For"];
-        [mutableReq setValue:sessionDNS forHTTPHeaderField:@"X-DNS-Server"];
-        [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
+    if (sessionIP) {
+        NSString *urlString = [url absoluteString];
+        if ([urlString containsString:@"ip="]) {
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
+            NSString *modifiedUrlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", sessionIP]];
+            url = [NSURL URLWithString:modifiedUrlString] ?: url;
+        }
     }
     
-    // تم التصحيح هنا ليمرر mutableReq الصحيح والمتوافق مع التوقيع البرمجي
-    return %orig(mutableReq, completionHandler);
+    // تمرير الـ url الأصلي من نوع NSURL بالشكل الصحيح ودون أخطاء توافق
+    return %orig(url, completionHandler);
 }
 
 %end
