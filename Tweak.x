@@ -3,6 +3,7 @@
 #import <AdSupport/AdSupport.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <objc/runtime.h>
+#import <netdb.h>
 
 // إعلان مسبق شامل لكل الدوال المحتملة لمدير الإعلانات
 @interface ActivatorAdService : NSObject
@@ -55,14 +56,38 @@ static NSString *randomNewIDFA() {
 
 // دالة لتوليد رقم IMEI وهمي جديد (15 رقم بمعيار صحيح)
 static NSString *randomIMEI() {
-    // توليد 15 رقم عشوائي بنمط IMEI مقبول
     int r1 = 10 + arc4random_uniform(89);
     long long r2 = 10000000000LL + (long long)(arc4random_uniform(900000000));
     return [NSString stringWithFormat:@"%d%lld", r1, r2];
 }
 
-static NSString *randomEuropeanIP() {
-    return [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+// سيرفرات DNS حقيقية تابعة لشركة Spectrum (Charter / Time Warner)
+static NSString *randomSpectrumDNS() {
+    NSArray *spectrumDNSList = @[
+        @"71.252.0.12",   // Spectrum / Charter Primary
+        @"71.243.0.12",   // Spectrum / Charter Secondary
+        @"209.18.47.61",  // Spectrum / Time Warner Cable
+        @"209.18.47.62"   // Spectrum / Time Warner Cable
+    ];
+    int index = arc4random_uniform((uint32_t)[spectrumDNSList count]);
+    return spectrumDNSList[index];
+}
+
+// توليد IP أمريكي حقيقي مأخوذ حصرياً من نطاقات (Subnets) شركة Spectrum (Charter Communications)
+static NSString *randomSpectrumIP() {
+    NSArray *spectrumSubnets = @[
+        @"24.24",      // Spectrum ASN
+        @"24.160",     // Spectrum ASN
+        @"65.24",      // Spectrum ASN
+        @"66.192",     // Spectrum ASN
+        @"67.240",     // Spectrum ASN
+        @"68.172",     // Spectrum ASN
+        @"71.64",      // Spectrum ASN
+        @"75.128",     // Spectrum ASN
+        @"97.100"      // Spectrum ASN
+    ];
+    NSString *subnet = spectrumSubnets[arc4random_uniform((uint32_t)[spectrumSubnets count])];
+    return [NSString stringWithFormat:@"%@.%d.%d", subnet, arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 static double randomInactivitySeconds() {
@@ -79,23 +104,19 @@ static NSString *generateFreshTimestamp() {
 // 2. التنفيذ في كل إقلاع للتطبيق (Constructor يعمل مع كل فتحه جديدة)
 static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaunch() {
     @autoreleasepool {
-        // أ) حماية التوكن في الكيشين
         clearKeychainExceptToken();
 
-        // ب) مسح نطاق الـ NSUserDefaults بالكامل
         NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
         if (bundleIdentifier) {
             [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
         }
 
-        // ج) تفريغ كاش الشبكة بالكامل
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
         [[NSURLCache sharedURLCache] setMemoryCapacity:0];
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
         
-        // د) مسح الـ Sandbox الرئيسي بالكامل في كل إقلاع
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
         NSArray *homeContents = [fileManager contentsOfDirectoryAtPath:homeDir error:&error];
@@ -104,7 +125,6 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
             [fileManager removeItemAtPath:fullPath error:&error];
         }
         
-        // هـ) مسح كل الـ App Groups المرتبطة في كل إقلاع
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
         if ([fileManager fileExistsAtPath:groupDirBase]) {
             NSArray *groupFolders = [fileManager contentsOfDirectoryAtPath:groupDirBase error:nil];
@@ -114,10 +134,11 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
             }
         }
 
-        // و) حقن هويات، بصمات و IMEI جديد بالكامل كأنه جهاز جديد مع كل إقلاع
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *freshID = randomNewIDFA();
         NSString *freshIMEI = randomIMEI();
+        NSString *selectedDNS = randomSpectrumDNS();
+        NSString *selectedIP = randomSpectrumIP();
         NSString *freshDate = generateFreshTimestamp();
         double dynamicInactivityTime = randomInactivitySeconds();
         
@@ -126,11 +147,14 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         [defaults setObject:freshID forKey:@"AppsFlyerUserId"];
         [defaults setObject:freshID forKey:@"com.firebase.installations.app_id_to_fiid_enforcement"];
         
-        // حقن الـ IMEI الوهمي في مفاتيح التخزين الشائعة
         [defaults setObject:freshIMEI forKey:@"device_imei"];
         [defaults setObject:freshIMEI forKey:@"imei"];
         [defaults setObject:freshIMEI forKey:@"hardware_imei"];
         [defaults setObject:freshIMEI forKey:@"deviceIdentifier"];
+        
+        // حفظ إعدادات شبكة Spectrum
+        [defaults setObject:selectedDNS forKey:@"spectrum_dns_spoof"];
+        [defaults setObject:selectedIP forKey:@"spectrum_ip_spoof"];
         
         [defaults setInteger:2 forKey:@"ATT_Tracking_Status"];
         [defaults setInteger:0 forKey:@"ump_status"];
@@ -151,11 +175,11 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         
         [defaults synchronize];
         
-        NSLog(@">>> [Every-Launch-Wipe] Sandbox, App Groups & Caches wiped. Fresh environment & IMEI: %@ spawned with ID: %@", freshIMEI, freshID);
+        NSLog(@">>> [Every-Launch-Wipe] Sandbox wiped. Spectrum DNS: %@ & Spectrum IP: %@ spawned with IMEI: %@", selectedDNS, selectedIP, freshIMEI);
     }
 }
 
-// 3. فرض حالة رفض التتبع على مستوى النظام برمجياً
+// 3. فرض حالة رفض التتبع على مستوى النظام
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
     return 2;
@@ -165,6 +189,9 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [NSUUID UUID];
+}
+- (NSString *)uniqueIdentifier {
+    return [[NSUserDefaults standardUserDefaults] objectForKey:@"device_imei"];
 }
 %end
 
@@ -177,37 +204,42 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// اعتراض دوال الـ UIDevice لو طلب التطبيق معرفات إضافية
-%hook UIDevice
-- (NSString *)uniqueIdentifier {
-    return [[NSUserDefaults standardUserDefaults] objectForKey:@"device_imei"];
-}
-%end
-
+// حقن وتزوير الشبكة لتبدو كعميل Spectrum منزلي حقيقي
 %hook NSMutableURLRequest
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"]) {
-        value = randomEuropeanIP();
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *spoofedIP = [defaults stringForKey:@"spectrum_ip_spoof"] ?: @"24.24.15.99";
+    NSString *spoofedDNS = [defaults stringForKey:@"spectrum_dns_spoof"] ?: @"71.252.0.12";
+    
+    // حقن الآيبي
+    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Client-IP"]) {
+        value = spoofedIP;
+    } 
+    // حقن الـ DNS
+    else if ([field isEqualToString:@"X-Custom-DNS"] || [field isEqualToString:@"X-DNS-Server"]) {
+        value = spoofedDNS;
     }
+    // إضافة ترويسة مزود الخدمة لمزيد من التخفي (اختياري ولكنه مفيد لبعض شبكات الإعلانات)
+    else if ([field isEqualToString:@"X-ISP"] || [field isEqualToString:@"X-Carrier"]) {
+        value = @"Charter Communications";
+    }
+
     %orig(value, field);
 }
 %end
 
-// --- التحصين المطلق لإعلانات مضمونة ولا نهائية في كل إقلاع ---
+// --- التحصين لإعلانات لا نهائية ---
 %hook ActivatorAdService
 
 - (BOOL)isReady {
     return YES;
 }
-
 - (BOOL)isAdReady {
     return YES;
 }
-
 - (BOOL)canShowAd {
     return YES;
 }
-
 - (BOOL)hasAdLoaded {
     return YES;
 }
@@ -225,15 +257,12 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 - (void)showRewardAd {
     @try {
         %orig;
-        NSLog(@">>> [Every-Launch-Ads] showRewardAd executed. Pre-fetching next ad instantly.");
-        
         id targetSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if ([targetSelf respondsToSelector:@selector(loadTab)] || [targetSelf respondsToSelector:@selector(loadAd)]) {
+            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
                 [targetSelf loadAd];
             }
         });
-        
     } @catch (NSException *exception) {
         NSLog(@">>> [Every-Launch-Ads] Exception in showRewardAd: %@", exception.reason);
     }
@@ -242,13 +271,10 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 - (void)presentAdFromViewController:(UIViewController *)viewController {
     @try {
         %orig;
-    } @catch (NSException *exception) {
-        NSLog(@">>> [Every-Launch-Ads] Exception caught in presentAdFromViewController: %@", exception.reason);
-    }
+    } @catch (NSException *exception) {}
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    NSLog(@">>> [Every-Launch-Ads] Ad error intercepted, forcing instant re-load.");
     id targetSelf = self;
     if ([targetSelf respondsToSelector:@selector(loadAd)]) {
         [targetSelf loadAd];
