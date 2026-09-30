@@ -79,7 +79,7 @@ static NSString *randomDeviceModel() {
     return models[arc4random_uniform((uint32_t)[models count])];
 }
 
-static NSString *randomLocale() {
+static NSString *randomLocaleIdentifier() {
     NSArray *locales = @[@"en_US", @"en_GB", @"en_CA", @"es_US", @"fr_FR"];
     return locales[arc4random_uniform((uint32_t)[locales count])];
 }
@@ -126,7 +126,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
     }
 }
 
-// 4. تزوير الهويات ومعرّفات الأجهزة
+// 4. تزوير الهويات ومعرّفات الأجهزة (بشكل آمن تماماً بدون كراش)
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
@@ -146,8 +146,8 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 %end
 
 %hook NSLocale
-+ (NSString *)currentLocale {
-    return randomLocale();
++ (NSLocale *)currentLocale {
+    return [[NSLocale alloc] initWithLocaleIdentifier:randomLocaleIdentifier()];
 }
 %end
 
