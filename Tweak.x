@@ -225,7 +225,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
     %orig(url);
 }
 
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
+- (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString *)field {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
     NSString *sessionDNS = [defaults stringForKey:@"spectrum_dns_spoof"];
@@ -246,7 +246,7 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 }
 %end
 
-// تغطية جلسات الـ NSURLSession بالأنواع الصحيحة 100% بدون أي أخطاء مطبعية
+// تغطية جلسات الـ NSURLSession بدون أي متغيرات غير مستخدمة
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -268,7 +268,6 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *sessionIP = [defaults stringForKey:@"spectrum_ip_spoof"];
-    NSString *sessionDNS = [defaults stringForKey:@"spectrum_dns_spoof"];
     
     if (sessionIP) {
         NSString *urlString = [url absoluteString];
@@ -279,7 +278,6 @@ static __attribute__((constructor)) void wipeAndSpawnFreshEnvironmentOnEveryLaun
         }
     }
     
-    // تمرير الـ url الأصلي من نوع NSURL بالشكل الصحيح ودون أخطاء توافق
     return %orig(url, completionHandler);
 }
 
