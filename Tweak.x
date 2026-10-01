@@ -16,6 +16,9 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
+// متغير عام لتجميد التطبيق فور الوصول لـ 395 نقطة بالضبط
+static BOOL isApplicationFrozen = NO;
+
 // مسار ملف الحفظ الخاص بالمؤقت
 static NSString *getCoolDownFilePath() {
     NSString *homeDir = NSHomeDirectory();
@@ -52,8 +55,10 @@ static void clearKeychainExceptToken() {
     }
 }
 
-// فحص حالة الانتظار المؤقت (10 دقائق)
+// فحص حالة الانتظار المؤقت أو التجميد
 static BOOL isCurrentlyInCoolDownPeriod() {
+    if (isApplicationFrozen) return YES;
+    
     NSString *path = getCoolDownFilePath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
     if (dict) {
@@ -168,36 +173,6 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
     }
 }
 
-// مراقبة وفك تشفير الـ JSON مباشرة لالتقاط هيكل النقاط بغض النظر عن مكتبة الشبكات (Alamofire أو غيرها)
-%hook NSJSONSerialization
-
-+ (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
-    id json = %orig(data, opt, error);
-    if (json && [json isKindOfClass:[NSDictionary class]]) {
-        @try {
-            NSDictionary *dataDict = json[@"data"];
-            if (dataDict && [dataDict isKindOfClass:[NSDictionary class]]) {
-                NSDictionary *pointsData = dataDict[@"pointsData"];
-                if (pointsData && [pointsData isKindOfClass:[NSDictionary class]]) {
-                    id pointsVal = pointsData[@"points"];
-                    if (pointsVal && [pointsVal respondsToSelector:@selector(integerValue)]) {
-                        NSInteger currentPoints = [pointsVal integerValue];
-                        // التوقف حصرياً عند وصول النقاط إلى 395
-                        if (currentPoints == 395) {
-                            NSTimeInterval coolDownDuration = 10 * 60; // 10 دقائق كاملة
-                            NSTimeInterval endTime = [[NSDate date] timeIntervalSince1970] + coolDownDuration;
-                            setCoolDownEndTime(endTime);
-                        }
-                    }
-                }
-            }
-        } @catch (NSException *exception) {}
-    }
-    return json;
-}
-
-%end
-
 // تزوير الهويات ومعرّفات الأجهزة
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
@@ -291,10 +266,10 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 %end
 
-// تزوير الهيدرز العامة للطلبات
+// اعتراض وتتبع بيانات NSURLSession الخام لفحص النقاط وتجميد التطبيق عند 395 حصرياً
 %hook NSURLSession
 
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error))completionHandler {
     if (isCurrentlyInCoolDownPeriod()) {
         return %orig(request, ^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
             NSError *coolDownError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil];
@@ -325,10 +300,39 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
     [mutableReq setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
     [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
     
-    return %orig(mutableReq, completionHandler);
+    void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+        
+        if (data && !isApplicationFrozen) {
+            @try {
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                if (json && [json isKindOfClass:[NSDictionary class]]) {
+                    NSDictionary *dataDict = json[@"data"];
+                    NSDictionary *pointsData = dataDict[@"pointsData"];
+                    id pointsVal = pointsData[@"points"] ?: json[@"points"] ?: json[@"point"];
+                    
+                    if (pointsVal && [pointsVal respondsToSelector:@selector(integerValue)]) {
+                        NSInteger currentPoints = [pointsVal integerValue];
+                        // التجميد فقط عندما تصبح النقاط تساوي 395 بالضبط
+                        if (currentPoints == 395) {
+                            isApplicationFrozen = YES;
+                            NSTimeInterval coolDownDuration = 10 * 60; // 10 دقائق
+                            NSTimeInterval endTime = [[NSDate date] timeIntervalSince1970] + coolDownDuration;
+                            setCoolDownEndTime(endTime);
+                        }
+                    }
+                }
+            } @catch (NSException *exception) {}
+        }
+        
+        if (completionHandler) {
+            completionHandler(data, response, error);
+        }
+    };
+    
+    return %orig(mutableReq, wrappedHandler);
 }
 
-- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error))completionHandler {
     if (isCurrentlyInCoolDownPeriod()) {
         return %orig(url, ^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
             NSError *coolDownError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil];
@@ -337,7 +341,6 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
     }
     
     NSString *urlString = [url absoluteString];
-    
     if ([urlString containsString:@"ip="]) {
         NSString *dynIP = randomSpectrumIP();
         NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
@@ -345,7 +348,34 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
         url = [NSURL URLWithString:urlString] ?: url;
     }
     
-    return %orig(url, completionHandler);
+    void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+        if (data && !isApplicationFrozen) {
+            @try {
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                if (json && [json isKindOfClass:[NSDictionary class]]) {
+                    NSDictionary *dataDict = json[@"data"];
+                    NSDictionary *pointsData = dataDict[@"pointsData"];
+                    id pointsVal = pointsData[@"points"] ?: json[@"points"] ?: json[@"point"];
+                    
+                    if (pointsVal && [pointsVal respondsToSelector:@selector(integerValue)]) {
+                        NSInteger currentPoints = [pointsVal integerValue];
+                        // التجميد فقط عندما تصبح النقاط تساوي 395 بالضبط
+                        if (currentPoints == 395) {
+                            isApplicationFrozen = YES;
+                            NSTimeInterval coolDownDuration = 10 * 60; // 10 دقائق
+                            NSTimeInterval endTime = [[NSDate date] timeIntervalSince1970] + coolDownDuration;
+                            setCoolDownEndTime(endTime);
+                        }
+                    }
+                }
+            } @catch (NSException *exception) {}
+        }
+        if (completionHandler) {
+            completionHandler(data, response, error);
+        }
+    };
+    
+    return %orig(url, wrappedHandler);
 }
 
 %end
