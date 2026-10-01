@@ -25,17 +25,17 @@ void showUniversalLog(NSString *logText) {
         if (keyWindow) {
             UIView *overlay = [keyWindow viewWithTag:999888];
             if (!overlay) {
-                overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 35, keyWindow.bounds.size.width - 20, 280)];
+                overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 35, keyWindow.bounds.size.width - 20, 300)];
                 overlay.tag = 999888;
-                overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.92];
+                overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.94];
                 overlay.layer.cornerRadius = 8;
                 
                 universalLogView = [[UITextView alloc] initWithFrame:CGRectMake(5, 5, overlay.bounds.size.width - 10, overlay.bounds.size.height - 10)];
                 universalLogView.backgroundColor = [UIColor clearColor];
                 universalLogView.textColor = [UIColor orangeColor];
-                universalLogView.font = [UIFont fontWithName:@"Courier" size:9];
+                universalLogView.font = [UIFont fontWithName:@"Courier" size:8.5];
                 universalLogView.editable = NO;
-                universalLogView.text = @"[+] Ultimate Comprehensive Monitor Active...\n";
+                universalLogView.text = @"[+] Full Request/Response Monitor Active...\n";
                 
                 [overlay addSubview:universalLogView];
                 [keyWindow addSubview:overlay];
@@ -49,63 +49,95 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
-// 1. مراقبة التخزين المحلي السريع NSUserDefaults
-%hook NSUserDefaults
-
-- (void)setObject:(id)value forKey:(NSString *)defaultName {
-    %orig;
-    NSString *log = [NSString stringWithFormat:@"[Defaults Object] Key: %@ = %@", defaultName, value];
-    showUniversalLog(log);
-}
-
-- (void)setInteger:(NSInteger)value forKey:(NSString *)defaultName {
-    %orig;
-    NSString *log = [NSString stringWithFormat:@"[Defaults Integer] Key: %@ = %ld", defaultName, (long)value];
-    showUniversalLog(log);
-}
-
-%end
-
-// 2. مراقبة كتابة أي ملف محلياً في التطبيق
-%hook NSData
-
-- (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile error:(NSError **)error {
-    BOOL result = %orig;
-    if (result) {
-        NSString *contentStr = [[NSString alloc] initWithData:self encoding:NSUTF8StringEncoding];
-        NSString *fileName = [path lastPathComponent];
-        NSString *log = [NSString stringWithFormat:@"[File Write] File: %@\nPath: %@\nContent: %@", fileName, path, contentStr ? contentStr : [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long)self.length]];
-        showUniversalLog(log);
+// دالة لمعالجة الطلب والاستجابة معاً (بما في ذلك بيانات الـ POST المرسلة)
+static void handleRequestAndResponse(NSURLRequest *request, NSData *responseData, NSURLResponse *response, NSError *error) {
+    NSString *urlString = [request.URL absoluteString];
+    if (!urlString) {
+        urlString = [response.URL absoluteString];
     }
-    return result;
-}
-
-- (BOOL)writeToFile:(NSString *)path options:(NSDataWritingOptions)writeOptionsMask error:(NSError **)error {
-    BOOL result = %orig;
-    if (result) {
-        NSString *contentStr = [[NSString alloc] initWithData:self encoding:NSUTF8StringEncoding];
-        NSString *fileName = [path lastPathComponent];
-        NSString *log = [NSString stringWithFormat:@"[File Write Opt] File: %@\nContent: %@", fileName, contentStr ? contentStr : [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long)self.length]];
-        showUniversalLog(log);
+    if (!urlString) {
+        urlString = @"<Unknown URL>";
     }
-    return result;
-}
-
-%end
-
-// 3. مراقبة تحليل الـ JSON محلياً
-%hook NSJSONSerialization
-
-+ (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
-    id result = %orig;
-    if (result && [result isKindOfClass:[NSDictionary class]]) {
-        NSString *jsonStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        if (jsonStr && (([jsonStr containsString:@"point"] || [jsonStr containsString:@"score"] || [jsonStr containsString:@"coin"]))) {
-            NSString *log = [NSString stringWithFormat:@"[JSON Points Intercept]:\n%@", jsonStr];
-            showUniversalLog(log);
+    
+    NSString *method = request.HTTPMethod ? request.HTTPMethod : @"GET";
+    
+    // استخراج البيانات المرسلة في الـ POST (إن وجدت)
+    NSString *requestBodyString = @"";
+    NSData *bodyData = request.HTTPBody;
+    if (bodyData) {
+        requestBodyString = [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding];
+        if (!requestBodyString) {
+            requestBodyString = [NSString stringWithFormat:@"<Binary Data Size: %lu>", (unsigned long)bodyData.length];
+        } else if (requestBodyString.length > 200) {
+            requestBodyString = [requestBodyString substringToIndex:200];
         }
     }
-    return result;
+    
+    // استخراج بيانات الاستجابة (Response)
+    NSString *responseString = @"";
+    if (responseData) {
+        responseString = [[NSString alloc] initWithData:responseData encoding:NSUTF8StringEncoding];
+        if (!responseString) {
+            responseString = [NSString stringWithFormat:@"<Binary Data Size: %lu>", (unsigned long)responseData.length];
+        } else if (responseString.length > 300) {
+            responseString = [responseString substringToIndex:300];
+        }
+    } else if (error) {
+        responseString = [NSString stringWithFormat:@"Error: %@", error.localizedDescription];
+    }
+    
+    NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+    NSInteger statusCode = [httpResponse statusCode];
+    
+    // بناء النص المعروض في النافذة
+    NSString *log = [NSString stringWithFormat:@"[%@] Status: %ld\nURL: %@\nReqBody: %@\nResBody: %@", 
+                     method, (long)statusCode, urlString, 
+                     requestBodyString.length > 0 ? requestBodyString : @"<None>", 
+                     responseString.length > 0 ? responseString : @"<No Data>"];
+    
+    showUniversalLog(log);
+}
+
+%hook NSURLSession
+
+// 1. التقاط طلبات الـ URL المباشر (GET العادية)
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    NSURLRequest *request = [NSURLRequest requestWithURL:url];
+    void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+        handleRequestAndResponse(request, data, response, error);
+        if (completionHandler) {
+            completionHandler(data, response, error);
+        }
+    };
+    return %orig(url, wrappedHandler);
+}
+
+// 2. التقاط جميع طلبات الـ NSURLRequest (تشمل GET, POST, PUT وغيرها بكل تفاصيلها)
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+        handleRequestAndResponse(request, data, response, error);
+        if (completionHandler) {
+            completionHandler(data, response, error);
+        }
+    };
+    return %orig(request, wrappedHandler);
+}
+
+// 3. التقاط مهام الرفع أو إرسال البيانات الكبيرة (Upload Tasks)
+- (NSURLSessionUploadTask *)uploadTaskWithRequest:(NSURLRequest *)request fromData:(NSData *)bodyData completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    // دمج البيانات المرسلة لو لم تكن موجودة في الـ request الأصلي
+    NSMutableURLRequest *mutableReq = [request mutableCopy];
+    if (bodyData && !mutableReq.HTTPBody) {
+        mutableReq.HTTPBody = bodyData;
+    }
+    
+    void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+        handleRequestAndResponse(mutableReq, data, response, error);
+        if (completionHandler) {
+            completionHandler(data, response, error);
+        }
+    };
+    return %orig(request, bodyData, wrappedHandler);
 }
 
 %end
