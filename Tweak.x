@@ -50,20 +50,19 @@ void showUniversalLog(NSString *logText) {
 }
 
 static void handleNetworkNotification(NSNotification *notification) {
-    // استخدام الأسماء الصحيحة حسب إصدار FLEX لديك
-    FLEXNetworkRecorder *recorder = [FLEXNetworkRecorder defaultRecorder];
-    
-    // جلب المعاملات أو الرابط بالطريقة المتاحة
-    // ملاحظة: يمكنك طباعة الإشعار أو تفاصيل المعاملات المتوفرة
-    NSString *log = [NSString stringWithFormat:@"[Network Notification Received] %@", notification.name];
+    // طباعة اسم الإشعار أو تفاصيل المعامل القادم من الإشعار
+    NSString *log = [NSString stringWithFormat:@"[Network Event] %@", notification.name];
     showUniversalLog(log);
 }
 
 %ctor {
-    // تفعيل المسجل بالطريقة الصحيحة (defaultRecorder)
-    [[FLEXNetworkRecorder defaultRecorder] setEnabled:YES];
+    // تفعيل مسجل الشبكة بالطريقة المتاحة لنسخة الـ FLEX لديك
+    FLEXNetworkRecorder *recorder = [FLEXNetworkRecorder defaultRecorder];
+    if ([recorder respondsToSelector:@selector(setEnabled:)]) {
+        [recorder setEnabled:YES];
+    }
     
-    // استخدام الإشعار الصحيح المعرف في هيدر مكتبتك (kFLEXNetworkRecorderNewTransactionNotification)
+    // الاستماع لإشعارات المعاملات الجديدة
     [[NSNotificationCenter defaultCenter] addObserverForName:kFLEXNetworkRecorderNewTransactionNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
