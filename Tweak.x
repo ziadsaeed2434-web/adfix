@@ -16,6 +16,12 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
+// مسار ملف الحفظ الخاص بالمؤقت لكي لا يتم حذفه
+static NSString *getCoolDownFilePath() {
+    NSString *homeDir = NSHomeDirectory();
+    return [homeDir stringByAppendingPathComponent:@"Library/PointsCoolDown.plist"];
+}
+
 // 1. تنظيف الـ Keychain بالكامل مع الحفاظ حصرياً على مفتاح المصادقة الأساسي (tokenKey)
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
@@ -45,6 +51,56 @@ static void clearKeychainExceptToken() {
             }
         }
     }
+}
+
+// فحص حالة الانتظار المؤقت (10 دقائق) من الملف المستثنى
+static BOOL isCurrentlyInCoolDownPeriod() {
+    NSString *path = getCoolDownFilePath();
+    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+    if (dict) {
+        NSTimeInterval coolDownEnd = [dict[@"PointsCoolDownEndTime"] doubleValue];
+        if (coolDownEnd > 0) {
+            NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+            if (now < coolDownEnd) {
+                return YES; // لا يزال في فترة التوقف
+            } else {
+                [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+            }
+        }
+    }
+    return NO;
+}
+
+static void setCoolDownEndTime(NSTimeInterval endTime) {
+    NSString *path = getCoolDownFilePath();
+    NSDictionary *dict = @{@"PointsCoolDownEndTime": @(endTime)};
+    [dict writeToFile:path atomically:YES];
+}
+
+static void triggerCoolDownIfNeeded(NSData *data) {
+    if (!data) return;
+    @try {
+        NSError *error = nil;
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+        if (json && [json isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *dataDict = json[@"data"];
+            if (dataDict && [dataDict isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *pointsData = dataDict[@"pointsData"];
+                if (pointsData && [pointsData isKindOfClass:[NSDictionary class]]) {
+                    id pointsVal = pointsData[@"points"];
+                    if (pointsVal && [pointsVal respondsToSelector:@selector(integerValue)]) {
+                        NSInteger currentPoints = [pointsVal integerValue];
+                        // تفعيل التوقف عند وصول النقاط إلى 395 فقط
+                        if (currentPoints == 395) {
+                            NSTimeInterval coolDownDuration = 10 * 60; // 10 دقائق كاملة
+                            NSTimeInterval endTime = [[NSDate date] timeIntervalSince1970] + coolDownDuration;
+                            setCoolDownEndTime(endTime);
+                        }
+                    }
+                }
+            }
+        }
+    } @catch (NSException *exception) {}
 }
 
 // مولدات الهوية المتغيرة لحظياً
@@ -91,7 +147,7 @@ static NSString *generateTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. الحذف الشامل لكل محتويات الساندبوكس مع استثناء ملف LCContainerInfo.plist حصرياً
+// 2. التنفيذ الشامل مع استثناء ملف الحاوية وملف المؤقت ومفتاح الحساب حصرياً
 static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch() {
     @autoreleasepool {
         clearKeychainExceptToken();
@@ -104,20 +160,21 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
 
-        // المرور على محتويات مجلد الساندبوكس الرئيسي وحذفها بالكامل عدا الملف المستثنى
         NSArray *homeContents = [fm contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
             NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
             
-            if ([item rangeOfString:@"LCContainerInfo.plist" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                continue; // تخطي وحماية ملف الحاوية المستثنى
+            if ([item rangeOfString:@"LCContainerInfo.plist" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [item rangeOfString:@"PointsCoolDown.plist" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                continue; // حماية واستثناء ملفات الحاوية والمؤقت
             }
             
             if ([item isEqualToString:@"Library"]) {
                 NSArray *libContents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
                 for (NSString *libItem in libContents) {
-                    if ([libItem rangeOfString:@"LCContainerInfo.plist" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                        continue; // حماية الملف داخل Library أيضاً إن وجد
+                    if ([libItem rangeOfString:@"LCContainerInfo.plist" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                        [libItem rangeOfString:@"PointsCoolDown.plist" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                        continue;
                     }
                     NSString *libItemPath = [fullPath stringByAppendingPathComponent:libItem];
                     [fm removeItemAtPath:libItemPath error:&error];
@@ -182,6 +239,8 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 %hook NSMutableURLRequest
 
 - (void)setURL:(NSURL *)url {
+    if (isCurrentlyInCoolDownPeriod()) return;
+    
     NSString *dynamicIP = randomSpectrumIP();
     NSString *urlString = [url absoluteString];
     
@@ -195,6 +254,8 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 
 - (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString *)field {
+    if (isCurrentlyInCoolDownPeriod()) return;
+    
     NSString *dynIP = randomSpectrumIP();
     NSString *dynDNS = randomSpectrumDNS();
     NSString *dynIMEI = randomIMEI();
@@ -227,10 +288,30 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 %end
 
-// التحكم المطلق بجلسات الشبكة
+// التحكم المطلق بجلسات الشبكة ومراقبة طلب النقاط
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    if (isCurrentlyInCoolDownPeriod()) {
+        return %orig(request, ^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+            NSError *coolDownError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil];
+            if (completionHandler) completionHandler(nil, response, coolDownError);
+        });
+    }
+    
+    NSString *urlString = [[request URL] absoluteString];
+    BOOL isPointsEndpoint = [urlString containsString:@"/api/v1/users/additional/points/data"];
+    
+    if (isPointsEndpoint && completionHandler) {
+        void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+            if (data) {
+                triggerCoolDownIfNeeded(data);
+            }
+            completionHandler(data, response, error);
+        };
+        return %orig(request, wrappedHandler);
+    }
+    
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
     NSString *dynIP = randomSpectrumIP();
@@ -258,10 +339,17 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSString *dynIP = randomSpectrumIP();
+    if (isCurrentlyInCoolDownPeriod()) {
+        return %orig(url, ^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+            NSError *coolDownError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil];
+            if (completionHandler) completionHandler(nil, response, coolDownError);
+        });
+    }
+    
     NSString *urlString = [url absoluteString];
     
     if ([urlString containsString:@"ip="]) {
+        NSString *dynIP = randomSpectrumIP();
         NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
         urlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", dynIP]];
         url = [NSURL URLWithString:urlString] ?: url;
@@ -281,6 +369,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 - (BOOL)hasAdLoaded { return YES; }
 
 - (void)loadAd {
+    if (isCurrentlyInCoolDownPeriod()) return;
     %orig;
     id targetSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -291,6 +380,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 
 - (void)showRewardAd {
+    if (isCurrentlyInCoolDownPeriod()) return;
     @try {
         %orig;
         id targetSelf = self;
@@ -303,12 +393,14 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
+    if (isCurrentlyInCoolDownPeriod()) return;
     @try { 
         %orig; 
     } @catch (NSException *exception) {}
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
+    if (isCurrentlyInCoolDownPeriod()) return;
     @try {
         id targetSelf = self;
         if ([targetSelf respondsToSelector:@selector(loadAd)]) {
