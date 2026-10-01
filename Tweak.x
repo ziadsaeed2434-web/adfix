@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import "FLEXNetworkRecorder.h"
+#import <objc/message.h>
 
 static UITextView *universalLogView = nil;
 
@@ -50,16 +51,21 @@ void showUniversalLog(NSString *logText) {
 }
 
 static void handleNetworkNotification(NSNotification *notification) {
-    // طباعة اسم الإشعار أو تفاصيل المعامل القادم من الإشعار
     NSString *log = [NSString stringWithFormat:@"[Network Event] %@", notification.name];
     showUniversalLog(log);
 }
 
 %ctor {
-    // تفعيل مسجل الشبكة بالطريقة المتاحة لنسخة الـ FLEX لديك
+    // تفعيل المسجل باستخدام Runtime لتجنب أخطاء المترجم إذا كانت الدالة مخفية
     FLEXNetworkRecorder *recorder = [FLEXNetworkRecorder defaultRecorder];
-    if ([recorder respondsToSelector:@selector(setEnabled:)]) {
-        [recorder setEnabled:YES];
+    SEL selector = NSSelectorFromString(@selector(setEnabled:));
+    if ([recorder respondsToSelector:selector]) {
+        ((void (*)(id, SEL, BOOL))[object_getIvar(recorder, 0) methodForSelector:selector])(recorder, selector, YES);
+        // أو استخدام الطريقة الأبسط للـ Runtime:
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        [recorder performSelector:selector withObject:@(YES)];
+        #pragma clang diagnostic pop
     }
     
     // الاستماع لإشعارات المعاملات الجديدة
