@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 
 #define BLOCK_DURATION 600.0 // 10 دقائق بالثواني
-#define TARGET_POINTS 395
+#define TARGET_POINTS 20     // التعديل هنا ليصبح الحظر عند الوصول إلى 20 نقطة تماماً
 #define KEY_BLOCK_END @"block_end_timestamp"
 #define TARGET_URL @"https://tn.maildisposable.com/api/v1/users/additional/points/data"
 
@@ -19,15 +19,15 @@ void showBlockOverlay() {
             titleLabel.text = @"توقف مؤقت للتطبيق";
             titleLabel.textColor = [UIColor whiteColor];
             titleLabel.textAlignment = NSTextAlignmentCenter;
-            titleLabel.font = [UIColor boldSystemFontOfSize:26];
+            titleLabel.font = [UIFont boldSystemFontOfSize:26];
             [overlay addSubview:titleLabel];
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 280, keyWindow.bounds.size.width - 40, 80)];
-            descLabel.text = @"لقد وصلت إلى 395 نقطة تماماً.\nسيتوقف التطبيق لمدة 10 دقائق تلقائياً.";
+            descLabel.text = @"لقد وصلت إلى 20 نقطة تماماً.\nسيتوقف التطبيق لمدة 10 دقائق تلقائياً.";
             descLabel.textColor = [UIColor lightGrayColor];
             descLabel.textAlignment = NSTextAlignmentCenter;
             descLabel.numberOfLines = 3;
-            descLabel.font = [UIColor systemFontOfSize:16];
+            descLabel.font = [UIFont systemFontOfSize:16];
             [overlay addSubview:descLabel];
             
             [keyWindow addSubview:overlay];
@@ -47,7 +47,7 @@ void showBlockOverlay() {
     });
 }
 
-// دالة مركزية للتحقق من قيمة النقاط وتطبيق الحظر فوراً عندما تصل إلى 395 حصراً
+// دالة مركزية للتحقق من قيمة النقاط وتطبيق الحظر فوراً عندما تصل إلى 20 حصراً
 void processPointsCheck(id jsonObject) {
     if ([jsonObject isKindOfClass:[NSDictionary class]]) {
         NSDictionary *dict = (NSDictionary *)jsonObject;
@@ -62,7 +62,7 @@ void processPointsCheck(id jsonObject) {
                 if (pointsNum) {
                     NSInteger points = [pointsNum integerValue];
                     
-                    // الشرط الحصري: عندما تكون القيمة 395 تماماً
+                    // الشرط الحصري: عندما تكون القيمة 20 تماماً
                     if (points == TARGET_POINTS) {
                         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
                         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
