@@ -56,11 +56,10 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
-// دالة الفلترة والتحقق: تعرض الطلب المحدّد فقط بناءً على الرابط
+// دالة الفلترة لعرض الطلب المستهدف فقط
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
-    // شرط الفلترة: تأكد من أن الرابط يحتوي على المسار المستهدف الظاهر في الصورة
     if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
-        return; // تجاهل أي طلب آخر تماماً ولا تقم بعرضه
+        return;
     }
 
     NSString *resStr = @"";
@@ -131,7 +130,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSURLRequest *req = [NSURLRequest requestWithURL:url];
     return %orig(url, ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
         logGodModeEvent(@"NSURLSession-URL", @"GET", url.absoluteString, httpResp.statusCode, data, error);
@@ -159,7 +157,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [NSURLProtocol registerCard:[GodModeNetworkProtocol class]]; // تم التصحيح لـ registerClass برمجياً بالأسفل
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
         showUniversalLog(@"[Init] Target-Only Filter Interceptor Active.");
     });
