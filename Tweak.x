@@ -2,9 +2,9 @@
 #import <UIKit/UIKit.h>
 
 #define BLOCK_DURATION 600.0 // 10 دقائق بالثواني
-#define TARGET_POINTS 20     // الحظر عند الوصول إلى 20 نقطة تماماً
+#define TARGET_POINTS 20     // الحظر حصرياً عند الوصول إلى 20 نقطة تماماً
 #define KEY_BLOCK_END @"block_end_timestamp"
-#define TARGET_URL @"https://tn.maildisposable.com/api/v1/users/additional/points/data"
+#define TARGET_URL_PATH @"/api/v1/users/additional/points/data"
 
 // دالة عرض شاشة الحظر الإجباري المانعة للتفاعل
 void showBlockOverlay() {
@@ -19,7 +19,7 @@ void showBlockOverlay() {
             titleLabel.text = @"توقف مؤقت للتطبيق";
             titleLabel.textColor = [UIColor whiteColor];
             titleLabel.textAlignment = NSTextAlignmentCenter;
-            titleLabel.font = [UIFont boldSystemFontOfSize:26]; // تم التصحيح هنا إلى UIFont
+            titleLabel.font = [UIFont boldSystemFontOfSize:26];
             [overlay addSubview:titleLabel];
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 280, keyWindow.bounds.size.width - 40, 80)];
@@ -27,7 +27,7 @@ void showBlockOverlay() {
             descLabel.textColor = [UIColor lightGrayColor];
             descLabel.textAlignment = NSTextAlignmentCenter;
             descLabel.numberOfLines = 3;
-            descLabel.font = [UIFont systemFontOfSize:16]; // وتم التصحيح هنا إلى UIFont
+            descLabel.font = [UIFont systemFontOfSize:16];
             [overlay addSubview:descLabel];
             
             [keyWindow addSubview:overlay];
@@ -35,7 +35,7 @@ void showBlockOverlay() {
     });
 }
 
-// فحص حالة الحظر فور فتح التطبيق لضمان استمرار الـ 10 دقائق
+// فحص حالة الحظر فور فتح التطبيق
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -47,12 +47,17 @@ void showBlockOverlay() {
     });
 }
 
-// دالة مركزية للتحقق من قيمة النقاط وتطبيق الحظر فوراً عندما تصل إلى 20 حصراً
-void processPointsCheck(id jsonObject) {
-    if ([jsonObject isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *dict = (NSDictionary *)jsonObject;
+// دالة لفحص البيانات وتحليل الـ JSON واستخراج النقاط
+void parseAndCheckData(NSData *data) {
+    if (!data) return;
+    
+    NSError *jsonError = nil;
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+    
+    if (!jsonError && [json isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)json;
         
-        // التحقق من المسار الدقيق للاستجابة: data -> pointsData -> points
+        // التحقق من المسار: data -> pointsData -> points
         NSDictionary *dataDict = dict[@"data"];
         if ([dataDict isKindOfClass:[NSDictionary class]]) {
             NSDictionary *pointsData = dataDict[@"pointsData"];
@@ -82,43 +87,48 @@ void processPointsCheck(id jsonObject) {
     }
 }
 
-// --- الطبقة الأولى: اعتراض فك شفرة الـ JSON (شاملة ومضمونة) ---
+// اعتراض مهام البيانات في NSURLSession لتغطية Alamofire وأي طلبات أخرى
+%hook NSURLSession
+
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    NSString *urlString = url.absoluteString;
+    if (urlString && [urlString containsString:TARGET_URL_PATH]) {
+        void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+            parseAndCheckData(data);
+            if (completionHandler) {
+                completionHandler(data, response, error);
+            }
+        };
+        return %orig(url, wrappedHandler);
+    }
+    return %orig(url, completionHandler);
+}
+
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    NSString *urlString = request.URL.absoluteString;
+    if (urlString && [urlString containsString:TARGET_URL_PATH]) {
+        void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+            parseAndCheckData(data);
+            if (completionHandler) {
+                completionHandler(data, response, error);
+            }
+        };
+        return %orig(request, wrappedHandler);
+    }
+    return %orig(request, completionHandler);
+}
+
+%end
+
+// اعتراض إضافي لـ NSJSONSerialization لضمان التقاط أي بيانات يتم فكها برمجياً
 %hook NSJSONSerialization
 
 + (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
     id json = %orig;
     if (json) {
-        processPointsCheck(json);
+        parseAndCheckData(data);
     }
     return json;
-}
-
-%end
-
-// --- الطبقة الثانية: اعتراض طلبات الشبكة للرابط الكامل والمحدد بحذافيره ---
-%hook NSURLSession
-
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSString *urlString = request.URL.absoluteString;
-    
-    // مطابقة الرابط كاملاً وحرفياً كما طلبته
-    if (urlString && [urlString isEqualToString:TARGET_URL]) {
-        void (^safeHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-            if (data) {
-                NSError *jsonError = nil;
-                id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-                if (!jsonError && json) {
-                    processPointsCheck(json);
-                }
-            }
-            if (completionHandler) {
-                completionHandler(data, response, error);
-            }
-        };
-        return %orig(request, safeHandler);
-    }
-    
-    return %orig(request, completionHandler);
 }
 
 %end
