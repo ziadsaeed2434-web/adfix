@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <WebKit/WebKit.h>
 
@@ -6,7 +7,7 @@ static BOOL isAlertActive = false;
 
 // دالة تحديد مسار ملف الـ plist المستقل داخل مجلد Library
 NSString *getStandalonePlistPath(void) {
-    NSArray *paths = NSSearchPathDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
     return [libraryDirectory stringByAppendingPathComponent:@"AppLockState.plist"];
 }
