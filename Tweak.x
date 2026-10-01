@@ -6,10 +6,31 @@
 #define KEY_BLOCK_END @"block_end_timestamp"
 #define TARGET_URL_PATH @"/api/v1/users/additional/points/data"
 
-// دالة عرض شاشة الحظر الإجباري المانعة للتفاعل
+// دالة آمنة لجلب النافذة النشطة لمنع الـ Crash
+UIWindow *getSafelyKeyWindow() {
+    UIWindow *foundWindow = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (scene.activationState == UISceneActivationStateForegroundActive) {
+                for (UIWindow *window in scene.windows) {
+                    if (window.isKeyWindow) {
+                        foundWindow = window;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (!foundWindow) {
+        foundWindow = [UIApplication sharedApplication].keyWindow;
+    }
+    return foundWindow;
+}
+
+// دالة عرض شاشة الحظر الإجباري المانعة للتفاعل بأمان تام
 void showBlockOverlay() {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+        UIWindow *keyWindow = getSafelyKeyWindow();
         if (keyWindow && ![keyWindow viewWithTag:9999]) {
             UIView *overlay = [[UIView alloc] initWithFrame:keyWindow.bounds];
             overlay.tag = 9999;
@@ -35,9 +56,9 @@ void showBlockOverlay() {
     });
 }
 
-// فحص حالة الحظر فور فتح التطبيق
+// فحص حالة الحظر فور فتح التطبيق بشكل آمن
 %ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSTimeInterval blockEndTime = [defaults doubleForKey:KEY_BLOCK_END];
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
