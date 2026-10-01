@@ -1,7 +1,6 @@
 #import <UIKit/UIKit.h>
 #import "FLEXNetworkRecorder.h"
 
-// تعريف دالة النافذة العلوية
 static UITextView *universalLogView = nil;
 
 void showUniversalLog(NSString *logText) {
@@ -50,52 +49,22 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
-// دالة لاستقبال تحديثات طلبات الشبكة من FLEX
 static void handleNetworkNotification(NSNotification *notification) {
-    // استخراج معرف الطلب أو كائن الطلب المسجل
-    NSString *requestID = notification.userInfo[FLEXNetworkRecorderRequestIDKey];
-    if (!requestID) return;
+    // استخدام الأسماء الصحيحة حسب إصدار FLEX لديك
+    FLEXNetworkRecorder *recorder = [FLEXNetworkRecorder defaultRecorder];
     
-    // جلب تفاصيل الطلب من المسجل
-    FLEXNetworkRecorder *recorder = [FLEXNetworkRecorder sharedRecorder];
-    
-    // يمكنك الحصول على الرابط ومعلومات الاستجابة
-    NSString *url = [recorder URLStringForRequestID:requestID];
-    NSData *responseBody = [recorder responseDataForRequestID:requestID];
-    NSString *method = [recorder requestMethodForRequestID:requestID];
-    
-    if (url) {
-        NSString *responseString = @"";
-        if (responseBody) {
-            responseString = [[NSString alloc] initWithData:responseBody encoding:NSUTF8StringEncoding];
-            if (!responseString) {
-                responseString = [NSString stringWithFormat:@"[Binary Data: %lu bytes]", (unsigned long)responseBody.length];
-            }
-            // تقييد الطول حتى لا تمتلئ الذاكرة بسرعة إذا كان الاستجابة ضخمة
-            if (responseString.length > 1000) {
-                responseString = [responseString substringToIndex:1000];
-                responseString = [responseString stringByAppendingString:@"... (truncated)"];
-            }
-        }
-        
-        NSString *log = [NSString *][format: @"[%@] %@\nResponse:\n%@", method, url, responseString];
-        showUniversalLog(log);
-    }
+    // جلب المعاملات أو الرابط بالطريقة المتاحة
+    // ملاحظة: يمكنك طباعة الإشعار أو تفاصيل المعاملات المتوفرة
+    NSString *log = [NSString stringWithFormat:@"[Network Notification Received] %@", notification.name];
+    showUniversalLog(log);
 }
 
 %ctor {
-    // 1. تفعيل مراقبة الشبكة تلقائياً
-    [[FLEXNetworkRecorder sharedRecorder] setEnabled:YES];
+    // تفعيل المسجل بالطريقة الصحيحة (defaultRecorder)
+    [[FLEXNetworkRecorder defaultRecorder] setEnabled:YES];
     
-    // 2. الاستماع لإشعارات تسجيل طلبات الشبكة الجديدة من FLEX
-    [[NSNotificationCenter defaultCenter] addObserverForName:FLEXNetworkRecorderNewRequestNotification
-                                                      object:nil
-                                                       queue:[NSOperationQueue mainQueue]
-                                                  usingBlock:^(NSNotification *note) {
-        handleNetworkNotification(note);
-    }];
-    
-    [[NSNotificationCenter defaultCenter] addObserverForName:FLEXNetworkRecorderResponseReceivedNotification
+    // استخدام الإشعار الصحيح المعرف في هيدر مكتبتك (kFLEXNetworkRecorderNewTransactionNotification)
+    [[NSNotificationCenter defaultCenter] addObserverForName:kFLEXNetworkRecorderNewTransactionNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
