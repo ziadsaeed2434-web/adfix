@@ -16,7 +16,7 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// 1. تنظيف الـ Keychain بالكامل مع الحفاظ حصرياً على مفتاح المصادقة الأساسي
+// 1. تنظيف الـ Keychain بالكامل مع الحفاظ حصرياً على مفتاح المصادقة الأساسي (tokenKey)
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -47,7 +47,7 @@ static void clearKeychainExceptToken() {
     }
 }
 
-// 2. مولدات الهوية المتغيرة لحظياً
+// مولدات الهوية المتغيرة لحظياً
 static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
@@ -91,15 +91,10 @@ static NSString *generateTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 3. التدمير الجذري الشامل مع كل إقلاع (مسح ملفات التطبيق، الكاش، والـ App Groups من جذورها)
+// 2. التدمير مع استثناء مجلد Preferences وملفات إعدادات التطبيق بالكامل
 static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch() {
     @autoreleasepool {
         clearKeychainExceptToken();
-
-        NSString *bundleId = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleId) {
-            [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleId];
-        }
 
         [[NSURLCache sharedURLCache] removeAllCachedResponses];
         [[NSURLCache sharedURLCache] setDiskCapacity:0];
@@ -109,10 +104,23 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
 
+        // مسح محتويات المجلد الرئيسي مع استثناء مجلد Library/Preferences وحفظ الإعدادات
         NSArray *homeContents = [fm contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
-            NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
-            [fm removeItemAtPath:fullPath error:&error];
+            if ([item isEqualToString:@"Library"]) {
+                NSString *libraryPath = [homeDir stringByAppendingPathComponent:@"Library"];
+                NSArray *libContents = [fm contentsOfDirectoryAtPath:libraryPath error:nil];
+                for (NSString *libItem in libContents) {
+                    // حماية مجلد التفضيلات الإعدادات بالكامل
+                    if (![libItem isEqualToString:@"Preferences"]) {
+                        NSString *fullLibItemPath = [libraryPath stringByAppendingPathComponent:libItem];
+                        [fm removeItemAtPath:fullLibItemPath error:&error];
+                    }
+                }
+            } else {
+                NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
+                [fm removeItemAtPath:fullPath error:&error];
+            }
         }
 
         NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
@@ -126,7 +134,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
     }
 }
 
-// 4. تزوير الهويات ومعرّفات الأجهزة (بشكل آمن تماماً بدون كراش)
+// تزوير الهويات ومعرّفات الأجهزة
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
@@ -166,7 +174,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 %end
 
-// 5. محرك تغيير وتزوير كل طلب شبكي طائراً
+// محرك تغيير وتزوير كل طلب شبكي طائراً
 %hook NSMutableURLRequest
 
 - (void)setURL:(NSURL *)url {
@@ -215,7 +223,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 %end
 
-// 6. التحكم المطلق بجلسات الشبكة
+// التحكم المطلق بجلسات الشبكة
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
