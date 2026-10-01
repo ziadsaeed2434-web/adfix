@@ -4,6 +4,8 @@
 
 static UITextView *universalLogView = nil;
 static UIView *globalOverlayView = nil;
+static NSDate *blockUntilDate = nil; 
+static BOOL canBlockFor100 = YES; // متغير الحالة للتحكم في التسلسل
 
 void showUniversalLog(NSString *logText) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -40,7 +42,7 @@ void showUniversalLog(NSString *logText) {
                 universalLogView.textColor = [UIColor greenColor];
                 universalLogView.font = [UIFont fontWithName:@"Courier-Bold" size:7.5];
                 universalLogView.editable = NO;
-                universalLogView.text = @"[+] Target Filter Active (Showing Target Request Only)...\n";
+                universalLogView.text = @"[+] Sequential Points Blocker Active...\n";
                 
                 [globalOverlayView addSubview:universalLogView];
                 [keyWindow addSubview:globalOverlayView];
@@ -56,7 +58,19 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
-// دالة الفلترة لعرض الطلب المستهدف فقط
+BOOL isNetworkBlocked(void) {
+    if (blockUntilDate) {
+        NSTimeInterval remaining = [blockUntilDate timeIntervalSinceNow];
+        if (remaining > 0) {
+            return YES; 
+        } else {
+            blockUntilDate = nil; 
+        }
+    }
+    return NO;
+}
+
+// دالة معالجة الاستجابة وفحص التسلسل المطلوب
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
     if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         return;
@@ -64,28 +78,55 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
     NSString *resStr = @"";
     if (data) {
+        NSError *jsonError = nil;
+        NSDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+        if (!jsonError && [jsonDict isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *dataObj = jsonDict[@"data"];
+            NSDictionary *pointsData = dataObj[@"pointsData"];
+            NSNumber *pointsVal = pointsData[@"points"];
+            
+            if (pointsVal) {
+                NSInteger currentPoints = [pointsVal integerValue];
+                
+                if (currentPoints == 100) {
+                    // يحظر فقط إذا كانت حالة السماح مفعلة ولم يتم حظره مسبقاً لهذه النقطة
+                    if (canBlockFor100 && !isNetworkBlocked()) {
+                        blockUntilDate = [NSDate dateWithTimeIntervalSinceNow:600]; // 10 دقائق
+                        canBlockFor100 = NO; // قفل الحظر حتى تتغير القيمة لاحقاً
+                        showUniversalLog(@"[BLOCKED!] Points = 100. Requests halted for 10 minutes.");
+                    }
+                } else {
+                    // إذا تغيرت القيمة وأصبحت شيئاً آخر (مثل 105 أو أي رقم غير 100)، نعيد تفعيل إمكانية الحظر مستقبلاً
+                    canBlockFor100 = YES;
+                }
+            }
+        }
+        
         resStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         if (!resStr) {
-            resStr = [NSString stringWithFormat:@"[Binary/Encrypted Data: %lu bytes]", (unsigned long)data.length];
-        } else if (resStr.length > 500) {
-            resStr = [[resStr substringToIndex:500] stringByAppendingString:@"...\n(truncated)"];
+            resStr = [NSString stringWithFormat:@"[Binary Data: %lu bytes]", (unsigned long)data.length];
+        } else if (resStr.length > 300) {
+            resStr = [[resStr substringToIndex:300] stringByAppendingString:@"...\n(truncated)"];
         }
     } else if (error) {
         resStr = [NSString stringWithFormat:@"Error: %@", error.localizedDescription];
     } else {
-        resStr = @"[No Body / Stream]";
+        resStr = @"[No Body]";
     }
     
-    NSString *log = [NSString stringWithFormat:@"[TARGET FOUND!] [%@] [%@] [%ld] %@\nData: %@", engine, method ?: @"GET", (long)statusCode, url, resStr];
+    NSString *log = [NSString stringWithFormat:@"[TARGET] [%@] [%@] [%ld] %@\nData: %@", engine, method ?: @"GET", (long)statusCode, url, resStr];
     showUniversalLog(log);
 }
 
-// 1. بروتوكول الاعتراض للطبقات الدنيا
+// 1. بروتوكول الاعتراض
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
 @implementation GodModeNetworkProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
+    if (isNetworkBlocked()) {
+        return NO; 
+    }
     NSString *url = request.URL.absoluteString;
     if (url && [url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         if ([NSURLProtocol propertyForKey:@"GodModeHandled" inRequest:request] == nil) {
@@ -100,6 +141,12 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     return mutableReq;
 }
 - (void)startLoading {
+    if (isNetworkBlocked()) {
+        NSError *blockError = [NSError errorWithDomain:@"NetworkBlockDomain" code:-999 userInfo:@{NSLocalizedDescriptionKey: @"Network blocked due to 100 points limit."}];
+        [self.client URLProtocol:self didFailWithError:blockError];
+        return;
+    }
+    
     NSMutableURLRequest *newReq = [self.request mutableCopy];
     [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
@@ -118,10 +165,20 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// 2. رصد طلبات الـ NSURLSession المستهدفة
+// 2. رصد وحظر طلبات الـ NSURLSession أثناء فترة الحظر
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    if (isNetworkBlocked()) {
+        NSError *cancelError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:@{NSLocalizedDescriptionKey: @"App network activity paused (10 min block)."}] ;
+        if (completionHandler) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completionHandler(nil, nil, cancelError);
+            });
+        }
+        return %orig(request, ^(NSData *d, NSURLResponse *r, NSError *e){});
+    }
+    
     return %orig(request, ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
         logGodModeEvent(@"NSURLSession", request.HTTPMethod, request.URL.absoluteString, httpResp.statusCode, data, error);
@@ -129,17 +186,9 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     });
 }
 
-- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    return %orig(url, ^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        logGodModeEvent(@"NSURLSession-URL", @"GET", url.absoluteString, httpResp.statusCode, data, error);
-        if (completionHandler) completionHandler(data, response, error);
-    });
-}
-
 %end
 
-// 3. فرض البروتوكول على الإعدادات
+// 3. فرض البروتوكول
 %hook NSURLSessionConfiguration
 
 + (NSURLSessionConfiguration *)defaultSessionConfiguration {
@@ -158,6 +207,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
-        showUniversalLog(@"[Init] Target-Only Filter Interceptor Active.");
+        showUniversalLog(@"[Init] Sequential Target Blocker Active.");
     });
 }
