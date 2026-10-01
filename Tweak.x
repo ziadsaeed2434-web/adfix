@@ -10,7 +10,8 @@ void showUniversalLog(NSString *logText) {
         if (@available(iOS 13.0, *)) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                    for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    for (UIWindow *w in windowScene.windows) {
                         if (w.isKeyWindow) {
                             keyWindow = w;
                             break;
@@ -43,47 +44,12 @@ void showUniversalLog(NSString *logText) {
                 [keyWindow addSubview:globalOverlayView];
             }
             
-            // التأكد من إحضار النافذة دائماً في المقدمة فوق جميع عناصر التطبيق
             [keyWindow bringSubviewToFront:globalOverlayView];
             
             if (universalLogView) {
                 NSString *oldText = universalLogView.text;
                 universalLogView.text = [NSString stringWithFormat:@"%@\n--------------------\n%@", logText, oldText];
             }
-        }
-    });
-}
-
-void showInjectionAlert() {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = nil;
-        if (@available(iOS 13.0, *)) {
-            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                if (scene.activationState == UISceneActivationStateForegroundActive) {
-                    for (UIWindow *w in scene.windows) {
-                        if (w.isKeyWindow) {
-                            keyWindow = w;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (!keyWindow) {
-            keyWindow = [UIApplication sharedApplication].keyWindow;
-        }
-        
-        UIViewController *topController = keyWindow.rootViewController;
-        while (topController.presentedViewController) {
-            topController = topController.presentedViewController;
-        }
-        
-        if (topController) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"نجح الحقن"
-                                                                            message:@"التويك شغال ومراقبة الشبكة مفعلة بنجاح!"
-                                                                     preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-            [topController presentViewController:alert animated:YES completion:nil];
         }
     });
 }
@@ -131,9 +97,9 @@ static void handleNetworkNotification(NSNotification *notification) {
         #pragma clang diagnostic pop
     }
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        showInjectionAlert();
-        showUniversalLog(@"[Init] Tweak injected & Network Recorder Active!");
+    // إظهار النافذة العلوية مباشرة دون أي رسائل منبثقة
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        showUniversalLog(@"[Init] Network Recorder Active!");
     });
     
     [[NSNotificationCenter defaultCenter] addObserverForName:kFLEXNetworkRecorderNewTransactionNotification
