@@ -7,7 +7,8 @@ static UIWindow *logWindow = nil;
 void showUniversalLog(NSString *logText) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!logWindow) {
-            // إنشاء نافذة مستقلة خاصة بالعرض العلوية تضمن ظهورها فوق أي واجهة للتطبيق
+            CGRect screenBounds = [UIScreen mainScreen].bounds;
+            
             if (@available(iOS 13.0, *)) {
                 for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                     if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
@@ -17,20 +18,18 @@ void showUniversalLog(NSString *logText) {
                 }
             }
             if (!logWindow) {
-                logWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+                logWindow = [[UIWindow alloc] initWithFrame:screenBounds];
             }
             
-            logWindow.windowLevel = UIWindowLevelAlert + 1000; // فوق جميع نوافذ التطبيق
+            logWindow.windowLevel = UIWindowLevelAlert + 1000;
             logWindow.backgroundColor = [UIColor clearColor];
             logWindow.hidden = NO;
             
-            // إنشاء لوحة تحكم (ViewController) بسيطة للنافذة
             UIViewController *rootVC = [[UIViewController alloc] init];
             rootVC.view.backgroundColor = [UIColor clearColor];
             logWindow.rootViewController = rootVC;
             
-            // تصميم اللوحة السوداء لعرض السجلات
-            UIView *overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 40, rootVC.view.bounds.size.width - 20, 260)];
+            UIView *overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 45, screenBounds.size.width - 20, 260)];
             overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.95];
             overlay.layer.cornerRadius = 10;
             overlay.layer.borderWidth = 1.5;
@@ -54,8 +53,42 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
+// دالة لإظهار رسالة تنبيه منبثقة تأكيدية على الشاشة فور الفتح
+void showInjectionAlert() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *keyWindow = nil;
+        if (@available(iOS 13.0, *)) {
+            for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive) {
+                    for (UIWindow *w in scene.windows) {
+                        if (w.isKeyWindow) {
+                            keyWindow = w;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!keyWindow) {
+            keyWindow = [UIApplication sharedApplication].keyWindow;
+        }
+        
+        UIViewController *topController = keyWindow.rootViewController;
+        while (topController.presentedViewController) {
+            topController = topController.presentedViewController;
+        }
+        
+        if (topController) {
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"نجح الحقن"
+                                                                            message:@"التويك شغال ومراقبة الشبكة مفعلة بنجاح!"
+                                                                     preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+            [topController presentViewController:alert animated:YES completion:nil];
+        }
+    });
+}
+
 static void handleNetworkNotification(NSNotification *notification) {
-    // طباعة اسم الإشعار والتأكد من عمل الرصد
     NSString *log = [NSString stringWithFormat:@"[Event]: %@", notification.name];
     showUniversalLog(log);
 }
@@ -71,12 +104,13 @@ static void handleNetworkNotification(NSNotification *notification) {
         #pragma clang diagnostic pop
     }
     
-    // إظهار رسالة تأكيد فور فتح التطبيق بأن الأداة تعمل
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        showUniversalLog(@"[Init] Tweak injected successfully!");
+    // إظهار رسالة المنبثقة والنافذة العلوية بعد إقلاع التطبيق بثانية واحدة
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        showInjectionAlert();
+        showUniversalLog(@"[Init] Tweak injected & active!");
     });
     
-    // الاستماع لإشعارات شبكة FLEX
+    // الاستماع لطلبات الشبكة
     [[NSNotificationCenter defaultCenter] addObserverForName:kFLEXNetworkRecorderNewTransactionNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
