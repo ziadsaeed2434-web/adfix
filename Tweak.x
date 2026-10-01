@@ -1,6 +1,5 @@
 #import <UIKit/UIKit.h>
 #import "FLEXNetworkRecorder.h"
-#import <objc/message.h>
 
 static UITextView *universalLogView = nil;
 
@@ -56,12 +55,10 @@ static void handleNetworkNotification(NSNotification *notification) {
 }
 
 %ctor {
-    // تفعيل المسجل باستخدام Runtime لتجنب أخطاء المترجم إذا كانت الدالة مخفية
+    // تفعيل مسجل الشبكة بالطريقة الآمنة عبر الـ Runtime
     FLEXNetworkRecorder *recorder = [FLEXNetworkRecorder defaultRecorder];
-    SEL selector = NSSelectorFromString(@selector(setEnabled:));
+    SEL selector = @selector(setEnabled:);
     if ([recorder respondsToSelector:selector]) {
-        ((void (*)(id, SEL, BOOL))[object_getIvar(recorder, 0) methodForSelector:selector])(recorder, selector, YES);
-        // أو استخدام الطريقة الأبسط للـ Runtime:
         #pragma clang diagnostic push
         #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
         [recorder performSelector:selector withObject:@(YES)];
