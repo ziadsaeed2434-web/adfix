@@ -12,7 +12,8 @@ AdPurgeTweak_PRIVATE_FRAMEWORKS = AppTrackingTransparency
 AdPurgeTweak_LIBRARIES = substrate
 AdPurgeTweak_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 
-AdPurgeTweak_FILES = Tweak.x FLEXNetworkRecorder.m FLEXUtility.m FLEXNetworkObserver.m
+AdPurgeTweak_FILES = Tweak.x FLEXNetworkObserver.m FLEXNetworkRecorder.m FLEXNetworkTransaction.m FLEXResources.m FLEXUtility.m
+
 
 
 include $(THEOS_MAKE_PATH)/tweak.mk
