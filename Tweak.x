@@ -16,13 +16,13 @@
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// مسار ملف الحفظ الخاص بالمؤقت لكي لا يتم حذفه
+// مسار ملف الحفظ الخاص بالمؤقت
 static NSString *getCoolDownFilePath() {
     NSString *homeDir = NSHomeDirectory();
     return [homeDir stringByAppendingPathComponent:@"Library/PointsCoolDown.plist"];
 }
 
-// 1. تنظيف الـ Keychain بالكامل مع الحفاظ حصرياً على مفتاح المصادقة الأساسي (tokenKey)
+// تنظيف الـ Keychain مع الحفاظ حصرياً على مفتاح المصادقة الأساسي (tokenKey)
 static void clearKeychainExceptToken() {
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
@@ -39,7 +39,6 @@ static void clearKeychainExceptToken() {
             NSArray *items = (__bridge NSArray *)result;
             for (NSDictionary *item in items) {
                 NSString *account = item[(__bridge id)kSecAttrAccount];
-                
                 if (![account isEqualToString:@"tokenKey"]) {
                     NSMutableDictionary *delQuery = [NSMutableDictionary dictionaryWithDictionary:item];
                     delQuery[(__bridge id)kSecClass] = secClass;
@@ -53,7 +52,7 @@ static void clearKeychainExceptToken() {
     }
 }
 
-// فحص حالة الانتظار المؤقت (10 دقائق) من الملف المستثنى
+// فحص حالة الانتظار المؤقت (10 دقائق)
 static BOOL isCurrentlyInCoolDownPeriod() {
     NSString *path = getCoolDownFilePath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -62,7 +61,7 @@ static BOOL isCurrentlyInCoolDownPeriod() {
         if (coolDownEnd > 0) {
             NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
             if (now < coolDownEnd) {
-                return YES; // لا يزال في فترة التوقف
+                return YES; 
             } else {
                 [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
             }
@@ -75,32 +74,6 @@ static void setCoolDownEndTime(NSTimeInterval endTime) {
     NSString *path = getCoolDownFilePath();
     NSDictionary *dict = @{@"PointsCoolDownEndTime": @(endTime)};
     [dict writeToFile:path atomically:YES];
-}
-
-static void triggerCoolDownIfNeeded(NSData *data) {
-    if (!data) return;
-    @try {
-        NSError *error = nil;
-        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-        if (json && [json isKindOfClass:[NSDictionary class]]) {
-            NSDictionary *dataDict = json[@"data"];
-            if (dataDict && [dataDict isKindOfClass:[NSDictionary class]]) {
-                NSDictionary *pointsData = dataDict[@"pointsData"];
-                if (pointsData && [pointsData isKindOfClass:[NSDictionary class]]) {
-                    id pointsVal = pointsData[@"points"];
-                    if (pointsVal && [pointsVal respondsToSelector:@selector(integerValue)]) {
-                        NSInteger currentPoints = [pointsVal integerValue];
-                        // تفعيل التوقف عند وصول النقاط إلى 395 فقط
-                        if (currentPoints == 395) {
-                            NSTimeInterval coolDownDuration = 10 * 60; // 10 دقائق كاملة
-                            NSTimeInterval endTime = [[NSDate date] timeIntervalSince1970] + coolDownDuration;
-                            setCoolDownEndTime(endTime);
-                        }
-                    }
-                }
-            }
-        }
-    } @catch (NSException *exception) {}
 }
 
 // مولدات الهوية المتغيرة لحظياً
@@ -147,7 +120,7 @@ static NSString *generateTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. التنفيذ الشامل مع استثناء ملف الحاوية وملف المؤقت ومفتاح الحساب حصرياً
+// التنفيذ الشامل مع استثناء ملف الحاوية وملف المؤقت ومفتاح الحساب حصرياً
 static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch() {
     @autoreleasepool {
         clearKeychainExceptToken();
@@ -166,7 +139,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
             
             if ([item rangeOfString:@"LCContainerInfo.plist" options:NSCaseInsensitiveSearch].location != NSNotFound ||
                 [item rangeOfString:@"PointsCoolDown.plist" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                continue; // حماية واستثناء ملفات الحاوية والمؤقت
+                continue; 
             }
             
             if ([item isEqualToString:@"Library"]) {
@@ -194,6 +167,36 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
         }
     }
 }
+
+// مراقبة وفك تشفير الـ JSON مباشرة لالتقاط هيكل النقاط بغض النظر عن مكتبة الشبكات (Alamofire أو غيرها)
+%hook NSJSONSerialization
+
++ (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
+    id json = %orig(data, opt, error);
+    if (json && [json isKindOfClass:[NSDictionary class]]) {
+        @try {
+            NSDictionary *dataDict = json[@"data"];
+            if (dataDict && [dataDict isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *pointsData = dataDict[@"pointsData"];
+                if (pointsData && [pointsData isKindOfClass:[NSDictionary class]]) {
+                    id pointsVal = pointsData[@"points"];
+                    if (pointsVal && [pointsVal respondsToSelector:@selector(integerValue)]) {
+                        NSInteger currentPoints = [pointsVal integerValue];
+                        // التوقف حصرياً عند وصول النقاط إلى 395
+                        if (currentPoints == 395) {
+                            NSTimeInterval coolDownDuration = 10 * 60; // 10 دقائق كاملة
+                            NSTimeInterval endTime = [[NSDate date] timeIntervalSince1970] + coolDownDuration;
+                            setCoolDownEndTime(endTime);
+                        }
+                    }
+                }
+            }
+        } @catch (NSException *exception) {}
+    }
+    return json;
+}
+
+%end
 
 // تزوير الهويات ومعرّفات الأجهزة
 %hook UIDevice
@@ -288,7 +291,7 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
 }
 %end
 
-// التحكم المطلق بجلسات الشبكة ومراقبة طلب النقاط
+// تزوير الهيدرز العامة للطلبات
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -297,19 +300,6 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
             NSError *coolDownError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil];
             if (completionHandler) completionHandler(nil, response, coolDownError);
         });
-    }
-    
-    NSString *urlString = [[request URL] absoluteString];
-    BOOL isPointsEndpoint = [urlString containsString:@"/api/v1/users/additional/points/data"];
-    
-    if (isPointsEndpoint && completionHandler) {
-        void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
-            if (data) {
-                triggerCoolDownIfNeeded(data);
-            }
-            completionHandler(data, response, error);
-        };
-        return %orig(request, wrappedHandler);
     }
     
     NSMutableURLRequest *mutableReq = [request mutableCopy];
