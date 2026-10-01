@@ -5,7 +5,6 @@
 static UITextView *universalLogView = nil;
 static UIView *globalOverlayView = nil;
 
-// دالة عرض السجلات في النافذة العلوية بشكل فوري ومفصل
 void showUniversalLog(NSString *logText) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
@@ -29,7 +28,6 @@ void showUniversalLog(NSString *logText) {
         if (keyWindow) {
             if (!globalOverlayView) {
                 CGRect screenBounds = keyWindow.bounds;
-                // نافذة سوداء بإطار نيون أخضر مضيء تلتقط كل شيء في الذاكرة والشبكة
                 globalOverlayView = [[UIView alloc] initWithFrame:CGRectMake(5, 40, screenBounds.size.width - 10, 270)];
                 globalOverlayView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.99];
                 globalOverlayView.layer.cornerRadius = 10;
@@ -42,7 +40,7 @@ void showUniversalLog(NSString *logText) {
                 universalLogView.textColor = [UIColor greenColor];
                 universalLogView.font = [UIFont fontWithName:@"Courier-Bold" size:7.5];
                 universalLogView.editable = NO;
-                universalLogView.text = @"[+] God-Mode Network & Memory Interceptor Online (All 10+ Engines Active)...\n";
+                universalLogView.text = @"[+] God-Mode Network & Memory Interceptor Online (Clean & Fixed)...\n";
                 
                 [globalOverlayView addSubview:universalLogView];
                 [keyWindow addSubview:globalOverlayView];
@@ -97,7 +95,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     return mutableReq;
 }
 - (void)startLoading {
-    NSMutableURLRequest *newReq = [[self.request mutableCopy] autoreleasing];
+    NSMutableURLRequest *newReq = [self.request mutableCopy];
     [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
@@ -129,14 +127,13 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     %orig;
     if (self.URL && field && value) {
-        // رصد الـ Headers الحساسة والـ Auth Tokens لحظة إضافتها للطلب
         showUniversalLog([NSString stringWithFormat:@"[Header-Inject] %@: %@\nFor URL: %@", field, value, self.URL.absoluteString]);
     }
 }
 
 %end
 
-// 3. هوكات مهام NSURLSession الشاملة لكافة الأنواع (Data, Upload, Download)
+// 3. هوكات مهام NSURLSession الشاملة لكافة الأنواع
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -148,7 +145,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSURLRequest *req = [NSURLRequest requestWithURL:url];
     return %orig(url, ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
         logGodModeEvent(@"NSURLSession-URL", @"GET", url.absoluteString, httpResp.statusCode, data, error);
@@ -175,7 +171,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %end
 
-// 4. حقن الإعدادات لفرض البروتوكول على كل الجلسات (بما فيها الخلفية والمعزولة)
+// 4. حقن الإعدادات لفرض البروتوكول على كل الجلسات
 %hook NSURLSessionConfiguration
 
 + (NSURLSessionConfiguration *)defaultSessionConfiguration {
@@ -213,10 +209,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %end
 
-// 5. رصد الـ WebViews الداخلية في حال استخدم التطبيق متصفحاً مصغراً لفتح واجهات API أو مصادقة
+// 5. رصد الـ WebViews الداخلية
 %hook WKWebView
 
--قات (void)loadRequest:(NSURLRequest *)request {
+- (void)loadRequest:(NSURLRequest *)request {
     %orig;
     if (request.URL) {
         showUniversalLog([NSString stringWithFormat:@"[WKWebView-Load] GET\nURL: %@", request.URL.absoluteString]);
@@ -228,6 +224,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
-        showUniversalLog(@"[Init] God-Mode Network Interceptor Fully Activated.");
+        showUniversalLog(@"[Init] God-Mode Network Interceptor Fully Activated (No Errors).");
     });
 }
