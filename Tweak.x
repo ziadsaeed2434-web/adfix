@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 static UITextView *universalLogView = nil;
 
@@ -25,17 +26,17 @@ void showUniversalLog(NSString *logText) {
         if (keyWindow) {
             UIView *overlay = [keyWindow viewWithTag:999888];
             if (!overlay) {
-                overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 35, keyWindow.bounds.size.width - 20, 350)];
+                overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 30, keyWindow.bounds.size.width - 20, 380)];
                 overlay.tag = 999888;
-                overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.96];
+                overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.98];
                 overlay.layer.cornerRadius = 8;
                 
                 universalLogView = [[UITextView alloc] initWithFrame:CGRectMake(5, 5, overlay.bounds.size.width - 10, overlay.bounds.size.height - 10)];
                 universalLogView.backgroundColor = [UIColor clearColor];
                 universalLogView.textColor = [UIColor orangeColor];
-                universalLogView.font = [UIFont fontWithName:@"Courier" size:8];
+                universalLogView.font = [UIFont fontWithName:@"Courier" size:7.5];
                 universalLogView.editable = NO;
-                universalLogView.text = @"[+] Full Response Monitor Active...\n";
+                universalLogView.text = @"[+] FLEX-Style Ultimate Network Interceptor Active...\n";
                 
                 [overlay addSubview:universalLogView];
                 [keyWindow addSubview:overlay];
@@ -49,92 +50,121 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
-// دالة لمعالجة الطلب واستخراج الـ Response Body وعرضه بالتفصيل
-static void handleTaskCompletion(NSURLRequest *request, NSData *data, NSURLResponse *response, NSError *error) {
-    NSString *urlString = [request.URL absoluteString];
-    if (!urlString) urlString = [response.URL absoluteString];
-    if (!urlString) urlString = @"<Unknown URL>";
+// ==========================================
+// 1. بروتوكول الاعتراض الشامل (طريقة FLEX الأساسية)
+// ==========================================
+@interface FLEXStyleNetworkProtocol : NSURLProtocol
+@end
+
+@implementation FLEXStyleNetworkProtocol
+
++ (BOOL)canInitWithRequest:(NSURLRequest *)request {
+    NSString *urlStr = [request.URL absoluteString];
+    if ([urlStr containsString:@"127.0.0.1"] || [urlStr containsString:@"localhost"]) {
+        return NO;
+    }
+    // منع تكرار المعالجة لنفس الطلب
+    if ([NSURLProtocol propertyForKey:@"FLEXHandledKey" inRequest:request]) {
+        return NO;
+    }
+    return YES;
+}
+
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request {
+    return request;
+}
+
+- (void)startLoading {
+    NSMutableURLRequest *mutableReq = [self.request mutableCopy];
+    [NSURLProtocol setProperty:@YES forKey:@"FLEXHandledKey" inRequest:mutableReq];
     
-    NSString *method = request.HTTPMethod ? request.HTTPMethod : @"GET";
+    NSString *urlStr = [mutableReq.URL absoluteString] ?: @"<Unknown>";
+    NSString *method = mutableReq.HTTPMethod ?: @"GET";
     
-    NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-    NSInteger statusCode = [httpResp statusCode];
-    
-    // استخراج الـ Headers
-    NSDictionary *headers = request.allHTTPHeaderFields;
+    // استخراج الـ Headers تماماً مثل الصورة
+    NSDictionary *headers = mutableReq.allHTTPHeaderFields;
     NSMutableString *headersStr = [NSMutableString string];
     [headers enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *obj, BOOL *stop) {
         [headersStr appendFormat:@"  %@: %@\n", key, obj];
     }];
     
-    // استخراج بيانات الطلب المرسل (Request Body)
-    NSData *reqBodyData = request.HTTPBody;
+    // استخراج الـ Request Body إن وجد
+    NSData *bodyData = mutableReq.HTTPBody;
     NSString *reqBodyStr = @"<None>";
-    if (reqBodyData) {
-        reqBodyStr = [[NSString alloc] initWithData:reqBodyData encoding:NSUTF8StringEncoding];
-        if (!reqBodyStr) reqBodyStr = [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long)reqBodyData.length];
+    if (bodyData) {
+        reqBodyStr = [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding];
+        if (!reqBodyStr) reqBodyStr = [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long)bodyData.length];
+        if (reqBodyStr.length > 150) reqBodyStr = [reqBodyStr substringToIndex:150];
     }
     
-    // ** استخراج محتوى الاستجابة (Response Body) وهو الأهم **
-    NSString *respBodyStr = @"<No Response Data>";
-    if (data) {
-        respBodyStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        if (!respBodyStr) {
-            respBodyStr = [NSString stringWithFormat:@"<Binary Data Size: %lu bytes>", (unsigned long)data.length];
+    // تنفيذ الطلب عبر الجلسة الحية لضمان عدم تعطل التطبيق
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
+    [[session dataTaskWithRequest:mutableReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+        NSInteger statusCode = [httpResp statusCode];
+        
+        NSString *respBodyStr = @"<No Data>";
+        if (data) {
+            respBodyStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            if (!respBodyStr) respBodyStr = [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long)data.length];
+            if (respBodyStr.length > 300) respBodyStr = [respBodyStr substringToIndex:300];
+        } else if (error) {
+            respBodyStr = [NSString stringWithFormat:@"Error: %@", error.localizedDescription];
         }
-    } else if (error) {
-        respBodyStr = [NSString stringWithFormat:@"Error: %@", error.localizedDescription];
-    }
-    
-    // بناء الشكل النهائي للتقرير داخل النافذة
-    NSString *log = [NSString stringWithFormat:@"[%@] URL: %@\nStatus: %ld\n[Headers]:\n%@[ReqBody]: %@\n[Response Body]:\n%@", 
-                     method, 
-                     urlString, 
-                     (long)statusCode, 
-                     headersStr.length > 0 ? headersStr : @"  <None>\n", 
-                     reqBodyStr, 
-                     respBodyStr];
-    
-    showUniversalLog(log);
+        
+        // تنسيق السجل ليطابق بيانات أداة الفحص (FLEX / الصورة)
+        NSString *log = [NSString stringWithFormat:@"[FLEX Intercept]\nURL: %@\nMethod: %@\nStatus: %ld\nMechanism: NSURLSessionDataTask (Alamofire)\n[Headers]:\n%@[ReqBody]: %@\n[Response Body]:\n%@", 
+                         urlStr, 
+                         method, 
+                         (long)statusCode, 
+                         headersStr.length > 0 ? headersStr : @"  <None>\n", 
+                         reqBodyStr, 
+                         respBodyStr];
+        
+        showUniversalLog(log);
+        
+        if (error) {
+            [self.client URLProtocol:self didFailWithError:error];
+        } else {
+            [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageAllowed];
+            [self.client URLProtocol:self didLoadData:data];
+            [self.client URLProtocolDidFinishLoading:self];
+        }
+    }] resume];
 }
 
+- (void)stopLoading {}
+
+@end
+
+// ==========================================
+// 2. خطافات NSURLSession لضمان تغطية طلبات Alamofire المباشرة
+// ==========================================
 %hook NSURLSession
 
-// 1. اعتراض طلبات الـ Data مع الـ Completion Handler لضمان جلب الـ Response
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    NSString *url = [request.URL absoluteString] ?: @"<Unknown>";
     void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-        handleTaskCompletion(request, data, response, error);
-        if (completionHandler) {
-            completionHandler(data, response, error);
-        }
+        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+        NSString *respStr = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"<No Data>";
+        if (respStr.length > 250) respStr = [respStr substringToIndex:250];
+        
+        NSString *log = [NSString stringWithFormat:@"[Alamofire/Session] URL: %@\nStatus: %ld\nResponse: %@", url, (long)[httpResp statusCode], respStr];
+        showUniversalLog(log);
+        
+        if (completionHandler) completionHandler(data, response, error);
     };
     return %orig(request, wrappedHandler);
 }
 
-- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL * )url completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSURLRequest *request = [NSURLRequest requestWithURL:url];
-    void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-        handleTaskCompletion(request, data, response, error);
-        if (completionHandler) {
-            completionHandler(data, response, error);
-        }
-    };
-    return %orig(url, wrappedHandler);
-}
-
-// 2. اعتراض طلبات الـ Upload (مثل POST الحساسة الخاصة بالنقاط) وجلب استجابتها
-- (NSURLSessionUploadTask *)uploadTaskWithRequest:(NSURLRequest *)request fromData:(NSData *)bodyData completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    if (bodyData && !mutableReq.HTTPBody) {
-        mutableReq.HTTPBody = bodyData;
-    }
-    void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-        handleTaskCompletion(mutableReq, data, response, error);
-        if (completionHandler) {
-            completionHandler(data, response, error);
-        }
-    };
-    return %orig(request, bodyData, wrappedHandler);
-}
-
 %end
+
+// ==========================================
+// 3. تفعيل نظام الاعتراض العام تلقائياً
+// ==========================================
+%ctor {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [NSURLProtocol registerClass:[FLEXStyleNetworkProtocol class]];
+        showUniversalLog(@"[+] FLEX-Style Network Protocol Registered!");
+    });
+}
