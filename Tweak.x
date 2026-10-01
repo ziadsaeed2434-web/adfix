@@ -4,8 +4,8 @@
 
 static UITextView *universalLogView = nil;
 static UIView *globalOverlayView = nil;
-static NSDate *blockUntilDate = nil; 
-static BOOL canBlockFor100 = YES; // متغير الحالة للتحكم في التسلسل
+static BOOL isAlertActive = false;
+static BOOL canTriggerAlertFor10 = YES;
 
 void showUniversalLog(NSString *logText) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -42,7 +42,7 @@ void showUniversalLog(NSString *logText) {
                 universalLogView.textColor = [UIColor greenColor];
                 universalLogView.font = [UIFont fontWithName:@"Courier-Bold" size:7.5];
                 universalLogView.editable = NO;
-                universalLogView.text = @"[+] Sequential Points Blocker Active...\n";
+                universalLogView.text = @"[+] Persistent 10-Min Lockout Guard Active...\n";
                 
                 [globalOverlayView addSubview:universalLogView];
                 [keyWindow addSubview:globalOverlayView];
@@ -58,20 +58,106 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
-BOOL isNetworkBlocked(void) {
-    if (blockUntilDate) {
-        NSTimeInterval remaining = [blockUntilDate timeIntervalSinceNow];
-        if (remaining > 0) {
-            return YES; 
+// دالة التحقق مما إذا كان وقت الحظر لا يزال سارياً (محفوظ في الذاكرة الدائمة)
+BOOL isLockoutStillActive(void) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSDate *expiryDate = [defaults objectForKey:@"AppLockoutExpiryDate"];
+    if (expiryDate) {
+        if ([expiryDate timeIntervalSinceNow] > 0) {
+            return YES; // الحظر ساري حتى لو خرجت من التطبيق ورجعت
         } else {
-            blockUntilDate = nil; 
+            [defaults removeObjectForKey:@"AppLockoutExpiryDate"]; // انتهت الـ 10 دقائق
         }
     }
     return NO;
 }
 
-// دالة معالجة الاستجابة وفحص التسلسل المطلوب
+// دالة إظهار التنبيه المانع بشكل دائم طوال الـ 10 دقائق
+void showPersistentLockoutAlert(void) {
+    if (isAlertActive) return;
+    isAlertActive = YES;
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *keyWindow = nil;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    for (UIWindow *w in windowScene.windows) {
+                        if (w.isKeyWindow) {
+                            keyWindow = w;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!keyWindow) {
+            keyWindow = [UIApplication sharedApplication].keyWindow;
+        }
+        
+        if (keyWindow) {
+            // إزالة أي تنبيه قديم قد يكون موجوداً لعدم التكرار
+            UIView *oldBlocker = [keyWindow viewWithTag:888899];
+            if (oldBlocker) [oldBlocker removeFromSuperview];
+            
+            UIView *blockerView = [[UIView alloc] initWithFrame:keyWindow.bounds];
+            blockerView.tag = 888899;
+            blockerView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.75];
+            blockerView.userInteractionEnabled = YES; // يمنع النقر تماماً على ما خلفه
+            
+            UIView *alertBox = [[UIView alloc] initWithFrame:CGRectMake(30, keyWindow.bounds.size.height / 2 - 110, keyWindow.bounds.size.width - 60, 220)];
+            alertBox.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:0.98];
+            alertBox.layer.cornerRadius = 16;
+            alertBox.layer.borderWidth = 1.5;
+            alertBox.layer.borderColor = [UIColor redColor].CGColor;
+            
+            UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 20, alertBox.bounds.size.width - 30, 30)];
+            titleLabel.text = @"⚠️ تنبيه الحظر المستمر";
+            titleLabel.textColor = [UIColor redColor];
+            titleLabel.font = [UIFont boldSystemFontOfSize:18];
+            titleLabel.textAlignment = NSTextAlignmentCenter;
+            
+            UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 65, alertBox.bounds.size.width - 30, 90)];
+            descLabel.text = @"تم الوصول إلى 10 نقاط!\nالتطبيق مقفل مؤقتاً لمدة 10 دقائق.\nحتى لو خرجت وعجست للتطبيق سيبقى التنبيه حتى تنتهي المدة.";
+            descLabel.textColor = [UIColor whiteColor];
+            descLabel.font = [UIFont systemFontOfSize:12.5];
+            descLabel.numberOfLines = 4;
+            descLabel.textAlignment = NSTextAlignmentCenter;
+            
+            [alertBox addSubview:titleLabel];
+            [alertBox addSubview:descLabel];
+            [blockerView addSubview:alertBox];
+            [keyWindow addSubview:blockerView];
+            
+            showUniversalLog(@"[PERSISTENT ALERT SHOWN] Lockout active and saved.");
+            
+            // حساب الوقت المتبقي بدقة وإزالة التنبيه تلقائياً فور انتهائه
+            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+            NSDate *expiryDate = [defaults objectForKey:@"AppLockoutExpiryDate"];
+            NSTimeInterval remainingTime = expiryDate ? [expiryDate timeIntervalSinceNow] : 600.0;
+            if (remainingTime <= 0) remainingTime = 600.0;
+            
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(remainingTime * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                UIView *v = [keyWindow viewWithTag:888899];
+                if (v) {
+                    [v removeFromSuperview];
+                }
+                [defaults removeObjectForKey:@"AppLockoutExpiryDate"];
+                isAlertActive = NO;
+                showUniversalLog(@"[ALERT DISMISSED] 10 minutes lockout expired.");
+            });
+        }
+    });
+}
+
+// دالة تحليل الطلبات وفحص شرط الـ 10 نقاط
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
+    // إذا كان الحظر سارياً بالفعل (حتى لو أغلق التطبيق وفتحه مجدداً)، أظهر التنبيه فوراً
+    if (isLockoutStillActive()) {
+        showPersistentLockoutAlert();
+    }
+
     if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         return;
     }
@@ -88,45 +174,44 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
-                if (currentPoints == 100) {
-                    // يحظر فقط إذا كانت حالة السماح مفعلة ولم يتم حظره مسبقاً لهذه النقطة
-                    if (canBlockFor100 && !isNetworkBlocked()) {
-                        blockUntilDate = [NSDate dateWithTimeIntervalSinceNow:600]; // 10 دقائق
-                        canBlockFor100 = NO; // قفل الحظر حتى تتغير القيمة لاحقاً
-                        showUniversalLog(@"[BLOCKED!] Points = 100. Requests halted for 10 minutes.");
+                if (currentPoints == 10) {
+                    if (canTriggerAlertFor10 && !isLockoutStillActive()) {
+                        canTriggerAlertFor10 = NO;
+                        // حفظ وقت انتهاء الحظر (بعد 10 دقائق من الآن) في الذاكرة الدائمة
+                        NSDate *expiry = [NSDate dateWithTimeIntervalSinceNow:600.0];
+                        [[NSUserDefaults standardUserDefaults] setObject:expiry forKey:@"AppLockoutExpiryDate"];
+                        [[NSUserDefaults standardUserDefaults] synchronize];
+                        
+                        showPersistentLockoutAlert();
                     }
                 } else {
-                    // إذا تغيرت القيمة وأصبحت شيئاً آخر (مثل 105 أو أي رقم غير 100)، نعيد تفعيل إمكانية الحظر مستقبلاً
-                    canBlockFor100 = YES;
+                    canTriggerAlertFor10 = YES;
                 }
             }
         }
         
         resStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         if (!resStr) {
-            resStr = [NSString stringWithFormat:@"[Binary Data: %lu bytes]", (unsigned long)data.length];
-        } else if (resStr.length > 300) {
-            resStr = [[resStr substringToIndex:300] stringByAppendingString:@"...\n(truncated)"];
+            resStr = [NSString stringWithFormat:@"[Binary/Encrypted Data: %lu bytes]", (unsigned long)data.length];
+        } else if (resStr.length > 500) {
+            resStr = [[resStr substringToIndex:500] stringByAppendingString:@"...\n(truncated)"];
         }
     } else if (error) {
         resStr = [NSString stringWithFormat:@"Error: %@", error.localizedDescription];
     } else {
-        resStr = @"[No Body]";
+        resStr = @"[No Body / Stream]";
     }
     
-    NSString *log = [NSString stringWithFormat:@"[TARGET] [%@] [%@] [%ld] %@\nData: %@", engine, method ?: @"GET", (long)statusCode, url, resStr];
+    NSString *log = [NSString stringWithFormat:@"[TARGET FOUND!] [%@] [%@] [%ld] %@\nData: %@", engine, method ?: @"GET", (long)statusCode, url, resStr];
     showUniversalLog(log);
 }
 
-// 1. بروتوكول الاعتراض
+// 1. بروتوكول الاعتراض للطبقات الدنيا
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
 @implementation GodModeNetworkProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
-    if (isNetworkBlocked()) {
-        return NO; 
-    }
     NSString *url = request.URL.absoluteString;
     if (url && [url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         if ([NSURLProtocol propertyForKey:@"GodModeHandled" inRequest:request] == nil) {
@@ -141,12 +226,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     return mutableReq;
 }
 - (void)startLoading {
-    if (isNetworkBlocked()) {
-        NSError *blockError = [NSError errorWithDomain:@"NetworkBlockDomain" code:-999 userInfo:@{NSLocalizedDescriptionKey: @"Network blocked due to 100 points limit."}];
-        [self.client URLProtocol:self didFailWithError:blockError];
-        return;
-    }
-    
     NSMutableURLRequest *newReq = [self.request mutableCopy];
     [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
@@ -165,20 +244,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// 2. رصد وحظر طلبات الـ NSURLSession أثناء فترة الحظر
+// 2. رصد طلبات الـ NSURLSession المستهدفة
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    if (isNetworkBlocked()) {
-        NSError *cancelError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:@{NSLocalizedDescriptionKey: @"App network activity paused (10 min block)."}] ;
-        if (completionHandler) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completionHandler(nil, nil, cancelError);
-            });
-        }
-        return %orig(request, ^(NSData *d, NSURLResponse *r, NSError *e){});
-    }
-    
     return %orig(request, ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
         logGodModeEvent(@"NSURLSession", request.HTTPMethod, request.URL.absoluteString, httpResp.statusCode, data, error);
@@ -188,7 +257,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %end
 
-// 3. فرض البروتوكول
+// 3. فرض البروتوكول على الإعدادات
 %hook NSURLSessionConfiguration
 
 + (NSURLSessionConfiguration *)defaultSessionConfiguration {
@@ -207,6 +276,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
-        showUniversalLog(@"[Init] Sequential Target Blocker Active.");
+        // فحص حالة الحظر فور فتح التطبيق
+        if (isLockoutStillActive()) {
+            showPersistentLockoutAlert();
+        }
+        showUniversalLog(@"[Init] Persistent 10-Min Lockout Interceptor Active.");
     });
 }
