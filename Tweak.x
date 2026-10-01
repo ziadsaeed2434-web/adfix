@@ -91,7 +91,7 @@ static NSString *generateTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// 2. التدمير مع استثناء مجلد Preferences وملفات إعدادات التطبيق بالكامل
+// 2. الحذف الشامل لكل محتويات الساندبوكس مع استثناء ملف LCContainerInfo.plist حصرياً
 static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch() {
     @autoreleasepool {
         clearKeychainExceptToken();
@@ -104,21 +104,25 @@ static __attribute__((constructor)) void totalAnonymityAndDeepWipeOnEveryLaunch(
         NSString *homeDir = NSHomeDirectory();
         NSError *error = nil;
 
-        // مسح محتويات المجلد الرئيسي مع استثناء مجلد Library/Preferences وحفظ الإعدادات
+        // المرور على محتويات مجلد الساندبوكس الرئيسي وحذفها بالكامل عدا الملف المستثنى
         NSArray *homeContents = [fm contentsOfDirectoryAtPath:homeDir error:&error];
         for (NSString *item in homeContents) {
+            NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
+            
+            if ([item rangeOfString:@"LCContainerInfo.plist" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                continue; // تخطي وحماية ملف الحاوية المستثنى
+            }
+            
             if ([item isEqualToString:@"Library"]) {
-                NSString *libraryPath = [homeDir stringByAppendingPathComponent:@"Library"];
-                NSArray *libContents = [fm contentsOfDirectoryAtPath:libraryPath error:nil];
+                NSArray *libContents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
                 for (NSString *libItem in libContents) {
-                    // حماية مجلد التفضيلات الإعدادات بالكامل
-                    if (![libItem isEqualToString:@"Preferences"]) {
-                        NSString *fullLibItemPath = [libraryPath stringByAppendingPathComponent:libItem];
-                        [fm removeItemAtPath:fullLibItemPath error:&error];
+                    if ([libItem rangeOfString:@"LCContainerInfo.plist" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                        continue; // حماية الملف داخل Library أيضاً إن وجد
                     }
+                    NSString *libItemPath = [fullPath stringByAppendingPathComponent:libItem];
+                    [fm removeItemAtPath:libItemPath error:&error];
                 }
             } else {
-                NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
                 [fm removeItemAtPath:fullPath error:&error];
             }
         }
