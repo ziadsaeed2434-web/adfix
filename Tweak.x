@@ -1,12 +1,12 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-#define BLOCK_DURATION 600.0 // 10 دقائق بالثواني
-#define TARGET_POINTS 20     // النقاط المستهدفة
+#define BLOCK_DURATION 600.0 // 10 دقائق
+#define TARGET_POINTS 20
 #define KEY_BLOCK_END @"block_end_timestamp"
 #define TARGET_URL_PATH @"/api/v1/users/additional/points/data"
 
-// دالة آمنة لجلب النافذة النشطة لمنع الـ Crash
+// دالة آمنة لجلب النافذة (يجب استدعاؤها من الـ Main Thread فقط)
 UIWindow *getSafelyKeyWindow() {
     UIWindow *foundWindow = nil;
     if (@available(iOS 13.0, *)) {
@@ -27,45 +27,41 @@ UIWindow *getSafelyKeyWindow() {
     return foundWindow;
 }
 
-// دالة عرض شاشة الحظر الإجباري المانعة للتفاعل بأمان تام
+// دالة عرض شاشة الحظر (آمنة تماماً)
 void showBlockOverlay() {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = getSafelyKeyWindow();
-        if (keyWindow) {
-            // إذا كانت الشاشة موجودة مسبقاً، نرفعها للأعلى فقط
-            UIView *existingOverlay = [keyWindow viewWithTag:9999];
-            if (existingOverlay) {
-                [keyWindow bringSubviewToFront:existingOverlay];
-                return;
-            }
-            
-            UIView *overlay = [[UIView alloc] initWithFrame:keyWindow.bounds];
-            overlay.tag = 9999;
-            overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.98];
-            overlay.userInteractionEnabled = YES; // يمنع النقر على أي شيء خلفه
-            
-            UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 220, keyWindow.bounds.size.width - 40, 40)];
-            titleLabel.text = @"توقف مؤقت للتطبيق";
-            titleLabel.textColor = [UIColor whiteColor];
-            titleLabel.textAlignment = NSTextAlignmentCenter;
-            titleLabel.font = [UIFont boldSystemFontOfSize:26];
-            [overlay addSubview:titleLabel];
-            
-            UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 280, keyWindow.bounds.size.width - 40, 80)];
-            descLabel.text = @"لقد وصلت إلى 20 نقطة.\nسيتوقف التطبيق لمدة 10 دقائق تلقائياً.";
-            descLabel.textColor = [UIColor lightGrayColor];
-            descLabel.textAlignment = NSTextAlignmentCenter;
-            descLabel.numberOfLines = 3;
-            descLabel.font = [UIFont systemFontOfSize:16];
-            [overlay addSubview:descLabel];
-            
-            [keyWindow addSubview:overlay];
-            [keyWindow bringSubviewToFront:overlay];
-        }
+        if (!keyWindow) return;
+        
+        // منع تكرار الشاشة
+        if ([keyWindow viewWithTag:9999]) return;
+        
+        UIView *overlay = [[UIView alloc] initWithFrame:keyWindow.bounds];
+        overlay.tag = 9999;
+        overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.98];
+        overlay.userInteractionEnabled = YES;
+        
+        UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 220, keyWindow.bounds.size.width - 40, 40)];
+        titleLabel.text = @"توقف مؤقت للتطبيق";
+        titleLabel.textColor = [UIColor whiteColor];
+        titleLabel.textAlignment = NSTextAlignmentCenter;
+        titleLabel.font = [UIFont boldSystemFontOfSize:26];
+        [overlay addSubview:titleLabel];
+        
+        UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 280, keyWindow.bounds.size.width - 40, 80)];
+        descLabel.text = @"لقد وصلت إلى 20 نقطة.\nسيتوقف التطبيق لمدة 10 دقائق تلقائياً.";
+        descLabel.textColor = [UIColor lightGrayColor];
+        descLabel.textAlignment = NSTextAlignmentCenter;
+        descLabel.numberOfLines = 3;
+        descLabel.font = [UIFont systemFontOfSize:16];
+        [overlay addSubview:descLabel];
+        
+        [keyWindow addSubview:overlay];
+        [keyWindow bringSubviewToFront:overlay];
     });
 }
 
-// دالة لفحص البيانات وتحليل الـ JSON واستخراج النقاط
+// دالة تحليل البيانات وفحص النقاط
 void parseAndCheckData(NSData *data) {
     if (!data) return;
     
@@ -74,9 +70,8 @@ void parseAndCheckData(NSData *data) {
     
     if (!jsonError && [json isKindOfClass:[NSDictionary class]]) {
         NSDictionary *dict = (NSDictionary *)json;
-        
-        // التحقق من المسار: data -> pointsData -> points
         NSDictionary *dataDict = dict[@"data"];
+        
         if ([dataDict isKindOfClass:[NSDictionary class]]) {
             NSDictionary *pointsData = dataDict[@"pointsData"];
             if ([pointsData isKindOfClass:[NSDictionary class]]) {
@@ -85,13 +80,12 @@ void parseAndCheckData(NSData *data) {
                 if (pointsNum) {
                     NSInteger points = [pointsNum integerValue];
                     
-                    // تم التعديل هنا ليكون >= لضمان الحظر حتى لو قفزت النقاط فوق 20
+                    // الشرط: 20 نقطة أو أكثر
                     if (points >= TARGET_POINTS) {
                         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
                         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
                         NSTimeInterval blockEndTime = [defaults doubleForKey:KEY_BLOCK_END];
                         
-                        // إذا لم يكن هناك حظر سابق أو انتهى الحظر السابق
                         if (blockEndTime == 0 || blockEndTime <= now) {
                             blockEndTime = now + BLOCK_DURATION;
                             [defaults setDouble:blockEndTime forKey:KEY_BLOCK_END];
@@ -106,22 +100,8 @@ void parseAndCheckData(NSData *data) {
     }
 }
 
-// 1. اعتراض مهام البيانات في NSURLSession (الطبقة الأساسية لاعتراض Alamofire)
+// 1. اعتراض مهام البيانات في NSURLSession فقط (بدون NSJSONSerialization لتجنب الكراش)
 %hook NSURLSession
-
-- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
-    NSString *urlString = url.absoluteString;
-    if (urlString && [urlString containsString:TARGET_URL_PATH]) {
-        void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-            parseAndCheckData(data);
-            if (completionHandler) {
-                completionHandler(data, response, error);
-            }
-        };
-        return %orig(url, wrappedHandler);
-    }
-    return %orig(url, completionHandler);
-}
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSString *urlString = request.URL.absoluteString;
@@ -137,39 +117,38 @@ void parseAndCheckData(NSData *data) {
     return %orig(request, completionHandler);
 }
 
-%end
-
-// 2. اعتراض تحليل JSON كطبقة احتياطية (في حال تم تحليل البيانات بطريقة مباشرة)
-%hook NSJSONSerialization
-
-+ (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
-    id json = %orig;
-    if (json) {
-        parseAndCheckData(data);
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+    NSString *urlString = url.absoluteString;
+    if (urlString && [urlString containsString:TARGET_URL_PATH]) {
+        void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+            parseAndCheckData(data);
+            if (completionHandler) {
+                completionHandler(data, response, error);
+            }
+        };
+        return %orig(url, wrappedHandler);
     }
-    return json;
+    return %orig(url, completionHandler);
 }
 
 %end
 
-// 3. التهيئة ومراقبة حالة التطبيق (عند الفتح أو العودة من الخلفية)
+// 2. التهيئة ومراقبة حالة التطبيق (آمنة تماماً)
 %ctor {
-    // فحص حالة الحظر فور فتح التطبيق
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // تأخير الفحص الأولي لمدة ثانيتين لضمان اكتمال إقلاع التطبيق
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSTimeInterval blockEndTime = [defaults doubleForKey:KEY_BLOCK_END];
-        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-        if (blockEndTime > now) {
+        if (blockEndTime > [[NSDate date] timeIntervalSince1970]) {
             showBlockOverlay();
         }
     });
 
-    // مراقبة عودة التطبيق من الخلفية (Foreground) لضمان عدم تخطي الحظر
+    // مراقبة العودة من الخلفية
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSTimeInterval blockEndTime = [defaults doubleForKey:KEY_BLOCK_END];
-        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-        if (blockEndTime > now) {
+        if (blockEndTime > [[NSDate date] timeIntervalSince1970]) {
             showBlockOverlay();
         }
     }];
