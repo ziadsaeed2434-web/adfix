@@ -461,7 +461,6 @@ void logNetworkEvent(NSString *method, NSURLRequest *request, NSURLResponse *res
             [[FLEXNetworkRecorder defaultRecorder] recordLoadingFinishedWithRequestID:requestID responseBody:data];
         }
         
-        // استخراج الطلب لعرضه في النافذة العائمة
         NSURLRequest *req = [[FLEXNetworkRecorder defaultRecorder] requestWithRequestID:requestID];
         logNetworkEvent(mechanism, req, response, data, error);
 
