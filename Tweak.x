@@ -1,9 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-static UITextView *fileLogView = nil;
+static UITextView *universalLogView = nil;
 
-void showFileLog(NSString *logText) {
+void showUniversalLog(NSString *logText) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
         if (@available(iOS 13.0, *)) {
@@ -23,81 +23,87 @@ void showFileLog(NSString *logText) {
         }
         
         if (keyWindow) {
-            UIView *overlay = [keyWindow viewWithTag:777888];
+            UIView *overlay = [keyWindow viewWithTag:999888];
             if (!overlay) {
-                overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 40, keyWindow.bounds.size.width - 20, 260)];
-                overlay.tag = 777888;
-                overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.9];
+                overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 35, keyWindow.bounds.size.width - 20, 280)];
+                overlay.tag = 999888;
+                overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.92];
                 overlay.layer.cornerRadius = 8;
                 
-                fileLogView = [[UITextView alloc] initWithFrame:CGRectMake(5, 5, overlay.bounds.size.width - 10, overlay.bounds.size.height - 10)];
-                fileLogView.backgroundColor = [UIColor clearColor];
-                fileLogView.textColor = [UIColor greenColor];
-                fileLogView.font = [UIFont fontWithName:@"Courier" size:9];
-                fileLogView.editable = NO;
-                fileLogView.text = @"[+] Full Content Monitor Started...\n";
+                universalLogView = [[UITextView alloc] initWithFrame:CGRectMake(5, 5, overlay.bounds.size.width - 10, overlay.bounds.size.height - 10)];
+                universalLogView.backgroundColor = [UIColor clearColor];
+                universalLogView.textColor = [UIColor orangeColor];
+                universalLogView.font = [UIFont fontWithName:@"Courier" size:9];
+                universalLogView.editable = NO;
+                universalLogView.text = @"[+] Ultimate Comprehensive Monitor Active...\n";
                 
-                [overlay addSubview:fileLogView];
+                [overlay addSubview:universalLogView];
                 [keyWindow addSubview:overlay];
             }
             
-            if (fileLogView) {
-                NSString *oldText = fileLogView.text;
-                fileLogView.text = [NSString stringWithFormat:@"%@\n--------------------\n%@", logText, oldText];
+            if (universalLogView) {
+                NSString *oldText = universalLogView.text;
+                universalLogView.text = [NSString stringWithFormat:@"%@\n--------------------\n%@", logText, oldText];
             }
         }
     });
 }
 
-// دالة مساعدة لتحويل NSData إلى نص أو وصف دقيق للمحتوى
-NSString* parseDataContent(NSData *data) {
-    if (!data) return @"<Nil Data>";
-    
-    // محاولة تحويله إلى نص UTF-8 مباشر
-    NSString *textStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (textStr && textStr.length > 0) {
-        return [NSString stringWithFormat:@"[Text Content]:\n%@", textStr];
-    }
-    
-    // إذا كان محتوى مشفر أو باينري، نحاول قراءته كـ plist أو JSON محلي إن أمكن
-    NSError *error = nil;
-    id plistObj = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:nil error:&error];
-    if (plistObj) {
-        return [NSString stringWithFormat:@"[Plist/Dict Content]:\n%@", plistObj];
-    }
-    
-    // كحل أخير، نعرض حجم البيانات وهكساديكسمل مبسط
-    return [NSString stringWithFormat:@"<Binary Data - Size: %lu bytes>", (unsigned long)data.length];
+// 1. مراقبة التخزين المحلي السريع NSUserDefaults
+%hook NSUserDefaults
+
+- (void)setObject:(id)value forKey:(NSString *)defaultName {
+    %orig;
+    NSString *log = [NSString stringWithFormat:@"[Defaults Object] Key: %@ = %@", defaultName, value];
+    showUniversalLog(log);
 }
 
+- (void)setInteger:(NSInteger)value forKey:(NSString *)defaultName {
+    %orig;
+    NSString *log = [NSString stringWithFormat:@"[Defaults Integer] Key: %@ = %ld", defaultName, (long)value];
+    showUniversalLog(log);
+}
+
+%end
+
+// 2. مراقبة كتابة أي ملف محلياً في التطبيق
 %hook NSData
 
 - (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile error:(NSError **)error {
     BOOL result = %orig;
-    if ([path containsString:@"userInfo.data"]) {
-        NSString *contentDesc = parseDataContent(self);
-        NSString *log = [NSString stringWithFormat:@"[WRITE] Path: %@\n%@", path, contentDesc];
-        showFileLog(log);
+    if (result) {
+        NSString *contentStr = [[NSString alloc] initWithData:self encoding:NSUTF8StringEncoding];
+        NSString *fileName = [path lastPathComponent];
+        NSString *log = [NSString stringWithFormat:@"[File Write] File: %@\nPath: %@\nContent: %@", fileName, path, contentStr ? contentStr : [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long]self.length]];
+        showUniversalLog(log);
     }
     return result;
 }
 
 - (BOOL)writeToFile:(NSString *)path options:(NSDataWritingOptions)writeOptionsMask error:(NSError **)error {
     BOOL result = %orig;
-    if ([path containsString:@"userInfo.data"]) {
-        NSString *contentDesc = parseDataContent(self);
-        NSString *log = [NSString stringWithFormat:@"[WRITE OPT] Path: %@\n%@", path, contentDesc];
-        showFileLog(log);
+    if (result) {
+        NSString *contentStr = [[NSString alloc] initWithData:self encoding:NSUTF8StringEncoding];
+        NSString *fileName = [path lastPathComponent];
+        NSString *log = [NSString stringWithFormat:@"[File Write Opt] File: %@\nContent: %@", fileName, contentStr ? contentStr : [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long]self.length]];
+        showUniversalLog(log);
     }
     return result;
 }
 
-+ (NSData *)dataWithContentsOfFile:(NSString *)path {
-    NSData *result = %orig;
-    if ([path containsString:@"userInfo.data"] && result) {
-        NSString *contentDesc = parseDataContent(result);
-        NSString *log = [NSString stringWithFormat:@"[READ] Path: %@\n%@", path, contentDesc];
-        showFileLog(log);
+%end
+
+// 3. مراقبة تحليل الـ JSON محلياً (عندما يرتدي التطبيق استجابة من الإعلان أو السيرفر)
+%hook NSJSONSerialization
+
++ (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
+    id result = %orig;
+    if (result && [result isKindOfClass:[NSDictionary class]]) {
+        NSString *jsonStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if (jsonStr && (([jsonStr containsString:@"point"] || [jsonStr containsString:@"score"] || [jsonStr containsString:@"coin"]))) {
+            NSString *log = [NSString stringWithFormat:@"[JSON Points Intercept]:\n%@", jsonStr];
+            showUniversalLog(log);
+        }
     }
     return result;
 }
