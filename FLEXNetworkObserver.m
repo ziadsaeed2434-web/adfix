@@ -57,9 +57,8 @@ void showUniversalLog(NSString *logText) {
             
             if (universalLogView) {
                 NSString *oldText = universalLogView.text;
-                // الحفاظ على أحدث السجلات في الأعلى لسهولة القراءة
                 if (oldText.length > 15000) {
-                    oldText = [oldText substringToIndex:15000]; // لمنع امتلاء الذاكرة
+                    oldText = [oldText substringToIndex:15000];
                 }
                 universalLogView.text = [NSString stringWithFormat:@"%@\n------------------------------------------------\n%@", logText, oldText];
             }
@@ -67,7 +66,6 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
-// دالة مساعدة لتنسيق وطباعة أحداث الشبكة في النافذة
 void logNetworkEvent(NSString *method, NSURLRequest *request, NSURLResponse *response, NSData *data, NSError *error) {
     NSMutableString *log = [NSMutableString string];
     [log appendFormat:@"🌐 [%@]\n", method ?: @"HTTP"];
@@ -85,7 +83,6 @@ void logNetworkEvent(NSString *method, NSURLRequest *request, NSURLResponse *res
     if (error) {
         [log appendFormat:@"❌ Error: %@\n", error.localizedDescription];
     } else if (data && data.length > 0) {
-        // محاولة تحويل البيانات إلى نص لقراءتها إن كانت صالحة
         NSString *responseString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         if (responseString.length > 0) {
             if (responseString.length > 500) {
@@ -155,7 +152,6 @@ void logNetworkEvent(NSString *method, NSURLRequest *request, NSURLResponse *res
 
 + (void)load {
     dispatch_async(dispatch_get_main_queue(), ^{
-        // تفعيل الرصد تلقائياً عند بدء التشغيل ليظهر في النافذة فوراً
         [self setEnabled:YES];
         if ([self isEnabled]) {
             [self injectIntoAllNSURLConnectionDelegateClasses];
@@ -461,7 +457,10 @@ void logNetworkEvent(NSString *method, NSURLRequest *request, NSURLResponse *res
             [[FLEXNetworkRecorder defaultRecorder] recordLoadingFinishedWithRequestID:requestID responseBody:data];
         }
         
-        NSURLRequest *req = [[FLEXNetworkRecorder defaultRecorder] requestWithRequestID:requestID];
+        // التعديل هنا: جلب الـ Request باستخدام transactionForRequestID بدلاً من الدالة القديمة
+        id transaction = [[FLEXNetworkRecorder defaultRecorder] performSelector:@selector(transactionForRequestID:) withObject:requestID];
+        NSURLRequest *req = [transaction respondsToSelector:@selector(request)] ? [transaction request] : nil;
+        
         logNetworkEvent(mechanism, req, response, data, error);
 
         if (completion) {
@@ -811,7 +810,11 @@ static char const * const kFLEXRequestIDKey = "kFLEXRequestIDKey";
         [[FLEXNetworkRecorder defaultRecorder] recordLoadingFinishedWithRequestID:requestID responseBody:requestState.dataAccumulator];
         
         NSURLRequest *req = requestState.request;
-        NSURLResponse *resp = [[FLEXNetworkRecorder defaultRecorder] responseWithRequestID:requestID];
+        
+        // التعديل هنا: استخدام transaction للحصول على الـ Response بشكل آمن
+        id transaction = [[FLEXNetworkRecorder defaultRecorder] performSelector:@selector(transactionForRequestID:) withObject:requestID];
+        NSURLResponse *resp = [transaction respondsToSelector:@selector(response)] ? [transaction response] : nil;
+        
         logNetworkEvent(@"NSURLConnection (Delegate)", req, resp, requestState.dataAccumulator, nil);
         
         [self removeRequestStateForRequestID:requestID];
