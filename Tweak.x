@@ -3,23 +3,25 @@
 #import <WebKit/WebKit.h>
 
 static BOOL isAlertActive = false;
-static BOOL canTriggerAlertFor10 = YES;
 
-// دالة تحديد مسار ملف الـ plist المستقل داخل مجلد Library (خارج مجلد Documents)
+// دالة تحديد مسار ملف الـ plist المستقل داخل مجلد Library
 NSString *getStandalonePlistPath(void) {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+    NSArray *paths = NSSearchPathDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
     return [libraryDirectory stringByAppendingPathComponent:@"AppLockState.plist"];
 }
 
-// حفظ بيانات الحظر في الملف المستقل
-void saveLockStateToPlist(NSDate *expiryDate) {
+// التحقق مما إذا كان مسموحاً بالحظر (هل تم رؤية رقم غير الـ 10 سابقاً؟)
+BOOL isArmedFor10(void) {
     NSString *path = getStandalonePlistPath();
-    NSDictionary *dict = @{@"LockExpiryTime": expiryDate};
-    [dict writeToFile:path atomically:YES];
+    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+    if (dict && dict[@"IsArmed"] != nil) {
+        return [dict[@"IsArmed"] boolValue];
+    }
+    return YES; // الافتراضي مسموح عند أول تشغيل
 }
 
-// التحقق من حالة الحظر عبر قراءة الملف المستقل
+// التحقق من حالة الحظر (هل الـ 10 دقائق لم تنتهِ بعد؟)
 BOOL checkLockStateFromPlist(void) {
     NSString *path = getStandalonePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -29,21 +31,41 @@ BOOL checkLockStateFromPlist(void) {
             if ([expiryDate timeIntervalSinceNow] > 0) {
                 return YES; // الحظر لا يزال سارياً
             } else {
-                // انتهت الـ 10 دقائق، يتم حذف الملف المستقل تلقائياً
-                [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+                // انتهت الـ 10 دقائق، نحذف وقت الحظر ولكن نبقي IsArmed معطلة (NO)
+                NSMutableDictionary *mutableDict = [dict mutableCopy];
+                [mutableDict removeObjectForKey:@"LockExpiryTime"];
+                mutableDict[@"IsArmed"] = @NO;
+                [mutableDict writeToFile:path atomically:YES];
             }
         }
     }
     return NO;
 }
 
-// حذف الملف عند انتهاء المدة
-void removeLockStatePlist(void) {
+// حفظ وقت الحظر وتعطيل التفعيل حتى يظهر رقم غير الـ 10
+void saveLockStateToPlist(NSDate *expiryDate) {
     NSString *path = getStandalonePlistPath();
-    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithContentsOfFile:path];
+    if (!mutableDict) {
+        mutableDict = [NSMutableDictionary dictionary];
+    }
+    mutableDict[@"LockExpiryTime"] = expiryDate;
+    mutableDict[@"IsArmed"] = @NO; // قفلنا، ممنوع يحظر مجدداً حتى يتغير الرقم
+    [mutableDict writeToFile:path atomically:YES];
 }
 
-// دالة إظهار التنبيه المانع المستمر
+// إعادة تفعيل نظام الحظر عندما يظهر رقم جديد غير الـ 10 (مثل 15 أو غيره)
+void armFor10Again(void) {
+    NSString *path = getStandalonePlistPath();
+    NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithContentsOfFile:path];
+    if (!mutableDict) {
+        mutableDict = [NSMutableDictionary dictionary];
+    }
+    mutableDict[@"IsArmed"] = @YES; // تم رؤية رقم مختلف، ائذن بالحظر لو وصل 10 مجدداً
+    [mutableDict writeToFile:path atomically:YES];
+}
+
+// دالة إظهار التنبيه المانع المستمر داخل التطبيق
 void showPersistentLockoutAlert(void) {
     if (isAlertActive) return;
     isAlertActive = YES;
@@ -89,7 +111,7 @@ void showPersistentLockoutAlert(void) {
             titleLabel.textAlignment = NSTextAlignmentCenter;
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 65, alertBox.bounds.size.width - 30, 90)];
-            descLabel.text = @"تم الوصول إلى 10 نقاط!\nالتطبيق مقفل مؤقتاً لمدة 10 دقائق.\nمخزن في ملف plist داخل مجلد Library.";
+            descLabel.text = @"تم الوصول إلى 10 نقاط!\nالتطبيق مقفل مؤقتاً لمدة 10 دقائق.\nسينتهي الوقت تلقائياً عند انقضاء المدة.";
             descLabel.textColor = [UIColor whiteColor];
             descLabel.font = [UIFont systemFontOfSize:12.5];
             descLabel.numberOfLines = 4;
@@ -112,7 +134,13 @@ void showPersistentLockoutAlert(void) {
                 if (v) {
                     [v removeFromSuperview];
                 }
-                removeLockStatePlist();
+                // تحديث ملف الـ plist بانتهاء الحظر وتعطيل الحظر حتى يرى رقماً غير الـ 10
+                NSMutableDictionary *mutableDict = [dict mutableCopy];
+                if (mutableDict) {
+                    [mutableDict removeObjectForKey:@"LockExpiryTime"];
+                    mutableDict[@"IsArmed"] = @NO;
+                    [mutableDict writeToFile:path atomically:YES];
+                }
                 isAlertActive = NO;
             });
         }
@@ -141,15 +169,15 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
                 NSInteger currentPoints = [pointsVal integerValue];
                 
                 if (currentPoints == 10) {
-                    if (canTriggerAlertFor10 && !checkLockStateFromPlist()) {
-                        canTriggerAlertFor10 = NO;
+                    // لن يحظرنا إلا إذا كان النظام مُسلحاً (IsArmed == YES) ولم يكن هناك حظر سارٍ
+                    if (isArmedFor10() && !checkLockStateFromPlist()) {
                         NSDate *expiry = [NSDate dateWithTimeIntervalSinceNow:600.0];
                         saveLockStateToPlist(expiry);
-                        
                         showPersistentLockoutAlert();
                     }
                 } else {
-                    canTriggerAlertFor10 = YES;
+                    // إذا أصبحت النقاط رقماً آخر غير الـ 10 (مثل 15، 5، إلخ)، نقوم بإعادة تسليح النظام فوراً
+                    armFor10Again();
                 }
             }
         }
