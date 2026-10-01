@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 
 #define BLOCK_DURATION 600.0 // 10 دقائق بالثواني
-#define TARGET_POINTS 20     // التعديل هنا ليصبح الحظر عند الوصول إلى 20 نقطة تماماً
+#define TARGET_POINTS 20     // الحظر عند الوصول إلى 20 نقطة تماماً
 #define KEY_BLOCK_END @"block_end_timestamp"
 #define TARGET_URL @"https://tn.maildisposable.com/api/v1/users/additional/points/data"
 
@@ -19,7 +19,7 @@ void showBlockOverlay() {
             titleLabel.text = @"توقف مؤقت للتطبيق";
             titleLabel.textColor = [UIColor whiteColor];
             titleLabel.textAlignment = NSTextAlignmentCenter;
-            titleLabel.font = [UIFont boldSystemFontOfSize:26];
+            titleLabel.font = [UIFont boldSystemFontOfSize:26]; // تم التصحيح هنا إلى UIFont
             [overlay addSubview:titleLabel];
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 280, keyWindow.bounds.size.width - 40, 80)];
@@ -27,7 +27,7 @@ void showBlockOverlay() {
             descLabel.textColor = [UIColor lightGrayColor];
             descLabel.textAlignment = NSTextAlignmentCenter;
             descLabel.numberOfLines = 3;
-            descLabel.font = [UIFont systemFontOfSize:16];
+            descLabel.font = [UIFont systemFontOfSize:16]; // وتم التصحيح هنا إلى UIFont
             [overlay addSubview:descLabel];
             
             [keyWindow addSubview:overlay];
