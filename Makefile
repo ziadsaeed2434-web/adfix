@@ -12,7 +12,7 @@ AdPurgeTweak_PRIVATE_FRAMEWORKS = AppTrackingTransparency
 AdPurgeTweak_LIBRARIES = substrate
 AdPurgeTweak_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 
-AdPurgeTweak_FILES = Tweak.x FLEXNetworkObserver.m FLEXNetworkRecorder.m FLEXNetworkTransaction.m FLEXResources.m FLEXUtility.m
+AdPurgeTweak_FILES = Tweak.x FLEXNetworkObserver.m FLEXNetworkRecorder.m FLEXNetworkTransaction.m FLEXNetworkTransaction.m FLEXResources.m FLEXUtility.m
 
 
 
