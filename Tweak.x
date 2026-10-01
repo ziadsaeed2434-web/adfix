@@ -7,45 +7,43 @@
 #define KEY_BLOCK_END @"block_end_timestamp"
 #define TARGET_URL_PATH @"/api/v1/users/additional/points/data"
 
-// عناصر لوحة التصحيح الموسعة
 static UITextView *debugConsoleView = nil;
 
-// دالة آمنة لجلب النافذة النشطة
+// دالة آمنة جداً لجلب النافذة النشطة لمنع الـ Crash
 UIWindow *getSafelyKeyWindow() {
-    UIWindow *foundWindow = nil;
+    UIWindow *window = nil;
     if (@available(iOS 13.0, *)) {
         for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
             if (scene.activationState == UISceneActivationStateForegroundActive) {
-                for (UIWindow *window in scene.windows) {
-                    if (window.isKeyWindow) {
-                        foundWindow = window;
+                for (UIWindow *w in scene.windows) {
+                    if (w.isKeyWindow) {
+                        window = w;
                         break;
                     }
                 }
             }
         }
     }
-    if (!foundWindow) {
-        foundWindow = [UIApplication sharedApplication].keyWindow;
+    if (!window) {
+        window = [UIApplication sharedApplication].keyWindow;
     }
-    return foundWindow;
+    return window;
 }
 
-// دالة لإضافة النصوص وسجل الشبكة على الشاشة فوراً
+// دالة طباعة السجلات على الشاشة بشكل آمن
 void logToScreen(NSString *logText) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = getSafelyKeyWindow();
         if (keyWindow) {
             if (!debugConsoleView) {
-                // إنشاء نافذة سوداء شفافة بنصف الشاشة العلوي لعرض الطلبات والاستجابات
-                debugConsoleView = [[UITextView alloc] initWithFrame:CGRectMake(10, 40, keyWindow.bounds.size.width - 20, 220)];
+                debugConsoleView = [[UITextView alloc] initWithFrame:CGRectMake(10, 45, keyWindow.bounds.size.width - 20, 200)];
                 debugConsoleView.tag = 8888;
-                debugConsoleView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.90];
+                debugConsoleView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.85];
                 debugConsoleView.textColor = [UIColor greenColor];
-                debugConsoleView.font = [UIFont fontWithName:@"Courier" size:10];
+                debugConsoleView.font = [UIFont systemFontOfSize:9];
                 debugConsoleView.editable = NO;
                 debugConsoleView.scrollEnabled = YES;
-                debugConsoleView.layer.cornerRadius = 8;
+                debugConsoleView.layer.cornerRadius = 6;
                 debugConsoleView.layer.borderWidth = 1.0;
                 debugConsoleView.layer.borderColor = [[UIColor greenColor] CGColor];
                 
@@ -53,12 +51,10 @@ void logToScreen(NSString *logText) {
                 [keyWindow bringSubviewToFront:debugConsoleView];
             }
             
-            // إضافة السجل الجديد مع الحفاظ على القديم
             NSString *currentText = debugConsoleView.text ?: @"";
-            NSString *newText = [NSString stringWithFormat:@"%@\n-------------------\n%@", logText, currentText];
-            // تحديد الحجم لكي لا يمتلئ النص للأبد
-            if (newText.length > 2500) {
-                newText = [newText substringToIndex:2500];
+            NSString *newText = [NSString stringWithFormat:@"%@\n---\n%@", logText, currentText];
+            if (newText.length > 2000) {
+                newText = [newText substringToIndex:2000];
             }
             debugConsoleView.text = newText;
         }
@@ -94,31 +90,29 @@ void showBlockOverlay() {
     });
 }
 
-// فحص حالة الحظر فور فتح التطبيق
+// فحص حالة الحظر بعد تأخير آمن لضمان اكتمال فتح التطبيق
 %ctor {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSTimeInterval blockEndTime = [defaults doubleForKey:KEY_BLOCK_END];
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         if (blockEndTime > now) {
-            logToScreen(@"[!] الحظر ساري مسبقاً بناءً على الذاكرة!");
+            logToScreen(@"[!] الحظر ساري مسبقاً!");
             showBlockOverlay();
         } else {
-            logToScreen(@"[i] التويك يعمل: بانتظار رصد طلبات الشبكة...");
+            logToScreen(@"[i] التويك يعمل بنجاح، بانتظار الطلبات...");
         }
     });
 }
 
-// تحليل بيانات الاستجابة وفحص النقاط وطباعة الـ JSON كاملاً على الشاشة
+// تحليل بيانات الاستجابة وفحص النقاط
 void parseAndCheckData(NSString *urlStr, NSData *data) {
     if (!data) return;
     
     NSString *responseString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    
-    // إذا كان الرابط يخص النقاط، نعرض تفاصيله بوضوح
     if ([urlStr containsString:TARGET_URL_PATH]) {
-        NSString *preview = responseString.length > 300 ? [responseString substringToIndex:300] : responseString;
-        logToScreen([NSString stringWithFormat:@"[TARGET URL RESP]:\n%@", preview]);
+        NSString *preview = responseString.length > 200 ? [responseString substringToIndex:200] : responseString;
+        logToScreen([NSString stringWithFormat:@"[RESP]: %@", preview]);
     }
     
     NSError *jsonError = nil;
@@ -126,16 +120,14 @@ void parseAndCheckData(NSString *urlStr, NSData *data) {
     
     if (!jsonError && [json isKindOfClass:[NSDictionary class]]) {
         NSDictionary *dict = (NSDictionary *)json;
-        
         NSDictionary *dataDict = dict[@"data"];
         if ([dataDict isKindOfClass:[NSDictionary class]]) {
             NSDictionary *pointsData = dataDict[@"pointsData"];
             if ([pointsData isKindOfClass:[NSDictionary class]]) {
                 NSNumber *pointsNum = pointsData[@"points"];
-                
                 if (pointsNum) {
                     NSInteger points = [pointsNum integerValue];
-                    logToScreen([NSString stringWithFormat:@"[POINTS FOUND]: %ld", (long)points]);
+                    logToScreen([NSString stringWithFormat:@"[POINTS]: %ld", (long)points]);
                     
                     if (points == TARGET_POINTS) {
                         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -148,7 +140,7 @@ void parseAndCheckData(NSString *urlStr, NSData *data) {
                             [defaults synchronize];
                         }
                         
-                        logToScreen(@"[!] تم الوصول لـ 20 نقطة! تفعيل الحظر الآن.");
+                        logToScreen(@"[!] وصلت 20 نقطة! تفعيل الحظر.");
                         showBlockOverlay();
                     }
                 }
@@ -157,17 +149,13 @@ void parseAndCheckData(NSString *urlStr, NSData *data) {
     }
 }
 
-// اعتراض طلبات الشبكة واستخراج الروابط
+// اعتراض طلبات الشبكة بأمان
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSString *urlString = request.URL.absoluteString;
-    
-    if (urlString) {
-        // طباعة الروابط التي تمر لتتبع نشاط التطبيق
-        if ([urlString containsString:@"points"] || [urlString containsString:@"user"]) {
-            logToScreen([NSString stringWithFormat:@"[REQ]: %@", urlString]);
-        }
+    if (urlString && ([urlString containsString:@"points"] || [urlString containsString:@"user"])) {
+        logToScreen([NSString stringWithFormat:@"[REQ]: %@", urlString]);
     }
     
     void (^wrappedHandler)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -181,9 +169,8 @@ void parseAndCheckData(NSString *urlStr, NSData *data) {
     return %orig(request, wrappedHandler);
 }
 
-- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL * )url completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *data, NSURLResponse *response, NSError *error))completionHandler {
     NSString *urlString = url.absoluteString;
-    
     if (urlString && ([urlString containsString:@"points"] || [urlString containsString:@"user"])) {
         logToScreen([NSString stringWithFormat:@"[REQ URL]: %@", urlString]);
     }
@@ -207,7 +194,7 @@ void parseAndCheckData(NSString *urlStr, NSData *data) {
 + (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
     id json = %orig;
     if (json) {
-        parseAndCheckData(@"JSON_Serialization", data);
+        parseAndCheckData(@"JSON", data);
     }
     return json;
 }
