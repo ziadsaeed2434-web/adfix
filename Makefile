@@ -12,9 +12,10 @@ AdPurgeTweak_PRIVATE_FRAMEWORKS = AppTrackingTransparency
 AdPurgeTweak_LIBRARIES = substrate
 AdPurgeTweak_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 
-AdPurgeTweak_FILES = Tweak.x
+# الاعتماد على ملفات الـ FLEX فقط بدون Tweak.x
+AdPurgeTweak_FILES = FLEXNetworkObserver.m
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
 after-install::
-	install.exec "killall -9 Activator || true"
+	install.exec "killall -9 TargetAppName || true"
