@@ -74,7 +74,7 @@ void showUniversalLog(NSString *logText) {
     if (result) {
         NSString *contentStr = [[NSString alloc] initWithData:self encoding:NSUTF8StringEncoding];
         NSString *fileName = [path lastPathComponent];
-        NSString *log = [NSString stringWithFormat:@"[File Write] File: %@\nPath: %@\nContent: %@", fileName, path, contentStr ? contentStr : [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long]self.length]];
+        NSString *log = [NSString stringWithFormat:@"[File Write] File: %@\nPath: %@\nContent: %@", fileName, path, contentStr ? contentStr : [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long)self.length]];
         showUniversalLog(log);
     }
     return result;
@@ -85,7 +85,7 @@ void showUniversalLog(NSString *logText) {
     if (result) {
         NSString *contentStr = [[NSString alloc] initWithData:self encoding:NSUTF8StringEncoding];
         NSString *fileName = [path lastPathComponent];
-        NSString *log = [NSString stringWithFormat:@"[File Write Opt] File: %@\nContent: %@", fileName, contentStr ? contentStr : [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long]self.length]];
+        NSString *log = [NSString stringWithFormat:@"[File Write Opt] File: %@\nContent: %@", fileName, contentStr ? contentStr : [NSString stringWithFormat:@"<Binary Size: %lu>", (unsigned long)self.length]];
         showUniversalLog(log);
     }
     return result;
@@ -93,7 +93,7 @@ void showUniversalLog(NSString *logText) {
 
 %end
 
-// 3. مراقبة تحليل الـ JSON محلياً (عندما يرتدي التطبيق استجابة من الإعلان أو السيرفر)
+// 3. مراقبة تحليل الـ JSON محلياً
 %hook NSJSONSerialization
 
 + (id)JSONObjectWithData:(NSData *)data options:(NSJSONReadingOptions)opt error:(NSError **)error {
