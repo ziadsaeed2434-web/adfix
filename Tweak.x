@@ -2,63 +2,63 @@
 #import "FLEXNetworkRecorder.h"
 
 static UITextView *universalLogView = nil;
-static UIWindow *logWindow = nil;
+static UIView *globalOverlayView = nil;
 
 void showUniversalLog(NSString *logText) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!logWindow) {
-            CGRect screenBounds = [UIScreen mainScreen].bounds;
-            
-            if (@available(iOS 13.0, *)) {
-                for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                    if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                        logWindow = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
-                        break;
+        UIWindow *keyWindow = nil;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                    for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                        if (w.isKeyWindow) {
+                            keyWindow = w;
+                            break;
+                        }
                     }
                 }
             }
-            if (!logWindow) {
-                logWindow = [[UIWindow alloc] initWithFrame:screenBounds];
-            }
-            
-            logWindow.windowLevel = UIWindowLevelAlert + 1000;
-            logWindow.backgroundColor = [UIColor clearColor];
-            logWindow.hidden = NO;
-            
-            UIViewController *rootVC = [[UIViewController alloc] init];
-            rootVC.view.backgroundColor = [UIColor clearColor];
-            logWindow.rootViewController = rootVC;
-            
-            UIView *overlay = [[UIView alloc] initWithFrame:CGRectMake(10, 45, screenBounds.size.width - 20, 260)];
-            overlay.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.95];
-            overlay.layer.cornerRadius = 10;
-            overlay.layer.borderWidth = 1.5;
-            overlay.layer.borderColor = [UIColor orangeColor].CGColor;
-            
-            universalLogView = [[UITextView alloc] initWithFrame:CGRectMake(5, 5, overlay.bounds.size.width - 10, overlay.bounds.size.height - 10)];
-            universalLogView.backgroundColor = [UIColor clearColor];
-            universalLogView.textColor = [UIColor orangeColor];
-            universalLogView.font = [UIFont fontWithName:@"Courier-Bold" size:10];
-            universalLogView.editable = NO;
-            universalLogView.text = @"[+] Network Monitor Active & Listening...\n";
-            
-            [overlay addSubview:universalLogView];
-            [rootVC.view addSubview:overlay];
+        }
+        if (!keyWindow) {
+            keyWindow = [UIApplication sharedApplication].keyWindow;
         }
         
-        if (universalLogView) {
-            NSString *oldText = universalLogView.text;
-            universalLogView.text = [NSString stringWithFormat:@"%@\n--------------------\n%@", logText, oldText];
+        if (keyWindow) {
+            if (!globalOverlayView) {
+                CGRect screenBounds = keyWindow.bounds;
+                globalOverlayView = [[UIView alloc] initWithFrame:CGRectMake(10, 45, screenBounds.size.width - 20, 260)];
+                globalOverlayView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.95];
+                globalOverlayView.layer.cornerRadius = 10;
+                globalOverlayView.layer.borderWidth = 1.5;
+                globalOverlayView.layer.borderColor = [UIColor orangeColor].CGColor;
+                
+                universalLogView = [[UITextView alloc] initWithFrame:CGRectMake(5, 5, globalOverlayView.bounds.size.width - 10, globalOverlayView.bounds.size.height - 10)];
+                universalLogView.backgroundColor = [UIColor clearColor];
+                universalLogView.textColor = [UIColor orangeColor];
+                universalLogView.font = [UIFont fontWithName:@"Courier-Bold" size:9];
+                universalLogView.editable = NO;
+                universalLogView.text = @"[+] Network Monitor Active & Listening...\n";
+                
+                [globalOverlayView addSubview:universalLogView];
+                [keyWindow addSubview:globalOverlayView];
+            }
+            
+            // التأكد من إحضار النافذة دائماً في المقدمة فوق جميع عناصر التطبيق
+            [keyWindow bringSubviewToFront:globalOverlayView];
+            
+            if (universalLogView) {
+                NSString *oldText = universalLogView.text;
+                universalLogView.text = [NSString stringWithFormat:@"%@\n--------------------\n%@", logText, oldText];
+            }
         }
     });
 }
 
-// دالة لإظهار رسالة تنبيه منبثقة تأكيدية على الشاشة فور الفتح
 void showInjectionAlert() {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
         if (@available(iOS 13.0, *)) {
-            for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive) {
                     for (UIWindow *w in scene.windows) {
                         if (w.isKeyWindow) {
@@ -89,12 +89,39 @@ void showInjectionAlert() {
 }
 
 static void handleNetworkNotification(NSNotification *notification) {
-    NSString *log = [NSString stringWithFormat:@"[Event]: %@", notification.name];
-    showUniversalLog(log);
+    FLEXNetworkRecorder *recorder = [FLEXNetworkRecorder defaultRecorder];
+    NSArray *transactions = [recorder networkTransactions];
+    
+    if (transactions.count > 0) {
+        id transaction = [transactions lastObject];
+        
+        NSString *method = [transaction valueForKey:@"method"];
+        NSURL *url = [transaction valueForKey:@"requestURL"];
+        if (!url) {
+            url = [[transaction valueForKey:@"request"] URL];
+        }
+        
+        NSData *responseData = [transaction valueForKey:@"responseData"];
+        NSString *responseString = @"";
+        
+        if (responseData) {
+            responseString = [[NSString alloc] initWithData:responseData encoding:NSUTF8StringEncoding];
+            if (!responseString) {
+                responseString = [NSString stringWithFormat:@"[Binary Data: %lu bytes]", (unsigned long)responseData.length];
+            }
+            if (responseString.length > 500) {
+                responseString = [[responseString substringToIndex:500] stringByAppendingString:@"...\n(truncated)"];
+            }
+        } else {
+            responseString = @"[No Response Body / Loading...]";
+        }
+        
+        NSString *log = [NSString stringWithFormat:@"[%@] %@\nRes: %@", method ?: @"REQ", url.absoluteString ?: @"Unknown URL", responseString];
+        showUniversalLog(log);
+    }
 }
 
 %ctor {
-    // تفعيل مسجل الشبكة
     FLEXNetworkRecorder *recorder = [FLEXNetworkRecorder defaultRecorder];
     SEL selector = @selector(setEnabled:);
     if ([recorder respondsToSelector:selector]) {
@@ -104,13 +131,11 @@ static void handleNetworkNotification(NSNotification *notification) {
         #pragma clang diagnostic pop
     }
     
-    // إظهار رسالة المنبثقة والنافذة العلوية بعد إقلاع التطبيق بثانية واحدة
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         showInjectionAlert();
-        showUniversalLog(@"[Init] Tweak injected & active!");
+        showUniversalLog(@"[Init] Tweak injected & Network Recorder Active!");
     });
     
-    // الاستماع لطلبات الشبكة
     [[NSNotificationCenter defaultCenter] addObserverForName:kFLEXNetworkRecorderNewTransactionNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
