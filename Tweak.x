@@ -40,7 +40,7 @@ void showUniversalLog(NSString *logText) {
                 universalLogView.textColor = [UIColor greenColor];
                 universalLogView.font = [UIFont fontWithName:@"Courier-Bold" size:7.5];
                 universalLogView.editable = NO;
-                universalLogView.text = @"[+] God-Mode Network & Memory Interceptor Online (Clean & Fixed)...\n";
+                universalLogView.text = @"[+] Target Filter Active (Showing Target Request Only)...\n";
                 
                 [globalOverlayView addSubview:universalLogView];
                 [keyWindow addSubview:globalOverlayView];
@@ -56,14 +56,20 @@ void showUniversalLog(NSString *logText) {
     });
 }
 
+// دالة الفلترة والتحقق: تعرض الطلب المحدّد فقط بناءً على الرابط
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
+    // شرط الفلترة: تأكد من أن الرابط يحتوي على المسار المستهدف الظاهر في الصورة
+    if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
+        return; // تجاهل أي طلب آخر تماماً ولا تقم بعرضه
+    }
+
     NSString *resStr = @"";
     if (data) {
         resStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         if (!resStr) {
             resStr = [NSString stringWithFormat:@"[Binary/Encrypted Data: %lu bytes]", (unsigned long)data.length];
-        } else if (resStr.length > 280) {
-            resStr = [[resStr substringToIndex:280] stringByAppendingString:@"...\n(truncated)"];
+        } else if (resStr.length > 500) {
+            resStr = [[resStr substringToIndex:500] stringByAppendingString:@"...\n(truncated)"];
         }
     } else if (error) {
         resStr = [NSString stringWithFormat:@"Error: %@", error.localizedDescription];
@@ -71,18 +77,18 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
         resStr = @"[No Body / Stream]";
     }
     
-    NSString *log = [NSString stringWithFormat:@"[%@] [%@] [%ld] %@\nData: %@", engine, method ?: @"REQ", (long)statusCode, url ?: @"Unknown URL", resStr];
+    NSString *log = [NSString stringWithFormat:@"[TARGET FOUND!] [%@] [%@] [%ld] %@\nData: %@", engine, method ?: @"GET", (long)statusCode, url, resStr];
     showUniversalLog(log);
 }
 
-// 1. بروتوكول الاعتراض الأعمى للطبقات الدنيا
+// 1. بروتوكول الاعتراض للطبقات الدنيا
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
 @implementation GodModeNetworkProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
     NSString *url = request.URL.absoluteString;
-    if (url && ([url hasPrefix:@"http://"] || [url hasPrefix:@"https://"])) {
+    if (url && [url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         if ([NSURLProtocol propertyForKey:@"GodModeHandled" inRequest:request] == nil) {
             return YES;
         }
@@ -113,27 +119,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// 2. رصد طلبات الـ NSMutableURLRequest والديناميكية لحظة تعديلها
-%hook NSMutableURLRequest
-
-- (void)setHTTPBody:(NSData *)HTTPBody {
-    %orig;
-    if (self.URL && HTTPBody) {
-        NSString *bodyStr = [[NSString alloc] initWithData:HTTPBody encoding:NSUTF8StringEncoding] ?: [NSString stringWithFormat:@"[Binary Body: %lu bytes]", (unsigned long)HTTPBody.length];
-        showUniversalLog([NSString stringWithFormat:@"[Mutable-Body] %@\nURL: %@\nBody: %@", self.HTTPMethod ?: @"POST", self.URL.absoluteString, bodyStr]);
-    }
-}
-
-- (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
-    %orig;
-    if (self.URL && field && value) {
-        showUniversalLog([NSString stringWithFormat:@"[Header-Inject] %@: %@\nFor URL: %@", field, value, self.URL.absoluteString]);
-    }
-}
-
-%end
-
-// 3. هوكات مهام NSURLSession الشاملة لكافة الأنواع
+// 2. رصد طلبات الـ NSURLSession المستهدفة
 %hook NSURLSession
 
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
@@ -145,6 +131,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    NSURLRequest *req = [NSURLRequest requestWithURL:url];
     return %orig(url, ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
         logGodModeEvent(@"NSURLSession-URL", @"GET", url.absoluteString, httpResp.statusCode, data, error);
@@ -152,26 +139,9 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     });
 }
 
-- (NSURLSessionUploadTask *)uploadTaskWithRequest:(NSURLRequest *)request fromData:(NSData *)bodyData completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    return %orig(request, bodyData, ^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        logGodModeEvent(@"UploadTask", request.HTTPMethod, request.URL.absoluteString, httpResp.statusCode, data, error);
-        if (completionHandler) completionHandler(data, response, error);
-    });
-}
-
-- (NSURLSessionDownloadTask *)downloadTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURL * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    return %orig(request, ^(NSURL *location, NSURLResponse *response, NSError *error) {
-        NSData *fileData = location ? [NSData dataWithContentsOfURL:location] : nil;
-        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        logGodModeEvent(@"DownloadTask", request.HTTPMethod, request.URL.absoluteString, httpResp.statusCode, fileData, error);
-        if (completionHandler) completionHandler(location, response, error);
-    });
-}
-
 %end
 
-// 4. حقن الإعدادات لفرض البروتوكول على كل الجلسات
+// 3. فرض البروتوكول على الإعدادات
 %hook NSURLSessionConfiguration
 
 + (NSURLSessionConfiguration *)defaultSessionConfiguration {
@@ -185,45 +155,12 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     return config;
 }
 
-+ (NSURLSessionConfiguration *)ephemeralSessionConfiguration {
-    NSURLSessionConfiguration *config = %orig;
-    NSMutableArray *protocols = [config.protocolClasses mutableCopy];
-    if (!protocols) protocols = [NSMutableArray array];
-    if (![protocols containsObject:[GodModeNetworkProtocol class]]) {
-        [protocols insertObject:[GodModeNetworkProtocol class] atIndex:0];
-        config.protocolClasses = protocols;
-    }
-    return config;
-}
-
-+ (NSURLSessionConfiguration *)backgroundSessionConfigurationWithIdentifier:(NSString *)identifier {
-    NSURLSessionConfiguration *config = %orig;
-    NSMutableArray *protocols = [config.protocolClasses mutableCopy];
-    if (!protocols) protocols = [NSMutableArray array];
-    if (![protocols containsObject:[GodModeNetworkProtocol class]]) {
-        [protocols insertObject:[GodModeNetworkProtocol class] atIndex:0];
-        config.protocolClasses = protocols;
-    }
-    return config;
-}
-
-%end
-
-// 5. رصد الـ WebViews الداخلية
-%hook WKWebView
-
-- (void)loadRequest:(NSURLRequest *)request {
-    %orig;
-    if (request.URL) {
-        showUniversalLog([NSString stringWithFormat:@"[WKWebView-Load] GET\nURL: %@", request.URL.absoluteString]);
-    }
-}
-
 %end
 
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [NSURLProtocol registerCard:[GodModeNetworkProtocol class]]; // تم التصحيح لـ registerClass برمجياً بالأسفل
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
-        showUniversalLog(@"[Init] God-Mode Network Interceptor Fully Activated (No Errors).");
+        showUniversalLog(@"[Init] Target-Only Filter Interceptor Active.");
     });
 }
