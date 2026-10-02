@@ -8,11 +8,12 @@
 #import <netdb.h>
 #import <arpa/inet.h>
 
-// --- الثوابت وإعدادات الحسابات ---
+// --- الثوابت وإعدادات الحسابات الثلاثة ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
-static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C";
-static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D";
+static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
+static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D"; // الحساب الثاني
+static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A5956"; // الحساب الثالث
 
 static BOOL isSwitchAlertShown = NO;
 
@@ -78,6 +79,12 @@ NSString *getStatePlistPath(void) {
     return [libraryDirectory stringByAppendingPathComponent:@"AccountSwitchState.plist"];
 }
 
+// --- مسار علامة الخروج النهائي (للكشف عما إذا كان التطبيق قد أُغلق تماماً من الخلفية) ---
+NSString *getTerminationMarkerPath(void) {
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+    return [[paths firstObject] stringByAppendingPathComponent:@"AppWasTerminated.flag"];
+}
+
 // --- إدارة الـ Keychain المدمجة ---
 NSString *getAppCurrentUUIDFromKeychain(void) {
     NSDictionary *query = @{
@@ -124,7 +131,52 @@ void saveUUIDToKeychain(NSString *uuidString) {
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
 }
 
-// --- منطق تبديل الحسابات والنقاط ---
+// --- مسح بيانات التطبيق كلياً (مع استثناء ملف الحالة) ---
+void clearAllAppDataCompletely(void) {
+    NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
+    if (bundleDomain) {
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleDomain];
+    }
+    
+    [[NSURLCache sharedURLCache] removeAllCachedResponses];
+    [[NSURLCache sharedURLCache] setDiskCapacity:0];
+    [[NSURLCache sharedURLCache] setMemoryCapacity:0];
+
+    NSString *homeDir = NSHomeDirectory();
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *error = nil;
+    
+    NSString *libraryDir = [homeDir stringByAppendingPathComponent:@"Library"];
+    NSString *statePath = getStatePlistPath();
+    
+    NSArray *homeContents = [fm contentsOfDirectoryAtPath:homeDir error:&error];
+    for (NSString *item in homeContents) {
+        NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
+        if ([item isEqualToString:@"Library"]) {
+            NSArray *libraryContents = [fm contentsOfDirectoryAtPath:libraryDir error:&error];
+            for (NSString *libItem in libraryContents) {
+                NSString *libItemPath = [libraryDir stringByAppendingPathComponent:libItem];
+                if ([libItemPath isEqualToString:statePath]) {
+                    continue; // استثناء ملف حالة التبديل لكي لا يضيع الترتيب والتسلسل
+                }
+                [fm removeItemAtPath:libItemPath error:&error];
+            }
+        } else {
+            [fm removeItemAtPath:fullPath error:&error];
+        }
+    }
+    
+    NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
+    if ([fm fileExistsAtPath:groupDirBase]) {
+        NSArray *groupFolders = [fm contentsOfDirectoryAtPath:groupDirBase error:nil];
+        for (NSString *groupFolder in groupFolders) {
+            NSString *groupPath = [groupDirBase stringByAppendingPathComponent:groupFolder];
+            [fm removeItemAtPath:groupPath error:&error];
+        }
+    }
+}
+
+// --- منطق التبديل التسلسلي (1 -> 2 -> 3 -> 1) ---
 NSString *getNextAccountUUID(void) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -140,6 +192,9 @@ NSString *getNextAccountUUID(void) {
     if (lastAccountIndex == 1) {
         nextUUID = kAccount2_UUID;
         newIndex = 2;
+    } else if (lastAccountIndex == 2) {
+        nextUUID = kAccount3_UUID;
+        newIndex = 3;
     } else {
         nextUUID = kAccount1_UUID;
         newIndex = 1;
@@ -170,51 +225,6 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
         }
     }
     return YES;
-}
-
-// --- مسح بيانات التطبيق كلياً ---
-void clearAllAppDataCompletely(void) {
-    NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
-    if (bundleDomain) {
-        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleDomain];
-    }
-    
-    [[NSURLCache sharedURLCache] removeAllCachedResponses];
-    [[NSURLCache sharedURLCache] setDiskCapacity:0];
-    [[NSURLCache sharedURLCache] setMemoryCapacity:0];
-
-    NSString *homeDir = NSHomeDirectory();
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSError *error = nil;
-    
-    NSString *libraryDir = [homeDir stringByAppendingPathComponent:@"Library"];
-    NSString *statePath = getStatePlistPath();
-    
-    NSArray *homeContents = [fm contentsOfDirectoryAtPath:homeDir error:&error];
-    for (NSString *item in homeContents) {
-        NSString *fullPath = [homeDir stringByAppendingPathComponent:item];
-        if ([item isEqualToString:@"Library"]) {
-            NSArray *libraryContents = [fm contentsOfDirectoryAtPath:libraryDir error:&error];
-            for (NSString *libItem in libraryContents) {
-                NSString *libItemPath = [libraryDir stringByAppendingPathComponent:libItem];
-                if ([libItemPath isEqualToString:statePath]) {
-                    continue;
-                }
-                [fm removeItemAtPath:libItemPath error:&error];
-            }
-        } else {
-            [fm removeItemAtPath:fullPath error:&error];
-        }
-    }
-    
-    NSString *groupDirBase = [[[homeDir stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Group Containers"];
-    if ([fm fileExistsAtPath:groupDirBase]) {
-        NSArray *groupFolders = [fm contentsOfDirectoryAtPath:groupDirBase error:nil];
-        for (NSString *groupFolder in groupFolders) {
-            NSString *groupPath = [groupDirBase stringByAppendingPathComponent:groupFolder];
-            [fm removeItemAtPath:groupPath error:&error];
-        }
-    }
 }
 
 // --- تنفيذ التبديل والتنبيه ---
@@ -250,7 +260,7 @@ void performAccountSwitchAndAlert(void) {
         }
         
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم تبديل الحساب تلقائياً"
-                                                                   message:@"تم الوصول إلى 395 نقطة وحذف الحساب السابق.\nتم تفعيل الحساب الآخر بنجاح.\n\nيرجى إغلاق التطبيق من الخلفية وفتحه مجدداً."
+                                                                   message:@"تم الوصول إلى 395 نقطة وحذف البيانات.\nتم الانتقال للحساب التالي بنجاح.\n\nيرجى إغلاق التطبيق من الخلفية وفتحه مجدداً."
                                                             preferredStyle:UIAlertControllerStyleAlert];
         
         if (rootVC) {
@@ -261,7 +271,9 @@ void performAccountSwitchAndAlert(void) {
 
 void checkAndEnforceValidAccount(void) {
     NSString *currentUUID = getAppCurrentUUIDFromKeychain();
-    if (![currentUUID isEqualToString:kAccount1_UUID] && ![currentUUID isEqualToString:kAccount2_UUID]) {
+    if (![currentUUID isEqualToString:kAccount1_UUID] && 
+        ![currentUUID isEqualToString:kAccount2_UUID] && 
+        ![currentUUID isEqualToString:kAccount3_UUID]) {
         clearEntireKeychain();
         saveUUIDToKeychain(kAccount1_UUID);
         
@@ -271,6 +283,31 @@ void checkAndEnforceValidAccount(void) {
         
         clearAllAppDataCompletely();
     }
+}
+
+// دالة تفحص ما إذا كان التطبيق قد أُغلق نهائياً من الخلفية (Terminated)
+void checkAndWipeOnFreshLaunchIfNeeded(void) {
+    checkAndEnforceValidAccount();
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *markerPath = getTerminationMarkerPath();
+    
+    // إذا لم يواجه علامة الخروج، فهذا يعني أنه تم الخروج نهائياً من الخلفية وتم فتحه من جديد الآن
+    if (![fm fileExistsAtPath:markerPath]) {
+        NSString *currentUUID = getAppCurrentUUIDFromKeychain();
+        
+        // مسح بيانات الكاش والملفات جذرياً
+        clearAllAppDataCompletely();
+        
+        // استعادة الحساب الحالي لضمان عدم ضياع الجلسة
+        if (currentUUID) {
+            clearEntireKeychain();
+            saveUUIDToKeychain(currentUUID);
+        }
+    }
+    
+    // إنشاء العلامة لتحديد أن التطبيق الآن يعمل
+    [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
@@ -459,7 +496,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    // تم تصحيح المشكلة: تعريف المتغير هنا ليكون متاحاً بدلاً من الخطأ السابق
     NSString *dynamicIP = randomSpectrumIP();
     NSString *urlString = [url absoluteString];
     
@@ -486,7 +522,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- تحصين وتفعيل الإعلانات تلقائياً (تم تصحيح هيكلة الأقواس و @try/@catch) ---
+// --- تحصين وتفعيل الإعلانات تلقائياً ---
 %hook ActivatorAdService
 - (BOOL)isReady { return YES; }
 - (BOOL)isAdReady { return YES; }
@@ -531,15 +567,22 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- نقطة البداية وتشغيل المراقب ---
+// --- مراقبة دورة حياة التطبيق لإدارة الخروج النهائي والكاش ---
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
         
-        checkAndEnforceValidAccount();
+        // الفحص والمسح عند التشغيل إذا كان الخروج نهائياً من الخلفية
+        checkAndWipeOnFreshLaunchIfNeeded();
         
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            checkAndEnforceValidAccount();
+        // تنظيف العلامة عند إغلاق التطبيق طبيعياً أو دخوله للخلفية
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            NSFileManager *fm = [NSFileManager defaultManager];
+            [fm removeItemAtPath:getTerminationMarkerPath() error:nil];
+        }];
+        
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            // إذا ذهب التطبيق للخلفية، نترك العلامة أو نحذفها بناءً على إغلاقه الكلي لاحقاً
         }];
     });
 }
