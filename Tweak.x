@@ -401,7 +401,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 2;
+    return 3;
 }
 %end
 
@@ -410,7 +410,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
-    return NO;
+    return YES;
 }
 %end
 
