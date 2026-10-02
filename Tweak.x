@@ -12,6 +12,9 @@ static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10
 
 static BOOL isSwitchAlertShown = NO;
 
+// علم أمني للتحكم المسموح به في الـ Keychain من قِبل التويك حصراً
+static BOOL isPerformingAuthorizedKeychainOperation = NO;
+
 // مسار حفظ مؤشر التبديل وحالة النقاط لضمان الذكاء وعدم التكرار
 NSString *getStatePlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
@@ -42,14 +45,13 @@ NSString *getNextAccountUUID(void) {
     
     NSMutableDictionary *newDict = dict ? [dict mutableCopy] : [NSMutableDictionary dictionary];
     newDict[@"LastIndex"] = @(newIndex);
-    // تسجيل أننا تجاوزنا الـ 10 نقاط للحساب الجديد حتى تفتح المراقبة بذكاء
     newDict[@"WaitingForPointsChange"] = @YES; 
     [newDict writeToFile:path atomically:YES];
     
     return nextUUID;
 }
 
-// التحقق هل يجب تفعيل المراقبة (هل تغيرت النقاط عن 10 بعد التبديل؟)
+// التحقق هل يجب تفعيل المراقبة
 BOOL shouldProcessPoints(NSInteger currentPoints) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -57,11 +59,9 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     if (dict && dict[@"WaitingForPointsChange"] != nil) {
         BOOL waiting = [dict[@"WaitingForPointsChange"] boolValue];
         if (waiting) {
-            // إذا كانت النقاط لا تزال 10 بالضبط، نتجاهل المراقبة حتى تتغير القيمة
             if (currentPoints == 10) {
                 return NO;
             } else {
-                // بمجرد أن تتغير النقاط عن 10، نقوم بإلغاء الانتظار وتفعيل المراقبة الكاملة
                 NSMutableDictionary *mutableDict = [dict mutableCopy];
                 mutableDict[@"WaitingForPointsChange"] = @NO;
                 [mutableDict writeToFile:path atomically:YES];
@@ -88,8 +88,9 @@ NSString *getAppCurrentUUIDFromKeychain(void) {
     return nil;
 }
 
-// حذف محتويات الـ Keychain بالكامل
+// حذف محتويات الـ Keychain بالكامل (مع تفعيل إذن التويك المؤقت)
 void clearEntireKeychain(void) {
+    isPerformingAuthorizedKeychainOperation = YES;
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecClassInternetPassword,
@@ -105,10 +106,12 @@ void clearEntireKeychain(void) {
         };
         SecItemDelete((__bridge CFDictionaryRef)spec);
     }
+    isPerformingAuthorizedKeychainOperation = NO;
 }
 
-// حفظ الـ UUID الجديد في الـ Keychain
+// حفظ الـ UUID الجديد في الـ Keychain (مع تفعيل إذن التويك المؤقت)
 void saveUUIDToKeychain(NSString *uuidString) {
+    isPerformingAuthorizedKeychainOperation = YES;
     NSData *data = [uuidString dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *addQuery = @{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
@@ -117,6 +120,7 @@ void saveUUIDToKeychain(NSString *uuidString) {
         (__bridge id)kSecValueData: data
     };
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
+    isPerformingAuthorizedKeychainOperation = NO;
 }
 
 // مسح جميع بيانات التطبيق جذرياً واستثناء ملف الحالة
@@ -246,12 +250,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
-                // التحقق الذكي: هل مسموح بفحص النقاط حالياً؟
                 if (!shouldProcessPoints(currentPoints)) {
                     return;
                 }
                 
-                // عند الوصول إلى 10 نقاط، يتم إظهار النافذة والتبديل
                 if (currentPoints >= 10) {
                     performAccountSwitchAndAlert();
                 }
@@ -260,7 +262,37 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     }
 }
 
-// 1. بروتوكول الاعتراض
+// -----------------------------------------------------------------
+// حماية الـ Keychain ومنع أي إضافة أو تعديل خارجي
+// -----------------------------------------------------------------
+
+OSStatus hooked_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
+    // إذا لم تكن العملية صادرة عن التويك نفسه، نقوم برفضها أمنياً
+    if (!isPerformingAuthorizedKeychainOperation) {
+        // إرجاع خطأ يمنع الإضافة (errSecAuthFailed أو errSecDuplicateItem أو errSecParam حسب الحاجة)
+        return errSecAuthFailed;
+    }
+    return SecItemAdd(attributes, result);
+}
+
+OSStatus hooked_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesToUpdate) {
+    // إذا لم تكن العملية صادرة عن التويك نفسه، نقوم برفض التعديل
+    if (!isPerformingAuthorizedKeychainOperation) {
+        return errSecAuthFailed;
+    }
+    return SecItemUpdate(query, attributesToUpdate);
+}
+
+// استخدام Logos Hooks لاعتراض دوال الأمن في C (Functions Interception)
+// ملاحظة: بما أن SecItemAdd و SecItemUpdate دوال C وليست Objective-C methods، يتم استخدام تقنية MSHookFunction أو إعادة توجيه الرموز، 
+// أو إن كان بيئة العمل تدعم Logos للـ C functions عبر %hook مع مساحات الأسماء أو Substrate:
+
+// إذا كانت بيئة الإنشاء تدعم الـ Function Hook المباشر عبر Logos:
+%group KeychainProtection
+// سيتم تفعيل الحماية لمنع أي تعديل خارجي
+%end
+
+// 1. بروتوكول الاعتراض للشبكة
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
@@ -281,7 +313,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    // تم تصحيح الخطأ هنا باستعمال inRequest بدلاً من inNewReq
     [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
@@ -329,6 +360,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 %end
 
 %ctor {
+    // تفعيل Hook لدوال C الخاصة بالـ Keychain لمنع أي تلاعب خارجي من التطبيق
+    MSHookFunction((void *)SecItemAdd, (void *)hooked_SecItemAdd, (void **)&SecItemAdd);
+    MSHookFunction((void *)SecItemUpdate, (void *)hooked_SecItemUpdate, (void **)&SecItemUpdate);
+
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
         
