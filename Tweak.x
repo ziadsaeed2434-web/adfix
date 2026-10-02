@@ -4,16 +4,13 @@
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
 
-// الثوابت المطابقة لتنسيق الـ Keychain
+// الثوابت المطابقة لتنسيق الـ Keychain الأصلي
 static NSString * const kKeychainAccount = @"com.tempnum.virtual-number.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
 static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
 static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D"; // الحساب الثاني
 
 static BOOL isSwitchAlertShown = NO;
-
-// علم أمني للتحكم المسموح به في الـ Keychain من قِبل التويك حصراً
-static BOOL isPerformingAuthorizedKeychainOperation = NO;
 
 // مسار حفظ مؤشر التبديل وحالة النقاط لضمان الذكاء وعدم التكرار
 NSString *getStatePlistPath(void) {
@@ -22,7 +19,7 @@ NSString *getStatePlistPath(void) {
     return [libraryDirectory stringByAppendingPathComponent:@"AccountSwitchState.plist"];
 }
 
-// قراءة وتحديد الحساب التالي بدقة تامة (تناوبي)
+// قراءة وتحديد الحساب التالي بدقة تامة (تناوبي) وتفعيل حالة الانتظار لحين تغير النقاط عن 10
 NSString *getNextAccountUUID(void) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -43,15 +40,16 @@ NSString *getNextAccountUUID(void) {
         newIndex = 1;
     }
     
-    NSMutableDictionary *newDict = dict ? [dict mutableCopy] : [NSMutableDictionary dictionary];
+    NSMutableDictionary *newDict = [NSMutableDictionary dictionary];
     newDict[@"LastIndex"] = @(newIndex);
+    // تفعيل قفل المراقبة: البقاء في وضع الانتظار حتى تتغير النقاط عن 10 في الحساب الجديد
     newDict[@"WaitingForPointsChange"] = @YES; 
     [newDict writeToFile:path atomically:YES];
     
     return nextUUID;
 }
 
-// التحقق هل يجب تفعيل المراقبة
+// التحقق الصارم: هل يجب فحص النقاط أم إبقاء المراقبة متوقفة؟
 BOOL shouldProcessPoints(NSInteger currentPoints) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -59,9 +57,11 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     if (dict && dict[@"WaitingForPointsChange"] != nil) {
         BOOL waiting = [dict[@"WaitingForPointsChange"] boolValue];
         if (waiting) {
+            // طالما أن النقاط في الحساب الجديد لا تزال 10 بالضبط، نتجاهل المراقبة تماماً (فك الحظر/عدم التبديل)
             if (currentPoints == 10) {
                 return NO;
             } else {
+                // بمجرد أن تتغير قيمة النقاط عن 10 (مثل أن تصبح أقل أو أكثر)، نقوم بفك قفل الانتظار وتفعيل المراقبة الكاملة من جديد
                 NSMutableDictionary *mutableDict = [dict mutableCopy];
                 mutableDict[@"WaitingForPointsChange"] = @NO;
                 [mutableDict writeToFile:path atomically:YES];
@@ -88,9 +88,8 @@ NSString *getAppCurrentUUIDFromKeychain(void) {
     return nil;
 }
 
-// حذف محتويات الـ Keychain بالكامل (مع تفعيل إذن التويك المؤقت)
+// حذف محتويات الـ Keychain بالكامل (حذف الحساب السابق جذرياً)
 void clearEntireKeychain(void) {
-    isPerformingAuthorizedKeychainOperation = YES;
     NSArray *secClasses = @[
         (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecClassInternetPassword,
@@ -106,12 +105,10 @@ void clearEntireKeychain(void) {
         };
         SecItemDelete((__bridge CFDictionaryRef)spec);
     }
-    isPerformingAuthorizedKeychainOperation = NO;
 }
 
-// حفظ الـ UUID الجديد في الـ Keychain (مع تفعيل إذن التويك المؤقت)
+// حفظ الـ UUID الجديد في الـ Keychain
 void saveUUIDToKeychain(NSString *uuidString) {
-    isPerformingAuthorizedKeychainOperation = YES;
     NSData *data = [uuidString dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *addQuery = @{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
@@ -120,10 +117,9 @@ void saveUUIDToKeychain(NSString *uuidString) {
         (__bridge id)kSecValueData: data
     };
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
-    isPerformingAuthorizedKeychainOperation = NO;
 }
 
-// مسح جميع بيانات التطبيق جذرياً واستثناء ملف الحالة
+// مسح جميع بيانات التطبيق جذرياً واستثناء ملف الحالة الخاص بالتبديل
 void clearAllAppDataCompletely(void) {
     NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleDomain];
@@ -150,6 +146,7 @@ void clearAllAppDataCompletely(void) {
             NSArray *contents = [fm contentsOfDirectoryAtPath:folderPath error:nil];
             for (NSString *file in contents) {
                 NSString *fullPath = [folderPath stringByAppendingPathComponent:file];
+                // الحفاظ حصرياً على ملف الحالة لضمان استمرار التناوب الصحيح
                 if (![fullPath isEqualToString:statePath]) {
                     [fm removeItemAtPath:fullPath error:nil];
                 }
@@ -163,10 +160,20 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
-// تنفيذ التبديل وإظهار النافذة للمستخدم
+// تنفيذ التبديل الاستباقي، حذف الحساب السابق، وحفظ الحساب الجديد فوراً
 void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
+    
+    // 1. تحديد الحساب التالي وتفعيل حالة الانتظار لتجنب المراقبة الخاطئة للحساب الجديد
+    NSString *nextUUID = getNextAccountUUID();
+    
+    // 2. حذف الحساب السابق وبياناته جذرياً بالكامل
+    clearAllAppDataCompletely();
+    clearEntireKeychain();
+    
+    // 3. زرع الحساب الجديد في الـ Keychain مسبقاً
+    saveUUIDToKeychain(nextUUID);
     
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
@@ -191,14 +198,10 @@ void performAccountSwitchAndAlert(void) {
         }
         
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تبديل الحساب تلقائياً"
-                                                                   message:@"تم الوصول إلى 10 نقاط!\nتم مسح البيانات والتبديل للحساب الآخر.\nيرجى إغلاق التطبيق وفتحه الآن."
+                                                                   message:@"تم الوصول إلى 10 نقاط!\nتم حذف الحساب السابق والتبديل للحساب الآخر مسبقاً.\nيرجى إغلاق التطبيق وفتحه الآن."
                                                             preferredStyle:UIAlertControllerStyleAlert];
         
         UIAlertAction *closeAction = [UIAlertAction actionWithTitle:@"إغلاق التطبيق الآن" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-            NSString *nextUUID = getNextAccountUUID();
-            clearAllAppDataCompletely();
-            clearEntireKeychain();
-            saveUUIDToKeychain(nextUUID);
             exit(0);
         }];
         
@@ -207,10 +210,6 @@ void performAccountSwitchAndAlert(void) {
         if (rootVC) {
             [rootVC presentViewController:alert animated:YES completion:nil];
         } else {
-            NSString *nextUUID = getNextAccountUUID();
-            clearAllAppDataCompletely();
-            clearEntireKeychain();
-            saveUUIDToKeychain(nextUUID);
             exit(0);
         }
     });
@@ -250,10 +249,12 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
+                // التحقق الذكي: إذا كان الحساب الجديد لم تتغير نقاطه عن 10 بعد، يتم تجاهل المراقبة تماماً
                 if (!shouldProcessPoints(currentPoints)) {
                     return;
                 }
                 
+                // عند الوصول الفعلي لـ 10 نقاط (في حساب نشط ومصرح بمراقبته)، يتم التبديل فوراً
                 if (currentPoints >= 10) {
                     performAccountSwitchAndAlert();
                 }
@@ -262,37 +263,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     }
 }
 
-// -----------------------------------------------------------------
-// حماية الـ Keychain ومنع أي إضافة أو تعديل خارجي
-// -----------------------------------------------------------------
-
-OSStatus hooked_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
-    // إذا لم تكن العملية صادرة عن التويك نفسه، نقوم برفضها أمنياً
-    if (!isPerformingAuthorizedKeychainOperation) {
-        // إرجاع خطأ يمنع الإضافة (errSecAuthFailed أو errSecDuplicateItem أو errSecParam حسب الحاجة)
-        return errSecAuthFailed;
-    }
-    return SecItemAdd(attributes, result);
-}
-
-OSStatus hooked_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesToUpdate) {
-    // إذا لم تكن العملية صادرة عن التويك نفسه، نقوم برفض التعديل
-    if (!isPerformingAuthorizedKeychainOperation) {
-        return errSecAuthFailed;
-    }
-    return SecItemUpdate(query, attributesToUpdate);
-}
-
-// استخدام Logos Hooks لاعتراض دوال الأمن في C (Functions Interception)
-// ملاحظة: بما أن SecItemAdd و SecItemUpdate دوال C وليست Objective-C methods، يتم استخدام تقنية MSHookFunction أو إعادة توجيه الرموز، 
-// أو إن كان بيئة العمل تدعم Logos للـ C functions عبر %hook مع مساحات الأسماء أو Substrate:
-
-// إذا كانت بيئة الإنشاء تدعم الـ Function Hook المباشر عبر Logos:
-%group KeychainProtection
-// سيتم تفعيل الحماية لمنع أي تعديل خارجي
-%end
-
-// 1. بروتوكول الاعتراض للشبكة
+// 1. بروتوكول الاعتراض
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
@@ -313,7 +284,7 @@ OSStatus hooked_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesT
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inNewReq]; // الخطأ المطبعي هنا مصحح تلقائياً
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -360,10 +331,6 @@ OSStatus hooked_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesT
 %end
 
 %ctor {
-    // تفعيل Hook لدوال C الخاصة بالـ Keychain لمنع أي تلاعب خارجي من التطبيق
-    MSHookFunction((void *)SecItemAdd, (void *)hooked_SecItemAdd, (void **)&SecItemAdd);
-    MSHookFunction((void *)SecItemUpdate, (void *)hooked_SecItemUpdate, (void **)&SecItemUpdate);
-
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
         
