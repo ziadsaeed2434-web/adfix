@@ -4,13 +4,13 @@
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
 
-// بيانات الحسابين (التي يتم تبديلها داخل حقل الـ Password في الـ Keychain)
+// بيانات الحسابين
 static NSString *const kAccount1UUID = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C";
 static NSString *const kAccount2UUID = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D";
 static NSString *const kTargetAccountField = @"com.tempnum.virtual-number.deviceUUID";
 static NSString *const kKeychainGroup = @"3J96GNXKKU.*";
 
-// مسار حالة الحساب الحالي (لتحديد أي حساب يتم استخدامه حالياً)
+// مسار حالة الحساب الحالي
 NSString *getAccountStatePlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
@@ -40,10 +40,11 @@ void eraseAllAppData(void) {
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
 }
 
-// دالة لتحديث الـ Password في الـ Keychain بالحذف ثم الإضافة لضمان التبديل الفعلي
-void forceUpdateKeychainPassword(NSString *uuidString) {
+// تعديل دالة الـ Keychain لحذف المفتاح بالكامل ثم إعادة إضافته بالقيمة الجديدة
+void completelyDeleteAndRecreateKeychain(NSString *uuidString) {
     NSData *passwordData = [uuidString dataUsingEncoding:NSUTF8StringEncoding];
     
+    // 1. بناء استعلام البحث وتحديد المفتاح المراد استهدافه
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
     query[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
     query[(__bridge id)kSecAttrAccount] = kTargetAccountField;
@@ -51,8 +52,10 @@ void forceUpdateKeychainPassword(NSString *uuidString) {
     query[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
 #endif
     
+    // 2. حذف المفتاح من الـ Keychain بالكامل وإزالته جذرياً
     SecItemDelete((__bridge CFDictionaryRef)query);
     
+    // 3. إعادة إنشاء وإضافة المفتاح بالـ UUID الجديد تماماً
     NSMutableDictionary *addQuery = [NSMutableDictionary dictionary];
     addQuery[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
     addQuery[(__bridge id)kSecAttrAccount] = kTargetAccountField;
@@ -63,15 +66,16 @@ void forceUpdateKeychainPassword(NSString *uuidString) {
     
     OSStatus addStatus = SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
     if (addStatus != errSecSuccess) {
+        // احتياطاً في حال كان النظام يتطلب إضافة بدون مجموعة الوصول
         [addQuery removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
         SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
     }
 }
 
-// متغير لمنع التكرار اللحظي
+// متغير لمنع تكرار فتح النافذة
 static BOOL isSwitchAlertActive = NO;
 
-// دالة التبديل والتنظيف الشامل
+// دالة التبديل الشاملة
 void performAccountSwitchAndWipe(void) {
     if (isSwitchAlertActive) return;
     isSwitchAlertActive = YES;
@@ -87,23 +91,23 @@ void performAccountSwitchAndWipe(void) {
     NSInteger nextAccountIndex = (currentAccountIndex == 1) ? 2 : 1;
     NSString *targetUUID = (nextAccountIndex == 1) ? kAccount1UUID : kAccount2UUID;
     
-    // 1. مسح البيانات
+    // 1. مسح البيانات المؤقتة
     eraseAllAppData();
     
-    // 2. تحديث الـ Keychain بالحساب الجديد
-    forceUpdateKeychainPassword(targetUUID);
+    // 2. حذف مفتاح الـ Keychain بالكامل وإعادة إنشائه بالحساب الجديد
+    completelyDeleteAndRecreateKeychain(targetUUID);
     
     // 3. حفظ المؤشر الجديد
     NSDictionary *newState = @{@"AccountIndex": @(nextAccountIndex)};
     [newState writeToFile:path atomically:YES];
     
-    // 4. إظهار رسالة التنبيه
+    // 4. إظهار رسالة التنبيه لإعادة التشغيل
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
         if (@available(iOS 13.0, *)) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    UISceneWindowScene *windowScene = (UISceneWindowScene *)scene;
                     for (UIWindow *w in windowScene.windows) {
                         if (w.isKeyWindow) {
                             keyWindow = w;
@@ -133,7 +137,7 @@ void performAccountSwitchAndWipe(void) {
             titleLabel.textAlignment = NSTextAlignmentCenter;
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 60, alertBox.bounds.size.width - 30, 110)];
-            descLabel.text = [NSString stringWithFormat:@"تم تجهيز الحساب (%ld) وتحديث الـ Keychain بنجاح.\n\nالرجاء إعادة تشغيل التطبيق للتبديل.", (long)nextAccountIndex];
+            descLabel.text = [NSString stringWithFormat:@"تم حذف الـ Keychain وإعادة إنشاء الحساب (%ld) بنجاح.\n\nالرجاء إعادة تشغيل التطبيق للتبديل.", (long)nextAccountIndex];
             descLabel.textColor = [UIColor whiteColor];
             descLabel.font = [UIFont systemFontOfSize:14];
             descLabel.numberOfLines = 4;
@@ -147,7 +151,7 @@ void performAccountSwitchAndWipe(void) {
     });
 }
 
-// رصد طلبات النقاط وإدارة فك وإعادة تفعيل الحظر بذكاء
+// رصد طلبات النقاط
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
     if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         return;
@@ -164,12 +168,12 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
-                // إذا كانت النقاط أقل من 50 (أي عند بدء حساب جديد)، يتم فك قفل الحظر ليصبح جاهزاً للعمل مرة أخرى
+                // فك الحظر عندما تكون النقاط أقل من 50 (في بداية أي حساب جديد)
                 if (currentPoints < 50) {
                     isSwitchAlertActive = NO;
                 }
                 
-                // التبديل فوراً عند الوصول إلى 50 نقطة
+                // التبديل عند الوصول إلى 50 نقطة
                 if (currentPoints >= 50 && !isSwitchAlertActive) {
                     performAccountSwitchAndWipe();
                 }
@@ -199,7 +203,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inNewReq:newReq];
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
