@@ -11,8 +11,8 @@
 // --- الثوابت وإعدادات الحسابات ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
-static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
-static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D"; // الحساب الثاني
+static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C";
+static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D";
 
 static BOOL isSwitchAlertShown = NO;
 
@@ -172,7 +172,7 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     return YES;
 }
 
-// --- مسح بيانات التطبيق كلياً مع استثناء ملفات الحالة الضرورية ---
+// --- مسح بيانات التطبيق كلياً ---
 void clearAllAppDataCompletely(void) {
     NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleDomain) {
@@ -198,7 +198,7 @@ void clearAllAppDataCompletely(void) {
             for (NSString *libItem in libraryContents) {
                 NSString *libItemPath = [libraryDir stringByAppendingPathComponent:libItem];
                 if ([libItemPath isEqualToString:statePath]) {
-                    continue; // استثناء ملف حالة التبديل
+                    continue;
                 }
                 [fm removeItemAtPath:libItemPath error:&error];
             }
@@ -449,7 +449,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     [mutableReq setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
     [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
     
-    // رصد طلبات النقاط للـ NSURLSession العادية أيضاً
     void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
         logGodModeEvent(@"NSURLSession", request.HTTPMethod, request.URL.absoluteString, httpResp.statusCode, data, error);
@@ -460,7 +459,8 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSString *dynIP = randomSpectrumIP();
+    // تم تصحيح المشكلة: تعريف المتغير هنا ليكون متاحاً بدلاً من الخطأ السابق
+    NSString *dynamicIP = randomSpectrumIP();
     NSString *urlString = [url absoluteString];
     
     if ([urlString containsString:@"ip="]) {
@@ -486,7 +486,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- تحصين وتفعيل الإعلانات تلقائياً ---
+// --- تحصين وتفعيل الإعلانات تلقائياً (تم تصحيح هيكلة الأقواس و @try/@catch) ---
 %hook ActivatorAdService
 - (BOOL)isReady { return YES; }
 - (BOOL)isAdReady { return YES; }
@@ -516,7 +516,9 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 
 - (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try { %orig; } @catch (NSException *exception) {}
+    @try { 
+        %orig; 
+    } @catch (NSException *exception) {}
 }
 
 - (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
