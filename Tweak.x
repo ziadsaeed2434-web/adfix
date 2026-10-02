@@ -4,24 +4,18 @@
 #import <WebKit/WebKit.h>
 
 static BOOL isAlertActive = false;
+static NSTimer *virtualClockTimer = nil;
 
-// دالة تحديد مسار ملف الـ plist المستقل داخل مجلد Library
-NSString *getStandalonePlistPath(void) {
+// مسار ملف الساعة الافتراضية داخل مجلد Library
+NSString *getVirtualClockPlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
-    return [libraryDirectory stringByAppendingPathComponent:@"AppLockState.plist"];
-}
-
-// تعديل التاريخ ليتوافق مع التوقيت المحلي للجهاز
-NSDate *getLocalExpirayDate(NSDate *date) {
-    NSTimeZone *tz = [NSTimeZone localTimeZone];
-    NSInteger seconds = [tz secondsFromGMTForDate:date];
-    return [[NSDate alloc] initWithTimeInterval:seconds sinceDate:date];
+    return [libraryDirectory stringByAppendingPathComponent:@"VirtualClockLockState.plist"];
 }
 
 // التحقق مما إذا كان مسموحاً بالحظر
-BOOL isArmedFor10(void) {
-    NSString *path = getStandalonePlistPath();
+BOOL isArmedFor15(void) {
+    NSString *path = getVirtualClockPlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
     if (dict && dict[@"IsArmed"] != nil) {
         return [dict[@"IsArmed"] boolValue];
@@ -29,19 +23,19 @@ BOOL isArmedFor10(void) {
     return YES;
 }
 
-// التحقق من حالة الحظر مع مطابقة الوقت المحلي
-BOOL checkLockStateFromPlist(void) {
-    NSString *path = getStandalonePlistPath();
+// فحص الساعة الافتراضية (تعمل بدقة سواء بالداخل أو بعد إغلاق التطبيق نهائياً)
+BOOL checkVirtualClockState(void) {
+    NSString *path = getVirtualClockPlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
     if (dict) {
-        NSDate *expiryDate = dict[@"LockExpiryTime"];
+        NSDate *expiryDate = dict[@"VirtualExpiryTime"];
         if (expiryDate && [expiryDate isKindOfClass:[NSDate class]]) {
-            // التحقق المباشر بالاعتماد على الفارق الزمني الصحيح
             if ([expiryDate timeIntervalSinceNow] > 0) {
-                return YES;
+                return YES; // الحظر افتراضياً لا يزال سارياً
             } else {
+                // انتهى الوقت تماماً (سواء كنت بالداخل أو فتحت التطبيق بعد إغلاقه)
                 NSMutableDictionary *mutableDict = [dict mutableCopy];
-                [mutableDict removeObjectForKey:@"LockExpiryTime"];
+                [mutableDict removeObjectForKey:@"VirtualExpiryTime"];
                 mutableDict[@"IsArmed"] = @NO;
                 [mutableDict writeToFile:path atomically:YES];
             }
@@ -50,22 +44,21 @@ BOOL checkLockStateFromPlist(void) {
     return NO;
 }
 
-// حفظ وقت الحظر بالتوقيت المحلي تماماً
-void saveLockStateToPlist(NSDate *expiryDate) {
-    NSString *path = getStandalonePlistPath();
+// بدء الساعة الافتراضية وحفظ وقت انتهائها المطلق
+void startVirtualClockLock(NSDate *expiryDate) {
+    NSString *path = getVirtualClockPlistPath();
     NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithContentsOfFile:path];
     if (!mutableDict) {
         mutableDict = [NSMutableDictionary dictionary];
     }
-    // تحويل التاريخ إلى التوقيت المحلي ليتطابق مع ساعة الجوال
-    mutableDict[@"LockExpiryTime"] = getLocalExpirayDate(expiryDate);
+    mutableDict[@"VirtualExpiryTime"] = expiryDate;
     mutableDict[@"IsArmed"] = @NO;
     [mutableDict writeToFile:path atomically:YES];
 }
 
-// إعادة تفعيل نظام الحظر
-void armFor10Again(void) {
-    NSString *path = getStandalonePlistPath();
+// إعادة تفعيل النظام لرؤية رقم غير 15
+void armVirtualClockAgain(void) {
+    NSString *path = getVirtualClockPlistPath();
     NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithContentsOfFile:path];
     if (!mutableDict) {
         mutableDict = [NSMutableDictionary dictionary];
@@ -74,8 +67,51 @@ void armFor10Again(void) {
     [mutableDict writeToFile:path atomically:YES];
 }
 
-// دالة إظهار التنبيه المانع المستمر داخل التطبيق
-void showPersistentLockoutAlert(void) {
+// إيقاف وإزالة واجهة الحظر الافتراضية فوراً
+void dismissVirtualLockoutAlert(void) {
+    if (virtualClockTimer) {
+        [virtualClockTimer invalidate];
+        virtualClockTimer = nil;
+    }
+    
+    NSString *path = getVirtualClockPlistPath();
+    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+    NSMutableDictionary *mutableDict = [dict mutableCopy];
+    if (mutableDict) {
+        [mutableDict removeObjectForKey:@"VirtualExpiryTime"];
+        mutableDict[@"IsArmed"] = @NO;
+        [mutableDict writeToFile:path atomically:YES];
+    }
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *keyWindow = nil;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    for (UIWindow *w in windowScene.windows) {
+                        if (w.isKeyWindow) {
+                            keyWindow = w;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!keyWindow) keyWindow = [UIApplication sharedApplication].keyWindow;
+        
+        if (keyWindow) {
+            UIView *v = [keyWindow viewWithTag:888899];
+            if (v) {
+                [v removeFromSuperview];
+            }
+        }
+        isAlertActive = NO;
+    });
+}
+
+// إظهار واجهة التنبيه للساعة الافتراضية مع العد التنازلي الحي
+void showVirtualLockoutAlert(void) {
     if (isAlertActive) return;
     isAlertActive = YES;
     
@@ -114,13 +150,14 @@ void showPersistentLockoutAlert(void) {
             alertBox.layer.borderColor = [UIColor redColor].CGColor;
             
             UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 20, alertBox.bounds.size.width - 30, 30)];
-            titleLabel.text = @"⚠️ تنبيه الحظر المستمر";
+            titleLabel.text = @"⚠️ الساعة الافتراضية للحظر";
             titleLabel.textColor = [UIColor redColor];
             titleLabel.font = [UIFont boldSystemFontOfSize:18];
             titleLabel.textAlignment = NSTextAlignmentCenter;
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 65, alertBox.bounds.size.width - 30, 90)];
-            descLabel.text = @"تم الوصول إلى 10 نقاط!\nالتطبيق مقفل مؤقتاً لمدة 10 دقائق.\nسينتهي الوقت تلقائياً عند انقضاء المدة.";
+            descLabel.text = @"تم الوصول إلى 15 نقطة!\nالتطبيق مقفل بواسطة الساعة الافتراضية لمدة دقيقة.\nسيختفي الحظر تلقائياً في كل الظروف.";
+            descLabel.tag = 999911;
             descLabel.textColor = [UIColor whiteColor];
             descLabel.font = [UIFont systemFontOfSize:12.5];
             descLabel.numberOfLines = 4;
@@ -131,33 +168,42 @@ void showPersistentLockoutAlert(void) {
             [blockerView addSubview:alertBox];
             [keyWindow addSubview:blockerView];
             
-            NSString *path = getStandalonePlistPath();
-            NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
-            NSDate *expiryDate = dict[@"LockExpiryTime"];
-            NSTimeInterval remainingTime = expiryDate ? [expiryDate timeIntervalSinceNow] : 600.0;
-            if (remainingTime <= 0) remainingTime = 600.0;
+            if (virtualClockTimer) {
+                [virtualClockTimer invalidate];
+                virtualClockTimer = nil;
+            }
             
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(remainingTime * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                UIView *v = [keyWindow viewWithTag:888899];
-                if (v) {
-                    [v removeFromSuperview];
+            // نبضة الساعة الافتراضية داخل التطبيق
+            virtualClockTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
+                if (!checkVirtualClockState()) {
+                    dismissVirtualLockoutAlert();
+                } else {
+                    NSString *path = getVirtualClockPlistPath();
+                    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+                    NSDate *expiryDate = dict[@"VirtualExpiryTime"];
+                    if (expiryDate) {
+                        NSInteger remaining = (NSInteger)[expiryDate timeIntervalSinceNow];
+                        if (remaining < 0) remaining = 0;
+                        UILabel *dLabel = [blockerView viewWithTag:999911];
+                        if (dLabel) {
+                            dLabel.text = [NSString stringWithFormat:@"تم الوصول إلى 15 نقطة!\nالتطبيق مقفل بواسطة الساعة الافتراضية.\nالوقت المتبقي: %ld ثانية", (long)remaining];
+                        }
+                    }
                 }
-                NSMutableDictionary *mutableDict = [dict mutableCopy];
-                if (mutableDict) {
-                    [mutableDict removeObjectForKey:@"LockExpiryTime"];
-                    mutableDict[@"IsArmed"] = @NO;
-                    [mutableDict writeToFile:path atomically:YES];
-                }
-                isAlertActive = NO;
-            });
+            }];
         }
     });
 }
 
 // تحليل الطلبات والتحقق من النقاط بصمت
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
-    if (checkLockStateFromPlist()) {
-        showPersistentLockoutAlert();
+    if (checkVirtualClockState()) {
+        showVirtualLockoutAlert();
+        return;
+    } else {
+        if (isAlertActive) {
+            dismissVirtualLockoutAlert();
+        }
     }
 
     if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
@@ -175,14 +221,15 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
-                if (currentPoints == 10) {
-                    if (isArmedFor10() && !checkLockStateFromPlist()) {
-                        NSDate *expiry = [NSDate dateWithTimeIntervalSinceNow:600.0];
-                        saveLockStateToPlist(expiry);
-                        showPersistentLockoutAlert();
+                if (currentPoints == 15) {
+                    if (isArmedFor15() && !checkVirtualClockState()) {
+                        // تشغيل الساعة الافتراضية لمدة دقيقة كاملة (60 ثانية) عند الوصول لـ 15 نقطة
+                        NSDate *expiry = [NSDate dateWithTimeIntervalSinceNow:60.0];
+                        startVirtualClockLock(expiry);
+                        showVirtualLockoutAlert();
                     }
                 } else {
-                    armFor10Again();
+                    armVirtualClockAgain();
                 }
             }
         }
@@ -259,8 +306,19 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
-        if (checkLockStateFromPlist()) {
-            showPersistentLockoutAlert();
+        
+        // التحقق الفوري من الساعة الافتراضية عند تشغيل التطبيق (حتى لو أغلقته تماماً وفتشته لاحقاً)
+        if (checkVirtualClockState()) {
+            showVirtualLockoutAlert();
         }
+        
+        // فحص الساعة الافتراضية فور العودة للتطبيق من الخلفية
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            if (checkVirtualClockState()) {
+                showVirtualLockoutAlert();
+            } else {
+                dismissVirtualLockoutAlert();
+            }
+        }];
     });
 }
