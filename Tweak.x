@@ -17,19 +17,17 @@ NSString *getAccountStatePlistPath(void) {
     return [libraryDirectory stringByAppendingPathComponent:@"AccountSwitchState.plist"];
 }
 
-// دالة لحذف جميع بيانات التطبيق (SharedPreferences, Caches, Documents, etc.)
+// دالة لحذف جميع بيانات التطبيق
 void eraseAllAppData(void) {
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSString *documentsDirectory = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
     NSString *libraryDirectory = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
     NSString *cachesDirectory = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
     
-    // مسح محتويات Library و Documents و Caches
     NSArray *directoriesToClean = @[documentsDirectory, libraryDirectory, cachesDirectory];
     for (NSString *dir in directoriesToClean) {
         NSArray *contents = [fileManager contentsOfDirectoryAtPath:dir error:nil];
         for (NSString *file in contents) {
-            // عدم حذف ملف حالة التبديل نفسه لكي نعرف الحساب القادم
             if ([dir isEqualToString:libraryDirectory] && [file isEqualToString:@"AccountSwitchState.plist"]) {
                 continue;
             }
@@ -38,13 +36,12 @@ void eraseAllAppData(void) {
         }
     }
     
-    // مسح الـ NSUserDefaults
     NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
 }
 
-// دالة لتحديث أو إنشاء الـ Password (UUID) في الـ Keychain
-void updateKeychainPasswordForCurrentAccount(NSString *uuidString) {
+// دالة لتحديث الـ Password في الـ Keychain بالحذف ثم الإضافة لضمان التبديل الفعلي
+void forceUpdateKeychainPassword(NSString *uuidString) {
     NSData *passwordData = [uuidString dataUsingEncoding:NSUTF8StringEncoding];
     
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
@@ -54,28 +51,27 @@ void updateKeychainPasswordForCurrentAccount(NSString *uuidString) {
     query[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
 #endif
     
-    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, NULL);
+    SecItemDelete((__bridge CFDictionaryRef)query);
     
-    if (status == errSecSuccess) {
-        NSMutableDictionary *updateAttr = [NSMutableDictionary dictionary];
-        updateAttr[(__bridge id)kSecValueData] = passwordData;
-        SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)updateAttr);
-    } else if (status == errSecItemNotFound) {
-        NSMutableDictionary *addQuery = [NSMutableDictionary dictionary];
-        addQuery[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
-        addQuery[(__bridge id)kSecAttrAccount] = kTargetAccountField;
-        addQuery[(__bridge id)kSecValueData] = passwordData;
+    NSMutableDictionary *addQuery = [NSMutableDictionary dictionary];
+    addQuery[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
+    addQuery[(__bridge id)kSecAttrAccount] = kTargetAccountField;
+    addQuery[(__bridge id)kSecValueData] = passwordData;
 #if !TARGET_OS_SIMULATOR
-        addQuery[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
+    addQuery[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
 #endif
+    
+    OSStatus addStatus = SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
+    if (addStatus != errSecSuccess) {
+        [addQuery removeObjectForKey:(__bridge id)kSecAttrAccessGroup];
         SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
     }
 }
 
-// متغير لمنع تكرار فتح النافذة مراراً وتكراراً بنفس اللحظة
+// متغير لمنع التكرار اللحظي
 static BOOL isSwitchAlertActive = NO;
 
-// دالة التبديل الذكي وتحديث الـ Password في الـ Keychain والتنظيف الشامل
+// دالة التبديل والتنظيف الشامل
 void performAccountSwitchAndWipe(void) {
     if (isSwitchAlertActive) return;
     isSwitchAlertActive = YES;
@@ -91,17 +87,17 @@ void performAccountSwitchAndWipe(void) {
     NSInteger nextAccountIndex = (currentAccountIndex == 1) ? 2 : 1;
     NSString *targetUUID = (nextAccountIndex == 1) ? kAccount1UUID : kAccount2UUID;
     
-    // 1. تنفيذ الحذف الشامل لبيانات التطبيق
+    // 1. مسح البيانات
     eraseAllAppData();
     
-    // 2. تحديث قيمة الـ Password في الـ Keychain بالحساب الجديد
-    updateKeychainPasswordForCurrentAccount(targetUUID);
+    // 2. تحديث الـ Keychain بالحساب الجديد
+    forceUpdateKeychainPassword(targetUUID);
     
-    // 3. حفظ المؤشر الجديد في ملف الحالة
+    // 3. حفظ المؤشر الجديد
     NSDictionary *newState = @{@"AccountIndex": @(nextAccountIndex)};
     [newState writeToFile:path atomically:YES];
     
-    // 4. إظهار النافذة التي تطالب المستخدم بإعادة التشغيل يدوياً للتبديل
+    // 4. إظهار رسالة التنبيه
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
         if (@available(iOS 13.0, *)) {
@@ -137,7 +133,7 @@ void performAccountSwitchAndWipe(void) {
             titleLabel.textAlignment = NSTextAlignmentCenter;
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 60, alertBox.bounds.size.width - 30, 110)];
-            descLabel.text = [NSString stringWithFormat:@"تم تجهيز الحساب (%ld) وتحديث الـ Password في الـ Keychain.\n\nالرجاء إعادة تشغيل التطبيق للتبديل.", (long)nextAccountIndex];
+            descLabel.text = [NSString stringWithFormat:@"تم تجهيز الحساب (%ld) وتحديث الـ Keychain بنجاح.\n\nالرجاء إعادة تشغيل التطبيق للتبديل.", (long)nextAccountIndex];
             descLabel.textColor = [UIColor whiteColor];
             descLabel.font = [UIFont systemFontOfSize:14];
             descLabel.numberOfLines = 4;
@@ -151,7 +147,7 @@ void performAccountSwitchAndWipe(void) {
     });
 }
 
-// رصد طلبات النقاط
+// رصد طلبات النقاط وإدارة فك وإعادة تفعيل الحظر بذكاء
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
     if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         return;
@@ -168,8 +164,13 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
-                // التبديل عند الوصول إلى 50 نقطة
-                if (currentPoints == 50) {
+                // إذا كانت النقاط أقل من 50 (أي عند بدء حساب جديد)، يتم فك قفل الحظر ليصبح جاهزاً للعمل مرة أخرى
+                if (currentPoints < 50) {
+                    isSwitchAlertActive = NO;
+                }
+                
+                // التبديل فوراً عند الوصول إلى 50 نقطة
+                if (currentPoints >= 50 && !isSwitchAlertActive) {
                     performAccountSwitchAndWipe();
                 }
             }
@@ -177,7 +178,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     }
 }
 
-// 1. بروتوكول الاعتراض
+// بروتوكول الاعتراض
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
@@ -198,7 +199,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inNewReq:newReq];
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -215,9 +216,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// 2. رصد طلبات NSURLSession
 %hook NSURLSession
-
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     return %orig(request, ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
@@ -225,12 +224,9 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
         if (completionHandler) completionHandler(data, response, error);
     });
 }
-
 %end
 
-// 3. فرض البروتوكول
 %hook NSURLSessionConfiguration
-
 + (NSURLSessionConfiguration *)defaultSessionConfiguration {
     NSURLSessionConfiguration *config = %orig;
     NSMutableArray *protocols = [config.protocolClasses mutableCopy];
@@ -241,7 +237,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     }
     return config;
 }
-
 %end
 
 %ctor {
