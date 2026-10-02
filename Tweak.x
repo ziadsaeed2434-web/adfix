@@ -5,7 +5,7 @@
 #import <Security/Security.h>
 
 // الثوابت المطابقة لتنسيق الـ Keychain الأصلي
-static NSString * const kKeychainAccount = @"com.tempnum.virtual-number.deviceUUID";
+static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
 static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
 static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D"; // الحساب الثاني
