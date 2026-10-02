@@ -169,7 +169,7 @@ void performAccountSwitchAndAlert(void) {
         if (@available(iOS 13.0, *)) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                    UISceneWindowScene *windowScene = (UIWindowScene *)scene;
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
                     for (UIWindow *w in windowScene.windows) {
                         if (w.isKeyWindow) {
                             keyWindow = w;
@@ -281,7 +281,8 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inNewReq:newReq];
+    // تم تصحيح الخطأ هنا باستعمال inRequest بدلاً من inNewReq
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
