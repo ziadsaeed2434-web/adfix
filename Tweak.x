@@ -2,106 +2,120 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <WebKit/WebKit.h>
+#import <Security/Security.h>
 
-static BOOL isAlertActive = false;
-static NSTimer *virtualClockTimer = nil;
+// بيانات الحسابين المرفقة من صور الـ Keychain
+static NSString *const kAccount1UUID = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C";
+static NSString *const kAccount2UUID = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D";
+static NSString *const kKeychainService = @"com.tempnum.virtual-number.deviceUUID";
+static NSString *const kKeychainGroup = @"3J96GNXKKU.*";
 
-// مسار ملف الساعة الافتراضية داخل مجلد Library
-NSString *getVirtualClockPlistPath(void) {
+// مسار حالة الحساب الحالي (لتحديد أي حساب يتم استخدامه حالياً)
+NSString *getAccountStatePlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
-    return [libraryDirectory stringByAppendingPathComponent:@"VirtualClockLockState.plist"];
+    return [libraryDirectory stringByAppendingPathComponent:@"AccountSwitchState.plist"];
 }
 
-// التحقق التلقائي مما إذا كان مسموحاً بالحظر
-BOOL isArmedFor395(void) {
-    NSString *path = getVirtualClockPlistPath();
-    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
-    if (dict && dict[@"IsArmed"] != nil) {
-        return [dict[@"IsArmed"] boolValue];
-    }
-    return YES;
-}
-
-// فحص ذكي وتلقائي للساعة الافتراضية وإلغاء التراكم الخاطئ
-BOOL checkVirtualClockState(void) {
-    NSString *path = getVirtualClockPlistPath();
-    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
-    if (dict) {
-        NSDate *expiryDate = dict[@"VirtualExpiryTime"];
-        if (expiryDate && [expiryDate isKindOfClass:[NSDate class]]) {
-            // إذا كان الوقت الباقي أكثر من 10 دقائق (بسبب تراكم قديم)، نقوم بإصلاحه وتعديله تلقائياً إلى 10 دقائق كحد أقصى
-            NSTimeInterval remaining = [expiryDate timeIntervalSinceNow];
-            if (remaining > 600.0) {
-                NSDate *newExpiry = [NSDate dateWithTimeIntervalSinceNow:600.0];
-                NSMutableDictionary *mutableDict = [dict mutableCopy];
-                mutableDict[@"VirtualExpiryTime"] = newExpiry;
-                [mutableDict writeToFile:path atomically:YES];
-                return YES;
+// دالة لحذف جميع بيانات التطبيق (SharedPreferences, Caches, Documents, etc.)
+void eraseAllAppData(void) {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *documentsDirectory = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *libraryDirectory = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *cachesDirectory = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
+    
+    // مسح محتويات Library و Documents و Caches
+    NSArray *directoriesToClean = @[documentsDirectory, libraryDirectory, cachesDirectory];
+    for (NSString *dir in directoriesToClean) {
+        NSArray *contents = [fileManager contentsOfDirectoryAtPath:dir error:nil];
+        for (NSString *file in contents) {
+            // عدم حذف ملف حالة التبديل نفسه لكي نعرف الحساب القادم
+            if ([dir isEqualToString:libraryDirectory] && [file isEqualToString:@"AccountSwitchState.plist"]) {
+                continue;
             }
-            
-            if (remaining > 0) {
-                return YES; // الحظر ساري بالشكل الصحيح
-            } else {
-                // انتهى الوقت تماماً بشكل تلقائي
-                NSMutableDictionary *mutableDict = [dict mutableCopy];
-                [mutableDict removeObjectForKey:@"VirtualExpiryTime"];
-                mutableDict[@"IsArmed"] = @NO;
-                [mutableDict writeToFile:path atomically:YES];
-            }
+            NSString *fullPath = [dir stringByAppendingPathComponent:file];
+            [fileManager removeItemAtPath:fullPath error:nil];
         }
     }
-    return NO;
-}
-
-// بدء الساعة الافتراضية تلقائياً بـ 10 دقائق صافية
-void startVirtualClockLock(void) {
-    NSString *path = getVirtualClockPlistPath();
-    NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithContentsOfFile:path];
-    if (!mutableDict) {
-        mutableDict = [NSMutableDictionary dictionary];
-    }
-    // ضمان أن تكون المدة 10 دقائق بالضبط (600 ثانية) في كل مرة يتم فيها الحظر
-    NSDate *expiry = [NSDate dateWithTimeIntervalSinceNow:600.0];
-    mutableDict[@"VirtualExpiryTime"] = expiry;
-    mutableDict[@"IsArmed"] = @NO;
-    [mutableDict writeToFile:path atomically:YES];
-}
-
-// إعادة تفعيل النظام تلقائياً لرؤية نقاط جديدة
-void armVirtualClockAgain(void) {
-    NSString *path = getVirtualClockPlistPath();
-    NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithContentsOfFile:path];
-    if (!mutableDict) {
-        mutableDict = [NSMutableDictionary dictionary];
-    }
-    mutableDict[@"IsArmed"] = @YES;
-    [mutableDict writeToFile:path atomically:YES];
-}
-
-// إيقاف وإزالة واجهة الحظر تلقائياً
-void dismissVirtualLockoutAlert(void) {
-    if (virtualClockTimer) {
-        [virtualClockTimer invalidate];
-        virtualClockTimer = nil;
-    }
     
-    NSString *path = getVirtualClockPlistPath();
+    // مسح الـ NSUserDefaults
+    NSString *appDomain = [[NSBundle mainBundle] bundleIdentifier];
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
+}
+
+// دالة لتحديث أو إنشاء الـ Keychain للـ DeviceUUID
+void updateKeychainForCurrentAccount(NSString *uuidString) {
+    NSData *passwordData = [uuidString dataUsingEncoding:NSUTF8StringEncoding];
+    
+    // إعداد استعلام البحث عن العنصر في الـ Keychain
+    NSMutableDictionary *query = [NSMutableDictionary dictionary];
+    query[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
+    query[(__bridge id)kSecAttrService] = kKeychainService;
+    query[(__bridge id)kSecAttrAccount] = kKeychainService;
+#if !TARGET_OS_SIMULATOR
+    query[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
+#endif
+    
+    // التحقق مما إذا كان العنصر موجوداً مسبقاً
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, NULL);
+    
+    if (status == errSecSuccess) {
+        // تحديث العنصر الموجود
+        NSMutableDictionary *updateAttr = [NSMutableDictionary dictionary];
+        updateAttr[(__bridge id)kSecValueData] = passwordData;
+        SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)updateAttr);
+    } else if (status == errSecItemNotFound) {
+        // إنشاء عنصر جديد إذا لم يكن موجوداً
+        NSMutableDictionary *addQuery = [NSMutableDictionary dictionary];
+        addQuery[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
+        addQuery[(__bridge id)kSecAttrService] = kKeychainService;
+        addQuery[(__bridge id)kSecAttrAccount] = kKeychainService;
+        addQuery[(__bridge id)kSecValueData] = passwordData;
+#if !TARGET_OS_SIMULATOR
+        addQuery[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
+#endif
+        SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
+    }
+}
+
+// متغير لمنع تكرار فتح النافذة مراراً وتكراراً بنفس اللحظة
+static BOOL isSwitchAlertActive = NO;
+
+// دالة التبديل الذكي وتحديث الحساب والتنظيف الشامل دون إعادة تشغيل إجبارية
+void performAccountSwitchAndWipe(void) {
+    if (isSwitchAlertActive) return;
+    isSwitchAlertActive = YES;
+    
+    NSString *path = getAccountStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
-    NSMutableDictionary *mutableDict = [dict mutableCopy];
-    if (mutableDict) {
-        [mutableDict removeObjectForKey:@"VirtualExpiryTime"];
-        mutableDict[@"IsArmed"] = @NO;
-        [mutableDict writeToFile:path atomically:YES];
+    NSInteger currentAccountIndex = 1;
+    
+    if (dict && dict[@"AccountIndex"] != nil) {
+        currentAccountIndex = [dict[@"AccountIndex"] integerValue];
     }
     
+    // تبديل الحساب (إذا كان 1 يصبح 2، وإذا كان 2 يصبح 1)
+    NSInteger nextAccountIndex = (currentAccountIndex == 1) ? 2 : 1;
+    NSString *targetUUID = (nextAccountIndex == 1) ? kAccount1UUID : kAccount2UUID;
+    
+    // 1. تنفيذ الحذف الشامل لبيانات التطبيق
+    eraseAllAppData();
+    
+    // 2. تحديث الـ Keychain بالـ UUID الخاص بالحساب الجديد
+    updateKeychainForCurrentAccount(targetUUID);
+    
+    // 3. حفظ المؤشر الجديد في ملف الحالة
+    NSDictionary *newState = @{@"AccountIndex": @(nextAccountIndex)};
+    [newState writeToFile:path atomically:YES];
+    
+    // 4. إظهار النافذة التي تطالب المستخدم بإعادة التشغيل يدوياً للتبديل
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
         if (@available(iOS 13.0, *)) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
                     UIWindowScene *windowScene = (UIWindowScene *)scene;
-                    for (UIWindow *w in windowScene.windows) {
+                    for (UIScene *w in windowScene.windows) {
                         if (w.isKeyWindow) {
                             keyWindow = w;
                             break;
@@ -113,65 +127,26 @@ void dismissVirtualLockoutAlert(void) {
         if (!keyWindow) keyWindow = [UIApplication sharedApplication].keyWindow;
         
         if (keyWindow) {
-            UIView *v = [keyWindow viewWithTag:888899];
-            if (v) {
-                [v removeFromSuperview];
-            }
-        }
-        isAlertActive = NO;
-    });
-}
-
-// إظهار واجهة التنبيه مع العد التنازلي الدقيق
-void showVirtualLockoutAlert(void) {
-    if (isAlertActive) return;
-    isAlertActive = YES;
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = nil;
-        if (@available(iOS 13.0, *)) {
-            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                    UIWindowScene *windowScene = (UIWindowScene *)scene;
-                    for (UIWindow *w in windowScene.windows) {
-                        if (w.isKeyWindow) {
-                            keyWindow = w;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (!keyWindow) {
-            keyWindow = [UIApplication sharedApplication].keyWindow;
-        }
-        
-        if (keyWindow) {
-            UIView *oldBlocker = [keyWindow viewWithTag:888899];
-            if (oldBlocker) [oldBlocker removeFromSuperview];
-            
             UIView *blockerView = [[UIView alloc] initWithFrame:keyWindow.bounds];
-            blockerView.tag = 888899;
-            blockerView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.75];
+            blockerView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0.85];
             blockerView.userInteractionEnabled = YES;
             
-            UIView *alertBox = [[UIView alloc] initWithFrame:CGRectMake(30, keyWindow.bounds.size.height / 2 - 110, keyWindow.bounds.size.width - 60, 220)];
+            UIView *alertBox = [[UIView alloc] initWithFrame:CGRectMake(30, keyWindow.bounds.size.height / 2 - 100, keyWindow.bounds.size.width - 60, 200)];
             alertBox.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.15 alpha:0.98];
             alertBox.layer.cornerRadius = 16;
             alertBox.layer.borderWidth = 1.5;
-            alertBox.layer.borderColor = [UIColor redColor].CGColor;
+            alertBox.layer.borderColor = [UIColor systemBlueColor].CGColor;
             
             UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 20, alertBox.bounds.size.width - 30, 30)];
-            titleLabel.text = @"⚠️ الساعة الافتراضية للحظر";
-            titleLabel.textColor = [UIColor redColor];
-            titleLabel.font = [UIFont boldSystemFontOfSize:18];
+            titleLabel.text = @"🔄 تم الوصول إلى 395 نقطة";
+            titleLabel.textColor = [UIColor systemBlueColor];
+            titleLabel.font = [UIFont boldSystemFontOfSize:17];
             titleLabel.textAlignment = NSTextAlignmentCenter;
             
-            UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 65, alertBox.bounds.size.width - 30, 90)];
-            descLabel.text = @"تم الوصول إلى 395 نقطة!\nالتطبيق مقفل بواسطة الساعة الافتراضية لمدة 10 دقائق.\nيقوم التويك بإدارة كل شيء تلقائياً.";
-            descLabel.tag = 999911;
+            UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 60, alertBox.bounds.size.width - 30, 110)];
+            descLabel.text = [NSString stringWithFormat:@"تم تجهيز الحساب (%ld) وحذف البيانات السابقة بنجاح.\n\nالرجاء إعادة تشغيل التطبيق للتبديل.", (long)nextAccountIndex];
             descLabel.textColor = [UIColor whiteColor];
-            descLabel.font = [UIFont systemFontOfSize:12.5];
+            descLabel.font = [UIFont systemFontOfSize:14];
             descLabel.numberOfLines = 4;
             descLabel.textAlignment = NSTextAlignmentCenter;
             
@@ -179,47 +154,12 @@ void showVirtualLockoutAlert(void) {
             [alertBox addSubview:descLabel];
             [blockerView addSubview:alertBox];
             [keyWindow addSubview:blockerView];
-            
-            if (virtualClockTimer) {
-                [virtualClockTimer invalidate];
-                virtualClockTimer = nil;
-            }
-            
-            // نبضة الساعة التلقائية
-            virtualClockTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
-                if (!checkVirtualClockState()) {
-                    dismissVirtualLockoutAlert();
-                } else {
-                    NSString *path = getVirtualClockPlistPath();
-                    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
-                    NSDate *expiryDate = dict[@"VirtualExpiryTime"];
-                    if (expiryDate) {
-                        NSInteger remaining = (NSInteger)[expiryDate timeIntervalSinceNow];
-                        if (remaining < 0) remaining = 0;
-                        NSInteger minutes = remaining / 60;
-                        NSInteger seconds = remaining % 60;
-                        UILabel *dLabel = [blockerView viewWithTag:999911];
-                        if (dLabel) {
-                            dLabel.text = [NSString stringWithFormat:@"تم الوصول إلى 395 نقطة!\nالتطبيق مقفل بواسطة الساعة الافتراضية.\nالوقت المتبقي: %02ld:%02ld دقيقة", (long)minutes, (long)seconds];
-                        }
-                    }
-                }
-            }];
         }
     });
 }
 
-// تحليل الطلبات تلقائياً بالكامل
+// رصد طلبات النقاط
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
-    if (checkVirtualClockState()) {
-        showVirtualLockoutAlert();
-        return;
-    } else {
-        if (isAlertActive) {
-            dismissVirtualLockoutAlert();
-        }
-    }
-
     if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         return;
     }
@@ -235,13 +175,9 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
+                // عند الوصول إلى 395 نقطة تماماً، قم بعمل الحذف والتبديل وإظهار رسالة إعادة التشغيل
                 if (currentPoints == 395) {
-                    if (isArmedFor395() && !checkVirtualClockState()) {
-                        startVirtualClockLock(); // تشغيل تلقائي لـ 10 دقائق صافية
-                        showVirtualLockoutAlert();
-                    }
-                } else {
-                    armVirtualClockAgain();
+                    performAccountSwitchAndWipe();
                 }
             }
         }
@@ -318,19 +254,5 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
-        
-        // فحص تلقائي عند تشغيل التطبيق
-        if (checkVirtualClockState()) {
-            showVirtualLockoutAlert();
-        }
-        
-        // فحص تلقائي فور العودة من الخلفية
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            if (checkVirtualClockState()) {
-                showVirtualLockoutAlert();
-            } else {
-                dismissVirtualLockoutAlert();
-            }
-        }];
     });
 }
