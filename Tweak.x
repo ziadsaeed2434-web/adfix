@@ -57,11 +57,11 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     if (dict && dict[@"WaitingForPointsChange"] != nil) {
         BOOL waiting = [dict[@"WaitingForPointsChange"] boolValue];
         if (waiting) {
-            // طالما أن النقاط في الحساب الجديد لا تزال 10 بالضبط، نتجاهل المراقبة تماماً (فك الحظر/عدم التبديل)
+            // طالما أن النقاط في الحساب الجديد لا تزال 10 بالضبط، نتجاهل المراقبة تماماً
             if (currentPoints == 10) {
                 return NO;
             } else {
-                // بمجرد أن تتغير قيمة النقاط عن 10 (مثل أن تصبح أقل أو أكثر)، نقوم بفك قفل الانتظار وتفعيل المراقبة الكاملة من جديد
+                // بمجرد أن تتغير قيمة النقاط عن 10، نقوم بفك قفل الانتظار وتفعيل المراقبة الكاملة من جديد
                 NSMutableDictionary *mutableDict = [dict mutableCopy];
                 mutableDict[@"WaitingForPointsChange"] = @NO;
                 [mutableDict writeToFile:path atomically:YES];
@@ -146,7 +146,6 @@ void clearAllAppDataCompletely(void) {
             NSArray *contents = [fm contentsOfDirectoryAtPath:folderPath error:nil];
             for (NSString *file in contents) {
                 NSString *fullPath = [folderPath stringByAppendingPathComponent:file];
-                // الحفاظ حصرياً على ملف الحالة لضمان استمرار التناوب الصحيح
                 if (![fullPath isEqualToString:statePath]) {
                     [fm removeItemAtPath:fullPath error:nil];
                 }
@@ -165,14 +164,11 @@ void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
     
-    // 1. تحديد الحساب التالي وتفعيل حالة الانتظار لتجنب المراقبة الخاطئة للحساب الجديد
     NSString *nextUUID = getNextAccountUUID();
     
-    // 2. حذف الحساب السابق وبياناته جذرياً بالكامل
     clearAllAppDataCompletely();
     clearEntireKeychain();
     
-    // 3. زرع الحساب الجديد في الـ Keychain مسبقاً
     saveUUIDToKeychain(nextUUID);
     
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -249,12 +245,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
-                // التحقق الذكي: إذا كان الحساب الجديد لم تتغير نقاطه عن 10 بعد، يتم تجاهل المراقبة تماماً
                 if (!shouldProcessPoints(currentPoints)) {
                     return;
                 }
                 
-                // عند الوصول الفعلي لـ 10 نقاط (في حساب نشط ومصرح بمراقبته)، يتم التبديل فوراً
                 if (currentPoints >= 10) {
                     performAccountSwitchAndAlert();
                 }
@@ -284,7 +278,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inNewReq]; // الخطأ المطبعي هنا مصحح تلقائياً
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq]; // تم التصحيح هنا
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
