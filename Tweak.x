@@ -4,10 +4,10 @@
 #import <WebKit/WebKit.h>
 #import <Security/Security.h>
 
-// بيانات الحسابين المرفقة من صور الـ Keychain
+// بيانات الحسابين (التي يتم تبديلها داخل حقل الـ Password في الـ Keychain)
 static NSString *const kAccount1UUID = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C";
 static NSString *const kAccount2UUID = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10D";
-static NSString *const kKeychainService = @"com.tempnum.virtual-number.deviceUUID";
+static NSString *const kTargetAccountField = @"com.tempnum.virtual-number.deviceUUID";
 static NSString *const kKeychainGroup = @"3J96GNXKKU.*";
 
 // مسار حالة الحساب الحالي (لتحديد أي حساب يتم استخدامه حالياً)
@@ -43,15 +43,14 @@ void eraseAllAppData(void) {
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
 }
 
-// دالة لتحديث أو إنشاء الـ Keychain للـ DeviceUUID
-void updateKeychainForCurrentAccount(NSString *uuidString) {
+// دالة لتحديث أو إنشاء الـ Password (UUID) في الـ Keychain بدقة مطابقة للصورة
+void updateKeychainPasswordForCurrentAccount(NSString *uuidString) {
     NSData *passwordData = [uuidString dataUsingEncoding:NSUTF8StringEncoding];
     
-    // إعداد استعلام البحث عن العنصر في الـ Keychain
+    // بناء استعلام البحث عن العنصر في الـ Keychain بناءً على الـ Account والـ Group
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
     query[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
-    query[(__bridge id)kSecAttrService] = kKeychainService;
-    query[(__bridge id)kSecAttrAccount] = kKeychainService;
+    query[(__bridge id)kSecAttrAccount] = kTargetAccountField;
 #if !TARGET_OS_SIMULATOR
     query[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
 #endif
@@ -60,16 +59,15 @@ void updateKeychainForCurrentAccount(NSString *uuidString) {
     OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, NULL);
     
     if (status == errSecSuccess) {
-        // تحديث العنصر الموجود
+        // إذا كان موجوداً، نقوم بتحديث قيمة الـ Password بالـ UUID الجديد
         NSMutableDictionary *updateAttr = [NSMutableDictionary dictionary];
         updateAttr[(__bridge id)kSecValueData] = passwordData;
         SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)updateAttr);
     } else if (status == errSecItemNotFound) {
-        // إنشاء عنصر جديد إذا لم يكن موجوداً
+        // إذا لم يكن موجوداً، نقوم بإنشائه وإضافته بالكامل مع الـ Password الجديد
         NSMutableDictionary *addQuery = [NSMutableDictionary dictionary];
         addQuery[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
-        addQuery[(__bridge id)kSecAttrService] = kKeychainService;
-        addQuery[(__bridge id)kSecAttrAccount] = kKeychainService;
+        addQuery[(__bridge id)kSecAttrAccount] = kTargetAccountField;
         addQuery[(__bridge id)kSecValueData] = passwordData;
 #if !TARGET_OS_SIMULATOR
         addQuery[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
@@ -81,7 +79,7 @@ void updateKeychainForCurrentAccount(NSString *uuidString) {
 // متغير لمنع تكرار فتح النافذة مراراً وتكراراً بنفس اللحظة
 static BOOL isSwitchAlertActive = NO;
 
-// دالة التبديل الذكي وتحديث الحساب والتنظيف الشامل دون إعادة تشغيل إجبارية
+// دالة التبديل الذكي وتحديث الـ Password في الـ Keychain والتنظيف الشامل
 void performAccountSwitchAndWipe(void) {
     if (isSwitchAlertActive) return;
     isSwitchAlertActive = YES;
@@ -101,8 +99,8 @@ void performAccountSwitchAndWipe(void) {
     // 1. تنفيذ الحذف الشامل لبيانات التطبيق
     eraseAllAppData();
     
-    // 2. تحديث الـ Keychain بالـ UUID الخاص بالحساب الجديد
-    updateKeychainForCurrentAccount(targetUUID);
+    // 2. تحديث قيمة الـ Password في الـ Keychain بالحساب الجديد
+    updateKeychainPasswordForCurrentAccount(targetUUID);
     
     // 3. حفظ المؤشر الجديد في ملف الحالة
     NSDictionary *newState = @{@"AccountIndex": @(nextAccountIndex)};
@@ -144,7 +142,7 @@ void performAccountSwitchAndWipe(void) {
             titleLabel.textAlignment = NSTextAlignmentCenter;
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 60, alertBox.bounds.size.width - 30, 110)];
-            descLabel.text = [NSString stringWithFormat:@"تم تجهيز الحساب (%ld) وحذف البيانات السابقة بنجاح.\n\nالرجاء إعادة تشغيل التطبيق للتبديل.", (long)nextAccountIndex];
+            descLabel.text = [NSString stringWithFormat:@"تم تجهيز الحساب (%ld) وتحديث الـ Password في الـ Keychain.\n\nالرجاء إعادة تشغيل التطبيق للتبديل.", (long)nextAccountIndex];
             descLabel.textColor = [UIColor whiteColor];
             descLabel.font = [UIFont systemFontOfSize:14];
             descLabel.numberOfLines = 4;
