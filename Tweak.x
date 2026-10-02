@@ -10,11 +10,11 @@ static NSTimer *virtualClockTimer = nil;
 NSString *getVirtualClockPlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
-    return [libraryDirectory stringByAppendingPathComponent:@"VirtualClockLockState.plist"];
+    return [libraryDirectory stringByAppendingPathComponent:@"AppLockState.plist"];
 }
 
 // التحقق مما إذا كان مسموحاً بالحظر
-BOOL isArmedFor15(void) {
+BOOL isArmedFor395(void) {
     NSString *path = getVirtualClockPlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
     if (dict && dict[@"IsArmed"] != nil) {
@@ -56,7 +56,7 @@ void startVirtualClockLock(NSDate *expiryDate) {
     [mutableDict writeToFile:path atomically:YES];
 }
 
-// إعادة تفعيل النظام لرؤية رقم غير 15
+// إعادة تفعيل النظام لرؤية رقم غير 395
 void armVirtualClockAgain(void) {
     NSString *path = getVirtualClockPlistPath();
     NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithContentsOfFile:path];
@@ -156,7 +156,7 @@ void showVirtualLockoutAlert(void) {
             titleLabel.textAlignment = NSTextAlignmentCenter;
             
             UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 65, alertBox.bounds.size.width - 30, 90)];
-            descLabel.text = @"تم الوصول إلى 15 نقطة!\nالتطبيق مقفل بواسطة الساعة الافتراضية لمدة دقيقة.\nسيختفي الحظر تلقائياً في كل الظروف.";
+            descLabel.text = @"تم الوصول إلى 395 نقطة!\nالتطبيق مقفل بواسطة الساعة الافتراضية لمدة 10 دقائق.\nسيختفي الحظر تلقائياً في كل الظروف.";
             descLabel.tag = 999911;
             descLabel.textColor = [UIColor whiteColor];
             descLabel.font = [UIFont systemFontOfSize:12.5];
@@ -184,9 +184,11 @@ void showVirtualLockoutAlert(void) {
                     if (expiryDate) {
                         NSInteger remaining = (NSInteger)[expiryDate timeIntervalSinceNow];
                         if (remaining < 0) remaining = 0;
+                        NSInteger minutes = remaining / 60;
+                        NSInteger seconds = remaining % 60;
                         UILabel *dLabel = [blockerView viewWithTag:999911];
                         if (dLabel) {
-                            dLabel.text = [NSString stringWithFormat:@"تم الوصول إلى 15 نقطة!\nالتطبيق مقفل بواسطة الساعة الافتراضية.\nالوقت المتبقي: %ld ثانية", (long)remaining];
+                            dLabel.text = [NSString stringWithFormat:@"تم الوصول إلى 395 نقطة!\nالتطبيق مقفل بواسطة الساعة الافتراضية.\nالوقت المتبقي: %02ld:%02ld دقيقة", (long)minutes, (long)seconds];
                         }
                     }
                 }
@@ -221,10 +223,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
-                if (currentPoints == 15) {
-                    if (isArmedFor15() && !checkVirtualClockState()) {
-                        // تشغيل الساعة الافتراضية لمدة دقيقة كاملة (60 ثانية) عند الوصول لـ 15 نقطة
-                        NSDate *expiry = [NSDate dateWithTimeIntervalSinceNow:60.0];
+                if (currentPoints == 395) {
+                    if (isArmedFor395() && !checkVirtualClockState()) {
+                        // تشغيل الساعة الافتراضية لمدة 10 دقائق كاملة (600 ثانية) عند الوصول لـ 395 نقطة
+                        NSDate *expiry = [NSDate dateWithTimeIntervalSinceNow:600.0];
                         startVirtualClockLock(expiry);
                         showVirtualLockoutAlert();
                     }
