@@ -66,7 +66,7 @@ static void safeDismissAllAds(UIView *view) {
                 [title caseInsensitiveCompare:@"done"] == NSOrderedSame ||
                 [title caseInsensitiveCompare:@"تم"] == NSOrderedSame ||
                 [accLabel containsString:@"close"] || [accLabel containsString:@"skip"] ||
-                [accId containsString:"close"] || [accId containsString:@"skip"]) {
+                [accId containsString:@"close"] || [accId containsString:@"skip"]) {
                 isCloseButtonOnly = YES;
             }
         }
@@ -86,7 +86,6 @@ static BOOL isRewardedOrVideoAdViewController(UIViewController *vc) {
     if (!vc) return NO;
     NSString *className = NSStringFromClass([vc class]);
     
-    // فحص أسماء الشاشات الشهيرة الخاصة بإعلانات المكافآت والفيديو (Google AdMob, Unity Ads, AppLovin, IronSource, إلخ)
     if ([className containsString:@"Fullscreen"] || 
         [className containsString:@"Interstitial"] || 
         [className containsString:@"Rewarded"] || 
@@ -113,9 +112,7 @@ static BOOL isRewardedOrVideoAdViewController(UIViewController *vc) {
     
     if (!viewControllerToPresent) return;
 
-    // الشرط الأساسي: لا تبدأ الفحص نهائياً إلا إذا كانت الشاشة المعروضة عبارة عن إعلان مكافأة أو فيديو
     if (isRewardedOrVideoAdViewController(viewControllerToPresent)) {
-        // فحص مستمر لمراقبة الإعلان حتى ينتهي ويظهر زر الإغلاق ليخرج منه فوراً
         for (int i = 1; i <= 30; i++) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 if (viewControllerToPresent && viewControllerToPresent.view && !viewControllerToPresent.isBeingDismissed) {
