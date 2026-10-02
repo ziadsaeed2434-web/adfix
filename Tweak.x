@@ -43,11 +43,10 @@ void eraseAllAppData(void) {
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:appDomain];
 }
 
-// دالة لتحديث أو إنشاء الـ Password (UUID) في الـ Keychain بدقة مطابقة للصورة
+// دالة لتحديث أو إنشاء الـ Password (UUID) في الـ Keychain
 void updateKeychainPasswordForCurrentAccount(NSString *uuidString) {
     NSData *passwordData = [uuidString dataUsingEncoding:NSUTF8StringEncoding];
     
-    // بناء استعلام البحث عن العنصر في الـ Keychain بناءً على الـ Account والـ Group
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
     query[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
     query[(__bridge id)kSecAttrAccount] = kTargetAccountField;
@@ -55,16 +54,13 @@ void updateKeychainPasswordForCurrentAccount(NSString *uuidString) {
     query[(__bridge id)kSecAttrAccessGroup] = kKeychainGroup;
 #endif
     
-    // التحقق مما إذا كان العنصر موجوداً مسبقاً
     OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, NULL);
     
     if (status == errSecSuccess) {
-        // إذا كان موجوداً، نقوم بتحديث قيمة الـ Password بالـ UUID الجديد
         NSMutableDictionary *updateAttr = [NSMutableDictionary dictionary];
         updateAttr[(__bridge id)kSecValueData] = passwordData;
         SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)updateAttr);
     } else if (status == errSecItemNotFound) {
-        // إذا لم يكن موجوداً، نقوم بإنشائه وإضافته بالكامل مع الـ Password الجديد
         NSMutableDictionary *addQuery = [NSMutableDictionary dictionary];
         addQuery[(__bridge id)kSecClass] = (__bridge id)kSecClassGenericPassword;
         addQuery[(__bridge id)kSecAttrAccount] = kTargetAccountField;
@@ -92,7 +88,6 @@ void performAccountSwitchAndWipe(void) {
         currentAccountIndex = [dict[@"AccountIndex"] integerValue];
     }
     
-    // تبديل الحساب (إذا كان 1 يصبح 2، وإذا كان 2 يصبح 1)
     NSInteger nextAccountIndex = (currentAccountIndex == 1) ? 2 : 1;
     NSString *targetUUID = (nextAccountIndex == 1) ? kAccount1UUID : kAccount2UUID;
     
@@ -113,7 +108,7 @@ void performAccountSwitchAndWipe(void) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
                     UIWindowScene *windowScene = (UIWindowScene *)scene;
-                    for (UIScene *w in windowScene.windows) {
+                    for (UIWindow *w in windowScene.windows) {
                         if (w.isKeyWindow) {
                             keyWindow = w;
                             break;
@@ -136,7 +131,7 @@ void performAccountSwitchAndWipe(void) {
             alertBox.layer.borderColor = [UIColor systemBlueColor].CGColor;
             
             UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 20, alertBox.bounds.size.width - 30, 30)];
-            titleLabel.text = @"🔄 تم الوصول إلى 395 نقطة";
+            titleLabel.text = @"🔄 تم الوصول إلى 50 نقطة";
             titleLabel.textColor = [UIColor systemBlueColor];
             titleLabel.font = [UIFont boldSystemFontOfSize:17];
             titleLabel.textAlignment = NSTextAlignmentCenter;
@@ -173,8 +168,8 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
                 
-                // عند الوصول إلى 395 نقطة تماماً، قم بعمل الحذف والتبديل وإظهار رسالة إعادة التشغيل
-                if (currentPoints == 395) {
+                // التبديل عند الوصول إلى 50 نقطة
+                if (currentPoints == 50) {
                     performAccountSwitchAndWipe();
                 }
             }
@@ -203,7 +198,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inNewReq:newReq];
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
