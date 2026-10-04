@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 
-// دالة جافا سكريبت ذكية للبحث والضغط على العناصر داخل صفحات الويب (WKWebView)
+// دالة جافا سكريبت للتعامل مع عناصر الويب (WKWebView)
 static void injectJavaScriptToHandleWebElements(UIView *view, NSString *targetText) {
     if (!view) return;
     
@@ -33,7 +33,7 @@ static void injectJavaScriptToHandleWebElements(UIView *view, NSString *targetTe
     }
 }
 
-// دالة متقدمة للبحث عن العناصر في واجهات التطبيق (SwiftUI / UIKit)
+// دالة البحث عن العناصر في واجهة التطبيق
 static UIView *findViewByTitleOrLabel(UIView *view, NSString *targetText) {
     if (!view || view.hidden || view.alpha < 0.01) return nil;
     
@@ -67,11 +67,10 @@ static UIView *findViewByTitleOrLabel(UIView *view, NSString *targetText) {
     return nil;
 }
 
-// دالة البحث الشاملة (تطبيق + ويب معاً)
+// دالة الضغط الآمنة الخالية من أخطاء المترجم
 static void smartClickElement(UIWindow *window, NSString *targetText) {
     if (!window) return;
     
-    // 1. محاولة الضغط عبر عناصر التطبيق العادية
     UIView *targetView = findViewByTitleOrLabel(window, targetText);
     if (targetView) {
         UIWindow *win = targetView.window ?: window;
@@ -83,25 +82,26 @@ static void smartClickElement(UIWindow *window, NSString *targetText) {
         }
         if (!interactiveView) interactiveView = targetView;
         
+        // التحقق الصحيح من نوع الكلاس قبل استدعاء الدالة لتجنب أخطاء البناء
         if ([interactiveView isKindOfClass:[UIControl class]]) {
-            [(UIControl *)interactiveView sendActionsForControlEvents:UIControlEventTouchDown];
-            [(UIControl *)interactiveView sendActionsForControlEvents:UIControlEventTouchUpInside];
+            UIControl *control = (UIControl *)interactiveView;
+            [control sendActionsForControlEvents:UIControlEventTouchDown];
+            [control sendActionsForControlEvents:UIControlEventTouchUpInside];
         }
         
+        // تفعيل الـ Gesture Recognizers للـ SwiftUI
         for (UIGestureRecognizer *gr in interactiveView.gestureRecognizers) {
             if (gr.enabled) {
                 [gr setValue:@(3) forKey:@"state"];
             }
         }
-        
-        [targetView sendActionsForControlEvents:UIControlEventAllEvents];
     }
     
-    // 2. محاولة الضغط إذا كان العنصر داخل صفحة ويب (WKWebView)
+    // فحص ودعم الويب (WKWebView)
     injectJavaScriptToHandleWebElements(window, targetText);
 }
 
-// دالة الرجوع للخلف الآمنة
+// دالة الرجوع للخلف
 static void goBackToPreviousScreen(UIWindow *window) {
     if (!window) return;
     UIViewController *rootVC = window.rootViewController;
@@ -121,18 +121,15 @@ static void goBackToPreviousScreen(UIWindow *window) {
     }
 }
 
-// الحلقة التلقائية الذكية والخارقة (تطبيق + ويب)
+// الحلقة الرئيسية المحدثة
 static void startMasterAutomationLoop(UIWindow *mainWindow) {
     if (!mainWindow) return;
     
-    // الخطوة 1: ضغط Shake & Earn
     smartClickElement(mainWindow, @"Shake & Earn");
     
-    // الخطوة 2: بعد ثانية، ضغط Start Shaking!
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         smartClickElement(mainWindow, @"Start Shaking!");
         
-        // الخطوة 3: مراقبة ظهور Watch Ad & Earn بمهلة 5 ثوانٍ
         __block int elapsedSeconds = 0;
         __block BOOL adClicked = NO;
         
@@ -143,21 +140,17 @@ static void startMasterAutomationLoop(UIWindow *mainWindow) {
             UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
             if (!keyWindow) return;
             
-            // التحقق من وجود الزر سواء كـ View عادية أو داخل ويب فيو
             UIView *watchAdView = findViewByTitleOrLabel(keyWindow, @"Watch Ad & Earn");
             
-            if (watchAdView || elapsedSeconds >= 0) { // يتم الفحص الشامل
-                // محاولة الضغط فوراً
+            if (watchAdView || elapsedSeconds >= 0) {
                 smartClickElement(keyWindow, @"Watch Ad & Earn");
                 
-                // نفترض نجاح الضغط وننتظر ثانيتين للرجوع
                 adClicked = YES;
                 dispatch_source_cancel(timer);
                 
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     goBackToPreviousScreen(keyWindow);
                     
-                    // إعادة تكرار العملية بسلاسة
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         startMasterAutomationLoop(keyWindow);
                     });
