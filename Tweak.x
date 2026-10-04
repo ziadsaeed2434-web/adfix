@@ -79,7 +79,7 @@ NSString *getStatePlistPath(void) {
     return [libraryDirectory stringByAppendingPathComponent:@"AccountSwitchState.plist"];
 }
 
-// --- مسار علامة الخروج النهائي (للكشف عما إذا كان التطبيق قد أُغلق تماماً من الخلفية) ---
+// --- مسار علامة الخروج النهائي ---
 NSString *getTerminationMarkerPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     return [[paths firstObject] stringByAppendingPathComponent:@"AppWasTerminated.flag"];
@@ -157,7 +157,7 @@ void clearAllAppDataCompletely(void) {
             for (NSString *libItem in libraryContents) {
                 NSString *libItemPath = [libraryDir stringByAppendingPathComponent:libItem];
                 if ([libItemPath isEqualToString:statePath]) {
-                    continue; // استثناء ملف حالة التبديل لكي لا يضيع الترتيب والتسلسل
+                    continue; 
                 }
                 [fm removeItemAtPath:libItemPath error:&error];
             }
@@ -227,7 +227,7 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     return YES;
 }
 
-// --- تنفيذ التبديل والتنبيه ---
+// --- تنفيذ التبديل، التنبيه، والخروج النهائي التلقائي ---
 void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
@@ -259,12 +259,21 @@ void performAccountSwitchAndAlert(void) {
             rootVC = rootVC.presentedViewController;
         }
         
+        // تعديل الرسالة لتوضيح أنه سيتم الخروج تلقائياً
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم تبديل الحساب تلقائياً"
-                                                                   message:@"تم الوصول إلى 395 نقطة وحذف البيانات.\nتم الانتقال للحساب التالي بنجاح.\n\nيرجى إغلاق التطبيق من الخلفية وفتحه مجدداً."
+                                                                   message:@"تم الوصول إلى 395 نقطة وحذف البيانات.\nتم الانتقال للحساب التالي بنجاح.\n\nسيتم إغلاق التطبيق الآن تلقائياً..."
                                                             preferredStyle:UIAlertControllerStyleAlert];
         
         if (rootVC) {
-            [rootVC presentViewController:alert animated:YES completion:nil];
+            [rootVC presentViewController:alert animated:YES completion:^{
+                // الخروج النهائي التلقائي بعد عرض الرسالة بـ 2.5 ثانية لضمان رؤيتها
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    exit(0);
+                });
+            }];
+        } else {
+            // في حال عدم توفر واجهة، الخروج الفوري
+            exit(0);
         }
     });
 }
@@ -285,28 +294,21 @@ void checkAndEnforceValidAccount(void) {
     }
 }
 
-// دالة تفحص ما إذا كان التطبيق قد أُغلق نهائياً من الخلفية (Terminated)
 void checkAndWipeOnFreshLaunchIfNeeded(void) {
     checkAndEnforceValidAccount();
     
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *markerPath = getTerminationMarkerPath();
     
-    // إذا لم يواجه علامة الخروج، فهذا يعني أنه تم الخروج نهائياً من الخلفية وتم فتحه من جديد الآن
     if (![fm fileExistsAtPath:markerPath]) {
         NSString *currentUUID = getAppCurrentUUIDFromKeychain();
-        
-        // مسح بيانات الكاش والملفات جذرياً
         clearAllAppDataCompletely();
-        
-        // استعادة الحساب الحالي لضمان عدم ضياع الجلسة
         if (currentUUID) {
             clearEntireKeychain();
             saveUUIDToKeychain(currentUUID);
         }
     }
     
-    // إنشاء العلامة لتحديد أن التطبيق الآن يعمل
     [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
@@ -382,7 +384,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
         [defaultName rangeOfString:@"onboard" options:NSCaseInsensitiveSearch].location != NSNotFound ||
         [defaultName rangeOfString:@"term" options:NSCaseInsensitiveSearch].location != NSNotFound ||
         [defaultName rangeOfString:@"agree" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-        return YES; //[span_0](start_span)[span_0](end_span) إجبار التطبيق على اعتبار أن المقدمة والشروط تمت الموافقة عليها مسبقاً
+        return YES;
     }
     return %orig;
 }
@@ -390,21 +392,21 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (id)objectForKey:(NSString *)defaultName {
     if ([defaultName isEqualToString:@"onboarding_completed"] ||
         [defaultName rangeOfString:@"onboard" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-        return @YES; //[span_1](start_span)[span_1](end_span)
+        return @YES;
     }
     return %orig;
 }
 
 - (NSInteger)integerForKey:(NSString *)defaultName {
     if ([defaultName isEqualToString:@"onboarding_completed"]) {
-        return 1; //[span_2](start_span)[span_2](end_span)
+        return 1;
     }
     return %orig;
 }
 
 %end
 
-// --- الخطافات (Hooks) لتزوير البيانات والهويات وتوجيه الشبكة ---
+// --- الخطافات لتزوير البيانات والهويات وتوجيه الشبكة ---
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
@@ -602,17 +604,11 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
         
-        // الفحص والمسح عند التشغيل إذا كان الخروج نهائياً من الخلفية
         checkAndWipeOnFreshLaunchIfNeeded();
         
-        // تنظيف العلامة عند إغلاق التطبيق طبيعياً أو دخوله للخلفية
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
             NSFileManager *fm = [NSFileManager defaultManager];
             [fm removeItemAtPath:getTerminationMarkerPath() error:nil];
-        }];
-        
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            // إذا ذهب التطبيق للخلفية، نترك العلامة أو نحذفها بناءً على إغلاقه الكلي لاحقاً
         }];
     });
 }
