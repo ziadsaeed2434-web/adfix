@@ -17,16 +17,6 @@ static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A595
 
 static BOOL isSwitchAlertShown = NO;
 
-// --- متغيرات الجلسة الثابتة (لضمان ثبات المعرفات طوال فترة تشغيل التطبيق) ---
-static NSString *g_persistentUUID = nil;
-static NSString *g_persistentIMEI = nil;
-static NSString *g_persistentIDFA = nil;
-static NSString *g_persistentIDFV = nil;
-static NSString *g_persistentOS = nil;
-static NSString *g_persistentModel = nil;
-static NSString *g_persistentLocale = nil;
-static NSString *g_persistentDNS = nil;
-
 // --- واجهة خدمة الإعلانات ---
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
@@ -38,72 +28,41 @@ static NSString *g_persistentDNS = nil;
 - (void)presentAdFromViewController:(UIViewController *)viewController;
 @end
 
-// --- دوال مساعدة لإنشاء الهويات وتثبيتها لكل جلسة ---
+// --- دوال مساعدة لإنشاء هويات عشوائية ---
 static NSString *randomUUID() {
-    if (!g_persistentUUID) {
-        g_persistentUUID = [[NSUUID UUID] UUIDString];
-    }
-    return g_persistentUUID;
+    return [[NSUUID UUID] UUIDString];
 }
 
 static NSString *randomIMEI() {
-    if (!g_persistentIMEI) {
-        int r1 = 10 + arc4random_uniform(89);
-        long long r2 = 10000000000LL + (long long)(arc4random_uniform(900000000));
-        g_persistentIMEI = [NSString stringWithFormat:@"%d%lld", r1, r2];
-    }
-    return g_persistentIMEI;
-}
-
-static NSString *randomIDFA() {
-    if (!g_persistentIDFA) {
-        g_persistentIDFA = [[NSUUID UUID] UUIDString];
-    }
-    return g_persistentIDFA;
-}
-
-static NSString *randomIDFV() {
-    if (!g_persistentIDFV) {
-        g_persistentIDFV = [[NSUUID UUID] UUIDString];
-    }
-    return g_persistentIDFV;
+    int r1 = 10 + arc4random_uniform(89);
+    long long r2 = 10000000000LL + (long long)(arc4random_uniform(900000000));
+    return [NSString stringWithFormat:@"%d%lld", r1, r2];
 }
 
 static NSString *randomSpectrumDNS() {
-    if (!g_persistentDNS) {
-        NSArray *dnsList = @[@"71.252.0.12", @"71.243.0.12", @"209.18.47.61", @"209.18.47.62", @"68.237.161.12"];
-        g_persistentDNS = dnsList[arc4random_uniform((uint32_t)[dnsList count])];
-    }
-    return g_persistentDNS;
+    NSArray *dnsList = @[@"71.252.0.12", @"71.243.0.12", @"209.18.47.61", @"209.18.47.62", @"68.237.161.12"];
+    return dnsList[arc4random_uniform((uint32_t)[dnsList count])];
 }
 
-// --- تقييد نطاق الآيبيهات ليقتصر حصرياً على 172.59 ---
 static NSString *randomSpectrumIP() {
-    return [NSString stringWithFormat:@"172.59.%d.%d", arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
+    NSArray *subnets = @[@"172.59"];
+    NSString *subnet = subnets[arc4random_uniform((uint32_t)[subnets count])];
+    return [NSString stringWithFormat:@"%@.%d.%d", subnet, arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 static NSString *randomOSVersion() {
-    if (!g_persistentOS) {
-        NSArray *versions = @[@"16.1", @"16.5", @"17.0", @"17.2", @"17.4", @"17.5.1", @"18.0"];
-        g_persistentOS = versions[arc4random_uniform((uint32_t)[versions count])];
-    }
-    return g_persistentOS;
+    NSArray *versions = @[@"16.1", @"16.5", @"17.0", @"17.2", @"17.4", @"17.5.1", @"18.0"];
+    return versions[arc4random_uniform((uint32_t)[versions count])];
 }
 
 static NSString *randomDeviceModel() {
-    if (!g_persistentModel) {
-        NSArray *models = @[@"iPhone14,2", @"iPhone14,3", @"iPhone15,2", @"iPhone15,3", @"iPhone16,1", @"iPhone16,2"];
-        g_persistentModel = models[arc4random_uniform((uint32_t)[models count])];
-    }
-    return g_persistentModel;
+    NSArray *models = @[@"iPhone14,2", @"iPhone14,3", @"iPhone15,2", @"iPhone15,3", @"iPhone16,1", @"iPhone16,2"];
+    return models[arc4random_uniform((uint32_t)[models count])];
 }
 
 static NSString *randomLocaleIdentifier() {
-    if (!g_persistentLocale) {
-        NSArray *locales = @[@"en_US", @"en_GB", @"en_CA", @"es_US", @"fr_FR"];
-        g_persistentLocale = locales[arc4random_uniform((uint32_t)[locales count])];
-    }
-    return g_persistentLocale;
+    NSArray *locales = @[@"en_US", @"en_GB", @"en_CA", @"es_US", @"fr_FR"];
+    return locales[arc4random_uniform((uint32_t)[locales count])];
 }
 
 static NSString *generateTimestamp() {
@@ -120,7 +79,7 @@ NSString *getStatePlistPath(void) {
     return [libraryDirectory stringByAppendingPathComponent:@"AccountSwitchState.plist"];
 }
 
-// --- مسار علامة الخروج النهائي ---
+// --- مسار علامة الخروج النهائي (للكشف عما إذا كان التطبيق قد أُغلق تماماً من الخلفية) ---
 NSString *getTerminationMarkerPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     return [[paths firstObject] stringByAppendingPathComponent:@"AppWasTerminated.flag"];
@@ -172,7 +131,7 @@ void saveUUIDToKeychain(NSString *uuidString) {
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
 }
 
-// --- مسح بيانات التطبيق كلياً ---
+// --- مسح بيانات التطبيق كلياً (مع استثناء ملف الحالة) ---
 void clearAllAppDataCompletely(void) {
     NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleDomain) {
@@ -198,7 +157,7 @@ void clearAllAppDataCompletely(void) {
             for (NSString *libItem in libraryContents) {
                 NSString *libItemPath = [libraryDir stringByAppendingPathComponent:libItem];
                 if ([libItemPath isEqualToString:statePath]) {
-                    continue; 
+                    continue; // استثناء ملف حالة التبديل لكي لا يضيع الترتيب والتسلسل
                 }
                 [fm removeItemAtPath:libItemPath error:&error];
             }
@@ -217,7 +176,7 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
-// --- منطق التبديل التسلسلي ---
+// --- منطق التبديل التسلسلي (1 -> 2 -> 3 -> 1) ---
 NSString *getNextAccountUUID(void) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -268,6 +227,7 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     return YES;
 }
 
+// --- تنفيذ التبديل والتنبيه ---
 void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
@@ -325,25 +285,28 @@ void checkAndEnforceValidAccount(void) {
     }
 }
 
-// فحص التشغيل الجديد وحذف البيانات عند إغلاق التطبيق نهائياً سابقاً
+// دالة تفحص ما إذا كان التطبيق قد أُغلق نهائياً من الخلفية (Terminated)
 void checkAndWipeOnFreshLaunchIfNeeded(void) {
     checkAndEnforceValidAccount();
     
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *markerPath = getTerminationMarkerPath();
     
-    // إذا لم تكن العلامة موجودة، فهذا يعني أن التطبيق أغلق نهائياً وتم فتحه مجدداً
+    // إذا لم يواجه علامة الخروج، فهذا يعني أنه تم الخروج نهائياً من الخلفية وتم فتحه من جديد الآن
     if (![fm fileExistsAtPath:markerPath]) {
         NSString *currentUUID = getAppCurrentUUIDFromKeychain();
         
+        // مسح بيانات الكاش والملفات جذرياً
         clearAllAppDataCompletely();
         
+        // استعادة الحساب الحالي لضمان عدم ضياع الجلسة
         if (currentUUID) {
             clearEntireKeychain();
             saveUUIDToKeychain(currentUUID);
         }
     }
     
+    // إنشاء العلامة لتحديد أن التطبيق الآن يعمل
     [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
@@ -411,7 +374,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// --- الخطافات (Hooks) لتزوير البيانات مع جعلها ثابتة للجلسة والتتبع مسموحاً ---
+// --- الخطافات (Hooks) لتزوير البيانات والهويات وتوجيه الشبكة ---
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
@@ -436,19 +399,18 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// جعل التتبع مسموحاً (Authorized)
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 3; // 3 تعني Authorized (مسموح)
+    return 3;
 }
 %end
 
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
-    return [[NSUUID alloc] initWithUUIDString:randomIDFA()];
+    return [[NSUUID alloc] initWithUUIDString:randomUUID()];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
-    return YES; // جعل تتبع الإعلانات مسموحاً
+    return YES;
 }
 %end
 
@@ -470,8 +432,8 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     NSString *dynIP = randomSpectrumIP();
     NSString *dynDNS = randomSpectrumDNS();
     NSString *dynIMEI = randomIMEI();
-    NSString *dynIDFA = randomIDFA();
-    NSString *dynIDFV = randomIDFV();
+    NSString *dynIDFA = randomUUID();
+    NSString *dynIDFV = randomUUID();
     NSString *dynOS = randomOSVersion();
     NSString *dynModel = randomDeviceModel();
     
@@ -506,8 +468,8 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     NSString *dynIP = randomSpectrumIP();
     NSString *dynDNS = randomSpectrumDNS();
     NSString *dynIMEI = randomIMEI();
-    NSString *dynIDFA = randomIDFA();
-    NSString *dynIDFV = randomIDFV();
+    NSString *dynIDFA = randomUUID();
+    NSString *dynIDFV = randomUUID();
     NSString *dynOS = randomOSVersion();
     NSString *dynModel = randomDeviceModel();
     NSString *timestamp = generateTimestamp();
@@ -605,19 +567,22 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- مراقبة دورة الحياة وحذف البيانات عند الإغلاق التام نهائياً ---
+// --- مراقبة دورة حياة التطبيق لإدارة الخروج النهائي والكاش ---
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
         
-        // الفحص عند التشغيل الطازج وحذف البيانات إذا أُغلق سابقاً من الخلفية
+        // الفحص والمسح عند التشغيل إذا كان الخروج نهائياً من الخلفية
         checkAndWipeOnFreshLaunchIfNeeded();
         
-        // رصد الإغلاق النهائي للتطبيق من الخلفية لحذف العلامة وحفظ الحالة للإغلاق القادم
+        // تنظيف العلامة عند إغلاق التطبيق طبيعياً أو دخوله للخلفية
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
             NSFileManager *fm = [NSFileManager defaultManager];
             [fm removeItemAtPath:getTerminationMarkerPath() error:nil];
         }];
+        
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            // إذا ذهب التطبيق للخلفية، نترك العلامة أو نحذفها بناءً على إغلاقه الكلي لاحقاً
+        }];
     });
 }
-
