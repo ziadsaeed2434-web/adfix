@@ -184,7 +184,6 @@ void logNetworkEvent(NSString *engine, NSString *method, NSString *url, NSIntege
                 CGPoint loc = [touch locationInView:self];
                 UIView *hitView = [self hitTest:loc withEvent:event];
                 NSString *viewClass = NSStringFromClass([hitView class]);
-                // لتجنب الازدحام الشديد، نسجل النقرات على العناصر البارزة فقط أو الأزرار
                 if ([viewClass containsString:@"Button"] || [viewClass containsString:@"Control"] || [viewClass containsString:@"Hosting"] || [viewClass containsString:@"Cell"]) {
                     showInspectLog([NSString stringWithFormat:@"[Touch] 👆 Tap on View: %@ at (%.0f, %.0f)", viewClass, loc.x, loc.y]);
                 }
@@ -209,7 +208,6 @@ void logNetworkEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [NSURLProtocol registerCard:[GodModeNetworkProtocol class] rescue:nil]; // safe register
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
         showInspectLog([NSString stringWithFormat:@"[Init] Ultimate Inspector Ready! Go use the app."]);
     });
