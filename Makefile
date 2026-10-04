@@ -15,7 +15,7 @@ AdPurgeTweak_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-gnu-folding-c
 
 AdPurgeTweak_FILES = Tweak.x FLEXNetworkObserver.m FLEXNetworkRecorder.m FLEXNetworkTransaction.m FLEXResources.m FLEXUtility.m
 
-
+‏AdPurgeTweak_EXTRA_FRAMEWORKS += GoogleMobileAds
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
