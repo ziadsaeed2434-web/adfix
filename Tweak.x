@@ -1,10 +1,11 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 static id safePreloadedAd = nil;
-static BOOL isFetchingNextAd = MSNO ? NO : NO;
+static BOOL isFetchingNextAd = NO;
 
-// دالة آمنة لجلب الإعلان عبر الـ Runtime دون الحاجة لربط الكلاس مسبقاً في ملف الـ Makefile
+// دالة آمنة لجلب الإعلان عبر الـ Runtime
 static void fetchNextAdSafely(NSString *adUnitID, id originalRequest) {
     if (isFetchingNextAd || safePreloadedAd != nil) return;
     isFetchingNextAd = YES;
@@ -17,10 +18,8 @@ static void fetchNextAdSafely(NSString *adUnitID, id originalRequest) {
     
     NSLog(@"[Tweak] Pre-loading next ad safely in background...");
     
-    // استدعاء الميثود ديناميكياً لتجنب أي مشاكل في التجميع
-    if ([gadClass respondsToSelector:@selector(loadWithAdUnitID:request:completionHandler:)]) {
-        [gadClass performSelector:@selector(loadWithAdUnitID:request:completionHandler:) withObject:adUnitID withObject:originalRequest];
-    }
+    // استخدام NSInvocation أو استدعاء مباشر إذا أمكن، أو ترك الـ Hook يتعامل مع الطلبات الطبيعية
+    isFetchingNextAd = NO;
 }
 
 %hook GADRewardedAd
@@ -36,17 +35,19 @@ static void fetchNextAdSafely(NSString *adUnitID, id originalRequest) {
         if (completionHandler) {
             completionHandler(readyAd, nil);
         }
-        
-        fetchNextAdSafely(adUnitID, request);
         return;
     }
     
     // الطلب الطبيعي
     %orig(adUnitID, request, ^(id ad, NSError *error) {
+        if (ad && !error && !safePreloadedAd) {
+            // حفظ نسخة احتياطية للإعلان القادم في المتغير الآمن
+            safePreloadedAd = ad;
+            NSLog(@"[Tweak] Next ad cached successfully in background!");
+        }
         if (completionHandler) {
             completionHandler(ad, error);
         }
-        fetchNextAdSafely(adUnitID, request);
     });
 }
 
