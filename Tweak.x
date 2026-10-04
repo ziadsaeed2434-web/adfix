@@ -10,10 +10,10 @@
 
 // --- الثوابت وإعدادات الحسابات الثلاثة ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
-static NSString * const kKeychainGroup   = @"8CAEUC6576.*";
-static NSString * const kAccount1_UUID   = @"5A82BF9A-3EA4-4CA5-AD37-593553C1E15C"; // الحساب الأول
-static NSString * const kAccount2_UUID   = @"2BEE80E7-E20A-432B-875D-A98E2B8BC10A"; // الحساب الثاني
-static NSString * const kAccount3_UUID   = @"7F4D0096-0107-44B6-9D40-63FBCE2A5956"; // الحساب الثالث
+static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
+static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
+static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10A"; // الحساب الثاني
+static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A5956"; // الحساب الثالث
 
 static BOOL isSwitchAlertShown = NO;
 
@@ -373,6 +373,36 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)stopLoading {}
 @end
+
+// --- تخطي شاشات الترحيب والشروط تلقائياً عبر NSUserDefaults ---
+%hook NSUserDefaults
+
+- (BOOL)boolForKey:(NSString *)defaultName {
+    if ([defaultName isEqualToString:@"onboarding_completed"] ||
+        [defaultName rangeOfString:@"onboard" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [defaultName rangeOfString:@"term" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [defaultName rangeOfString:@"agree" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return YES; //[span_0](start_span)[span_0](end_span) إجبار التطبيق على اعتبار أن المقدمة والشروط تمت الموافقة عليها مسبقاً
+    }
+    return %orig;
+}
+
+- (id)objectForKey:(NSString *)defaultName {
+    if ([defaultName isEqualToString:@"onboarding_completed"] ||
+        [defaultName rangeOfString:@"onboard" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return @YES; //[span_1](start_span)[span_1](end_span)
+    }
+    return %orig;
+}
+
+- (NSInteger)integerForKey:(NSString *)defaultName {
+    if ([defaultName isEqualToString:@"onboarding_completed"]) {
+        return 1; //[span_2](start_span)[span_2](end_span)
+    }
+    return %orig;
+}
+
+%end
 
 // --- الخطافات (Hooks) لتزوير البيانات والهويات وتوجيه الشبكة ---
 %hook UIDevice
