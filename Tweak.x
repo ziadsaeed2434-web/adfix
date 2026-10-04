@@ -17,10 +17,19 @@ static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A595
 
 static BOOL isSwitchAlertShown = NO;
 
-// --- متغيرات التخزين المؤقت للإعلانات ---
-static id safePreloadedAd = nil;
+// --- واجهة خدمة الإعلانات ---
 
-// --- دوال مساعدة لإنشاء هويات عشوائية ---
+@interface ActivatorAdService : NSObject
+- (void)loadAd;
+- (BOOL)isReady;
+- (BOOL)isAdReady;
+- (BOOL)canShowAd;
+- (BOOL)hasAdLoaded;
+- (void)showRewardAd;
+- (void)presentAdFromViewController:(UIViewController *)viewController;
+@end
+
+// --- دوال مساعدة لإنشاء هويات عشوائية (بدون IP أو DNS) ---
 static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
@@ -29,17 +38,6 @@ static NSString *randomIMEI() {
     int r1 = 10 + arc4random_uniform(89);
     long long r2 = 10000000000LL + (long long)(arc4random_uniform(900000000));
     return [NSString stringWithFormat:@"%d%lld", r1, r2];
-}
-
-static NSString *randomSpectrumDNS() {
-    NSArray *dnsList = @[@"71.252.0.12", @"71.243.0.12", @"209.18.47.61", @"209.18.47.62", @"68.237.161.12"];
-    return dnsList[arc4random_uniform((uint32_t)[dnsList count])];
-}
-
-static NSString *randomSpectrumIP() {
-    NSArray *subnets = @[@"172.59"];
-    NSString *subnet = subnets[arc4random_uniform((uint32_t)[subnets count])];
-    return [NSString stringWithFormat:@"%@.%d.%d", subnet, arc4random_uniform(250) + 1, arc4random_uniform(250) + 1];
 }
 
 static NSString *randomOSVersion() {
@@ -123,6 +121,7 @@ void saveUUIDToKeychain(NSString *uuidString) {
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
 }
 
+// --- مسح بيانات التطبيق كلياً وبشكل مضمون (مع استثناء ملف الحالة) ---
 void clearAllAppDataCompletely(void) {
     NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleDomain) {
@@ -167,6 +166,7 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
+// --- منطق التبديل التسلسلي المضمون 100% ---
 NSString *getNextAccountUUID(void) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -176,6 +176,7 @@ NSString *getNextAccountUUID(void) {
         lastAccountIndex = [dict[@"LastIndex"] integerValue];
     }
     
+    NSString *currentKeychainUUID = getAppCurrentUUIDFromKeychain();
     NSString *nextUUID = nil;
     NSInteger newIndex = 1;
     
@@ -188,6 +189,16 @@ NSString *getNextAccountUUID(void) {
     } else {
         nextUUID = kAccount1_UUID;
         newIndex = 1;
+    }
+    
+    if (currentKeychainUUID && [nextUUID isEqualToString:currentKeychainUUID]) {
+        if ([currentKeychainUUID isEqualToString:kAccount1_UUID]) {
+            nextUUID = kAccount2_UUID; newIndex = 2;
+        } else if ([currentKeychainUUID isEqualToString:kAccount2_UUID]) {
+            nextUUID = kAccount3_UUID; newIndex = 3;
+        } else {
+            nextUUID = kAccount1_UUID; newIndex = 1;
+        }
     }
     
     NSMutableDictionary *newDict = [NSMutableDictionary dictionary];
@@ -217,6 +228,7 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     return YES;
 }
 
+// --- عملية الحذف والتبديل المضمونة ---
 void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
@@ -248,12 +260,18 @@ void performAccountSwitchAndAlert(void) {
             rootVC = rootVC.presentedViewController;
         }
         
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم تبديل الحساب تلقائياً"
-                                                                   message:@"تم الوصول إلى 395 نقطة وحذف البيانات.\nتم الانتقال للحساب التالي بنجاح.\n\nيرجى إغلاق التطبيق من الخلفية وفتحه مجدداً."
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم التبديل والحذف بنجاح"
+                                                                   message:@"تم الوصول إلى 395 نقطة، حذف البيانات السابقة، والانتقال للحساب التالي بنجاح تام.\n\nسيتم إغلاق التطبيق الآن..."
                                                             preferredStyle:UIAlertControllerStyleAlert];
         
         if (rootVC) {
-            [rootVC presentViewController:alert animated:YES completion:nil];
+            [rootVC presentViewController:alert animated:YES completion:^{
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    exit(0);
+                });
+            }];
+        } else {
+            exit(0);
         }
     });
 }
@@ -288,6 +306,7 @@ void checkAndWipeOnFreshLaunchIfNeeded(void) {
             saveUUIDToKeychain(currentUUID);
         }
     }
+    
     [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
@@ -355,7 +374,37 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// --- الخطافات (Hooks) لتزوير البيانات والهويات وتوجيه الشبكة ---
+// --- تخطي شاشات الترحيب والشروط تلقائياً عبر NSUserDefaults ---
+%hook NSUserDefaults
+
+- (BOOL)boolForKey:(NSString *)defaultName {
+    if ([defaultName isEqualToString:@"onboarding_completed"] ||
+        [defaultName rangeOfString:@"onboard" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [defaultName rangeOfString:@"term" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [defaultName rangeOfString:@"agree" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return YES;
+    }
+    return %orig;
+}
+
+- (id)objectForKey:(NSString *)defaultName {
+    if ([defaultName isEqualToString:@"onboarding_completed"] ||
+        [defaultName rangeOfString:@"onboard" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return @YES;
+    }
+    return %orig;
+}
+
+- (NSInteger)integerForKey:(NSString *)defaultName {
+    if ([defaultName isEqualToString:@"onboarding_completed"]) {
+        return 1;
+    }
+    return %orig;
+}
+
+%end
+
+// --- الخطافات لتزوير الهويات (بدون IP أو DNS) ---
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
@@ -396,33 +445,14 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 %end
 
 %hook NSMutableURLRequest
-- (void)setURL:(NSURL *)url {
-    NSString *dynamicIP = randomSpectrumIP();
-    NSString *urlString = [url absoluteString];
-    
-    if ([urlString containsString:@"ip="]) {
-        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
-        urlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", dynamicIP]];
-    }
-    
-    url = [NSURL URLWithString:urlString] ?: url;
-    %orig(url);
-}
-
 - (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString *)field {
-    NSString *dynIP = randomSpectrumIP();
-    NSString *dynDNS = randomSpectrumDNS();
     NSString *dynIMEI = randomIMEI();
     NSString *dynIDFA = randomUUID();
     NSString *dynIDFV = randomUUID();
     NSString *dynOS = randomOSVersion();
     NSString *dynModel = randomDeviceModel();
     
-    if ([field isEqualToString:@"X-Forwarded-For"] || [field isEqualToString:@"Client-IP"] || [field isEqualToString:@"True-Client-IP"] || [field isEqualToString:@"X-Client-IP"] || [field isEqualToString:@"Remote-IP"]) {
-        value = dynIP;
-    } else if ([field isEqualToString:@"X-Custom-DNS"] || [field isEqualToString:@"X-DNS-Server"]) {
-        value = dynDNS;
-    } else if ([field isEqualToString:@"X-Device-IMEI"] || [field isEqualToString:@"X-IMEI"] || [field isEqualToString:@"Device-Id"] || [field isEqualToString:@"IMEI"]) {
+    if ([field isEqualToString:@"X-Device-IMEI"] || [field isEqualToString:@"X-IMEI"] || [field isEqualToString:@"Device-Id"] || [field isEqualToString:@"IMEI"]) {
         value = dynIMEI;
     } else if ([field isEqualToString:@"X-Advertising-ID"] || [field isEqualToString:@"IDFA"] || [field isEqualToString:@"Advertising-Identifier"]) {
         value = dynIDFA;
@@ -434,8 +464,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
         value = dynOS;
     } else if ([field isEqualToString:@"X-Device-Model"]) {
         value = dynModel;
-    } else if ([field isEqualToString:@"X-ISP"] || [field isEqualToString:@"X-Carrier"]) {
-        value = @"Charter Communications";
     }
 
     %orig(value, field);
@@ -446,8 +474,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
-    NSString *dynIP = randomSpectrumIP();
-    NSString *dynDNS = randomSpectrumDNS();
     NSString *dynIMEI = randomIMEI();
     NSString *dynIDFA = randomUUID();
     NSString *dynIDFV = randomUUID();
@@ -455,14 +481,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     NSString *dynModel = randomDeviceModel();
     NSString *timestamp = generateTimestamp();
     
-    [mutableReq setValue:dynIP forHTTPHeaderField:@"X-Forwarded-For"];
-    [mutableReq setValue:dynIP forHTTPHeaderField:@"Client-IP"];
-    [mutableReq setValue:dynDNS forHTTPHeaderField:@"X-DNS-Server"];
     [mutableReq setValue:dynIMEI forHTTPHeaderField:@"X-Device-IMEI"];
     [mutableReq setValue:dynIDFA forHTTPHeaderField:@"X-Advertising-ID"];
     [mutableReq setValue:dynIDFV forHTTPHeaderField:@"X-Vendor-ID"];
     [mutableReq setValue:timestamp forHTTPHeaderField:@"X-Request-Timestamp"];
-    [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
     [mutableReq setValue:dynOS forHTTPHeaderField:@"X-OS-Version"];
     [mutableReq setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
     [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
@@ -474,19 +496,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     };
     
     return %orig(mutableReq, wrappedHandler);
-}
-
-- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSString *dynamicIP = randomSpectrumIP();
-    NSString *urlString = [url absoluteString];
-    
-    if ([urlString containsString:@"ip="]) {
-        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
-        urlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", dynamicIP]];
-        url = [NSURL URLWithString:urlString] ?: url;
-    }
-    
-    return %orig(url, completionHandler);
 }
 %end
 
@@ -503,29 +512,49 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- نظام التجهيز الفوري لإعلانات GADRewardedAd ---
-%hook GADRewardedAd
+// --- تحصين وتفعيل الإعلانات تلقائياً ---
+%hook ActivatorAdService
+- (BOOL)isReady { return YES; }
+- (BOOL)isAdReady { return YES; }
+- (BOOL)canShowAd { return YES; }
+- (BOOL)hasAdLoaded { return YES; }
 
-+ (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(id ad, NSError *error))completionHandler {
-    if (safePreloadedAd != nil) {
-        id readyAd = safePreloadedAd;
-        safePreloadedAd = nil;
-        if (completionHandler) {
-            completionHandler(readyAd, nil);
-        }
-        return;
-    }
-    
-    %orig(adUnitID, request, ^(id ad, NSError *error) {
-        if (ad && !error && safePreloadedAd == nil) {
-            safePreloadedAd = ad;
-        }
-        if (completionHandler) {
-            completionHandler(ad, error);
+- (void)loadAd {
+    %orig;
+    id targetSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+            [targetSelf loadAd];
         }
     });
 }
 
+- (void)showRewardAd {
+    @try {
+        %orig;
+        id targetSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+                [targetSelf loadAd];
+            }
+        });
+    } @catch (NSException *exception) {}
+}
+
+- (void)presentAdFromViewController:(UIViewController *)viewController {
+    @try { 
+        %orig; 
+    } @catch (NSException *exception) {}
+}
+
+- (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
+    @try {
+        id targetSelf = self;
+        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
+            [targetSelf loadAd];
+        }
+    } @catch (NSException *exception) {}
+}
 %end
 
 // --- مراقبة دورة حياة التطبيق لإدارة الخروج النهائي والكاش ---
