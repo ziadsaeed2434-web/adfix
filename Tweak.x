@@ -11,9 +11,9 @@
 // --- الثوابت وإعدادات الحسابات الثلاثة ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
-static NSString * const kAccount1_UUID   = @"9A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
-static NSString * const kAccount2_UUID   = @"7BEE80E4-E20A-432B-879D-A98E2B8BC10D"; // الحساب الثاني
-static NSString * const kAccount3_UUID   = @"3F4D0094-0107-44B6-9D43-63FBCE2A5956"; // الحساب الثالث
+static NSString * const kAccount1_UUID   = @"5A82BF9F-1EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
+static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-232B-879D-A98E2B8BC10D"; // الحساب الثاني
+static NSString * const kAccount3_UUID   = @"7F4D0094-0107-34B6-9D43-63FBCE2A5956"; // الحساب الثالث
 
 static BOOL isSwitchAlertShown = NO;
 
