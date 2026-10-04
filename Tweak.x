@@ -1,38 +1,33 @@
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
-// تعريف كلاس GADRewardedAd والميثود صراحةً لكي يتعرف عليه المترجم
-@interface GADRewardedAd : NSObject
-+ (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(GADRewardedAd *ad, NSError *error))completionHandler;
-@end
-
-// متغير لحفظ الإعلان المحمل مسبقاً في الخلفية
 static id safePreloadedAd = nil;
-static BOOL isFetchingNextAd = NO;
+static BOOL isFetchingNextAd = MSNO ? NO : NO;
 
-// دالة لجلب الإعلان التالي بهدوء بمجرد انتهاء الإعلان الحالي
+// دالة آمنة لجلب الإعلان عبر الـ Runtime دون الحاجة لربط الكلاس مسبقاً في ملف الـ Makefile
 static void fetchNextAdSafely(NSString *adUnitID, id originalRequest) {
     if (isFetchingNextAd || safePreloadedAd != nil) return;
     isFetchingNextAd = YES;
     
-    NSLog(@"[Tweak] Pre-load next ad safely in background...");
-    
-    // استخدام الكلاس المعرف مباشرة بدلاً من NSClassFromString لتجنب خطأ الـ Compilation
-    [GADRewardedAd loadWithAdUnitID:adUnitID request:originalRequest completionHandler:^(GADRewardedAd *ad, NSError *error) {
+    Class gadClass = objc_getClass("GADRewardedAd");
+    if (!gadClass) {
         isFetchingNextAd = NO;
-        if (ad && !error) {
-            safePreloadedAd = ad;
-            NSLog(@"[Tweak] Next ad successfully pre-loaded and ready!");
-        } else {
-            NSLog(@"[Tweak] Failed to pre-load next ad: %@", error.localizedDescription);
-        }
-    }];
+        return;
+    }
+    
+    NSLog(@"[Tweak] Pre-loading next ad safely in background...");
+    
+    // استدعاء الميثود ديناميكياً لتجنب أي مشاكل في التجميع
+    if ([gadClass respondsToSelector:@selector(loadWithAdUnitID:request:completionHandler:)]) {
+        [gadClass performSelector:@selector(loadWithAdUnitID:request:completionHandler:) withObject:adUnitID withObject:originalRequest];
+    }
 }
 
 %hook GADRewardedAd
 
-+ (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(GADRewardedAd *ad, NSError *error))completionHandler {
++ (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(id ad, NSError *error))completionHandler {
     
-    // إذا كان لدينا إعلان جاهز مسبقاً، نسلمه فوراً للتطبيق بدون انتظار
+    // تسليم الإعلان الجاهز مسبقاً فوراً
     if (safePreloadedAd != nil) {
         id readyAd = safePreloadedAd;
         safePreloadedAd = nil;
@@ -42,17 +37,15 @@ static void fetchNextAdSafely(NSString *adUnitID, id originalRequest) {
             completionHandler(readyAd, nil);
         }
         
-        // البدء فوراً بتحميل الإعلان الذي يليه في الخلفية
         fetchNextAdSafely(adUnitID, request);
         return;
     }
     
-    // إذا لم يكن جاهزاً، نسمح للطلب الطبيعي بالمرور
-    %orig(adUnitID, request, ^(GADRewardedAd *ad, NSError *error) {
+    // الطلب الطبيعي
+    %orig(adUnitID, request, ^(id ad, NSError *error) {
         if (completionHandler) {
             completionHandler(ad, error);
         }
-        // بعد انتهاء الطلب الطبيعي، نبدأ بتجهيز الإعلان التالي
         fetchNextAdSafely(adUnitID, request);
     });
 }
