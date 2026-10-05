@@ -355,14 +355,15 @@ void injectRandomizedHeaders(NSMutableURLRequest *request) {
     [request setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 AppModel/%@", dynOS, dynModel] forHTTPHeaderField:@"User-Agent"];
 }
 
-// --- دالة التكرار التلقائي (تم إصلاح خطأ البلوك المتداخل) ---
+// --- دالة التكرار التلقائي (محدثة لتفادي حلقة الاحتجاز وتحذيرات ARC) ---
 void startAutoShakeLoop(NSURLRequest *originalRequest) {
     if (isAutoShakingActive) return;
     isAutoShakingActive = YES;
     
     __block void (^sendRequestBlock)(void) = nil;
+    __weak __block void (^weakSendRequestBlock)(void) = nil;
     
-    sendRequestBlock = ^(void) {
+    weakSendRequestBlock = sendRequestBlock = ^(void) {
         if (!isAutoShakingActive) return;
         
         NSMutableURLRequest *clonedRequest = [originalRequest mutableCopy];
@@ -374,8 +375,9 @@ void startAutoShakeLoop(NSURLRequest *originalRequest) {
             int randomDelay = 3 + arc4random_uniform(3); // بين 3 إلى 5 ثوانٍ
             
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if (sendRequestBlock) {
-                    sendRequestBlock();
+                void (^strongBlock)(void) = weakSendRequestBlock;
+                if (strongBlock) {
+                    strongBlock();
                 }
             });
         }];
@@ -383,8 +385,9 @@ void startAutoShakeLoop(NSURLRequest *originalRequest) {
     };
     
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (sendRequestBlock) {
-            sendRequestBlock();
+        void (^strongBlock)(void) = weakSendRequestBlock;
+        if (strongBlock) {
+            strongBlock();
         }
     });
 }
