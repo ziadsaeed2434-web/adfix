@@ -93,15 +93,13 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
 
 %hook GADRewardedAd
 
-+ (void)loadWithAdUnitID:(NSString * _Nonnull)adUnitID request:(id _Nullable)request completionHandler:(void (^ _Nonnull)(id _Nullable, NSError * _Nullable))completionHandler {
++ (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(id, NSError *))arg3 {
     
-    // حفظ الـ handler في متغير محلي لضمان بقائه ضمن النطاق
-    void (^localHandler)(id, NSError *) = [completionHandler copy];
+    void (^localHandler)(id, NSError *) = [arg3 copy];
     
     if (adUnitID) {
         NSMutableArray *queue = adQueuesMap[adUnitID];
         
-        // تسليم الإعلان بسرعة فائقة جداً من الطابور
         if (queue && queue.count > 0) {
             id cachedAd = [queue firstObject];
             [queue removeObjectAtIndex:0];
@@ -110,7 +108,6 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
                 localHandler(cachedAd, nil);
             }
             
-            // إعادة التعبئة في الخلفية
             dispatch_async(dispatch_get_main_queue(), ^{
                 UltraFastRefillQueue(adUnitID, request);
             });
