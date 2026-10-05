@@ -5,13 +5,13 @@
 #import <AdSupport/AdSupport.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 
-// --- الثوابت وإعدادات الحسابات الثلاثة ---
-
+// --- الثوابت وإعدادات الحسابات الثلاثة مرقمة ومرتبة بدقة ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
-static NSString * const kKeychainGroup   = @"NT53G4TQG2.*";
-static NSString * const kAccount1_UUID   = @"5A82BF9A-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
-static NSString * const kAccount2_UUID   = @"2BEE87E7-E20A-432B-879E-A98E2B8BC10A"; // الحساب الثاني
-static NSString * const kAccount3_UUID   = @"7F4D0096-0107-44B6-9D43-63FBCE2A5956"; // الحساب الثالث
+static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
+
+static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD66-593553C1E15C"; // الحساب الأول (1)
+static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-8799-A98E2B8BC10A"; // الحساب الثاني (2)
+static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D41-63FBCE2A5956"; // الحساب الثالث (3)
 
 static BOOL isSwitchAlertShown = NO;
 
@@ -20,17 +20,11 @@ static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// --- مسار حالة التبديل ---
+// --- مسار حالة التبديل والتسلسل ---
 NSString *getStatePlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
     return [libraryDirectory stringByAppendingPathComponent:@"AccountSwitchState.plist"];
-}
-
-// --- مسار علامة الخروج النهائي ---
-NSString *getTerminationMarkerPath(void) {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-    return [[paths firstObject] stringByAppendingPathComponent:@"AppWasTerminated.flag"];
 }
 
 // --- إدارة الـ Keychain المدمجة ---
@@ -79,7 +73,7 @@ void saveUUIDToKeychain(NSString *uuidString) {
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
 }
 
-// --- مسح بيانات التطبيق كلياً وبشكل مضمون (مع استثناء ملف الحالة) ---
+// --- مسح بيانات التطبيق كلياً عند الوصول للهدف فقط (مع استثناء ملف الحالة) ---
 void clearAllAppDataCompletely(void) {
     NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleDomain) {
@@ -124,45 +118,40 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
-// --- منطق التبديل التسلسلي المضمون 100% ---
+// --- المنطق التسلسلي الصارم والمضمون 100% (1 -> 2 -> 3 -> 1) ---
 NSString *getNextAccountUUID(void) {
     NSString *path = getStatePlistPath();
-    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+    NSMutableDictionary *dict = [[NSMutableDictionary alloc] initWithContentsOfFile:path];
     
-    NSInteger lastAccountIndex = 1; 
-    if (dict && dict[@"LastIndex"] != nil) {
-        lastAccountIndex = [dict[@"LastIndex"] integerValue];
+    if (!dict) {
+        dict = [NSMutableDictionary dictionary];
     }
     
-    NSString *currentKeychainUUID = getAppCurrentUUIDFromKeychain();
+    // قراءة خطوة التسلسل الحالية (افتراضياً 1)
+    NSInteger currentStep = 1;
+    if (dict[@"SequenceStep"] != nil) {
+        currentStep = [dict[@"SequenceStep"] integerValue];
+    }
+    
     NSString *nextUUID = nil;
-    NSInteger newIndex = 1;
+    NSInteger nextStep = 1;
     
-    if (lastAccountIndex == 1) {
-        nextUUID = kAccount2_UUID;
-        newIndex = 2;
-    } else if (lastAccountIndex == 2) {
-        nextUUID = kAccount3_UUID;
-        newIndex = 3;
+    // التبديل خطوة بخطوة بالترتيب المحدد تماماً
+    if (currentStep == 1) {
+        nextUUID = kAccount2_UUID; // من الحساب الأول إلى الثاني
+        nextStep = 2;
+    } else if (currentStep == 2) {
+        nextUUID = kAccount3_UUID; // من الحساب الثاني إلى الثالث
+        nextStep = 3;
     } else {
-        nextUUID = kAccount1_UUID;
-        newIndex = 1;
+        nextUUID = kAccount1_UUID; // من الحساب الثالث يعود للأول (بداية دورة جديدة)
+        nextStep = 1;
     }
     
-    if (currentKeychainUUID && [nextUUID isEqualToString:currentKeychainUUID]) {
-        if ([currentKeychainUUID isEqualToString:kAccount1_UUID]) {
-            nextUUID = kAccount2_UUID; newIndex = 2;
-        } else if ([currentKeychainUUID isEqualToString:kAccount2_UUID]) {
-            nextUUID = kAccount3_UUID; newIndex = 3;
-        } else {
-            nextUUID = kAccount1_UUID; newIndex = 1;
-        }
-    }
-    
-    NSMutableDictionary *newDict = [NSMutableDictionary dictionary];
-    newDict[@"LastIndex"] = @(newIndex);
-    newDict[@"WaitingForPointsChange"] = @YES; 
-    [newDict writeToFile:path atomically:YES];
+    // حفظ الخطوة التالية وحالة الانتظار في ملف الـ Plist فوراً
+    dict[@"SequenceStep"] = @(nextStep);
+    dict[@"WaitingForPointsChange"] = @YES;
+    [dict writeToFile:path atomically:YES];
     
     return nextUUID;
 }
@@ -186,12 +175,13 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     return YES;
 }
 
-// --- عملية الحذف والتبديل المضمونة ---
+// --- تنفيذ عملية التبديل والحذف (تتم حصراً عند الوصول لـ 395 نقطة) ---
 void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
     
     NSString *nextUUID = getNextAccountUUID();
+    
     clearAllAppDataCompletely();
     clearEntireKeychain();
     saveUUIDToKeychain(nextUUID);
@@ -218,8 +208,8 @@ void performAccountSwitchAndAlert(void) {
             rootVC = rootVC.presentedViewController;
         }
         
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم التبديل والحذف بنجاح"
-                                                                   message:@"تم الوصول إلى 395 نقطة، حذف البيانات السابقة، والانتقال للحساب التالي بنجاح تام.\n\nسيتم إغلاق التطبيق الآن..."
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم التبديل التسلسلي بنجاح"
+                                                                   message:@"تم الوصول إلى 395 نقطة، والانتقال للحساب التالي بالترتيب الدقيق.\n\nسيتم إغلاق التطبيق الآن..."
                                                             preferredStyle:UIAlertControllerStyleAlert];
         
         if (rootVC) {
@@ -234,38 +224,23 @@ void performAccountSwitchAndAlert(void) {
     });
 }
 
+// --- التحقق من وجود حساب صالح في الـ Keychain بدون مسح البيانات عند الفتح العادي ---
 void checkAndEnforceValidAccount(void) {
     NSString *currentUUID = getAppCurrentUUIDFromKeychain();
     if (![currentUUID isEqualToString:kAccount1_UUID] && 
         ![currentUUID isEqualToString:kAccount2_UUID] && 
         ![currentUUID isEqualToString:kAccount3_UUID]) {
+        
         clearEntireKeychain();
         saveUUIDToKeychain(kAccount1_UUID);
         
         NSString *path = getStatePlistPath();
-        NSDictionary *dict = @{ @"LastIndex": @(1), @"WaitingForPointsChange": @NO };
+        NSDictionary *dict = @{ 
+            @"SequenceStep": @(1), 
+            @"WaitingForPointsChange": @NO 
+        };
         [dict writeToFile:path atomically:YES];
-        
-        clearAllAppDataCompletely();
     }
-}
-
-void checkAndWipeOnFreshLaunchIfNeeded(void) {
-    checkAndEnforceValidAccount();
-    
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *markerPath = getTerminationMarkerPath();
-    
-    if (![fm fileExistsAtPath:markerPath]) {
-        NSString *currentUUID = getAppCurrentUUIDFromKeychain();
-        clearAllAppDataCompletely();
-        if (currentUUID) {
-            clearEntireKeychain();
-            saveUUIDToKeychain(currentUUID);
-        }
-    }
-    
-    [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
@@ -388,16 +363,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- مراقبة دورة حياة التطبيق لإدارة الخروج النهائي والكاش ---
+// --- تهيئة التويك عند بدء التشغيل بدون أي مسح عشوائي للبيانات ---
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
-        
-        checkAndWipeOnFreshLaunchIfNeeded();
-        
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            NSFileManager *fm = [NSFileManager defaultManager];
-            [fm removeItemAtPath:getTerminationMarkerPath() error:nil];
-        }];
+        checkAndEnforceValidAccount();
     });
 }
