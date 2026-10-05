@@ -95,6 +95,9 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
 
 + (void)loadWithAdUnitID:(NSString * _Nonnull)adUnitID request:(id _Nullable)request completionHandler:(void (^ _Nonnull)(id _Nullable, NSError * _Nullable))completionHandler {
     
+    // حفظ الـ handler في متغير محلي لضمان بقائه ضمن النطاق
+    void (^localHandler)(id, NSError *) = [completionHandler copy];
+    
     if (adUnitID) {
         NSMutableArray *queue = adQueuesMap[adUnitID];
         
@@ -103,8 +106,8 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
             id cachedAd = [queue firstObject];
             [queue removeObjectAtIndex:0];
             
-            if (completionHandler) {
-                completionHandler(cachedAd, nil);
+            if (localHandler) {
+                localHandler(cachedAd, nil);
             }
             
             // إعادة التعبئة في الخلفية
@@ -125,8 +128,8 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
             [queue addObject:ad];
             UltraFastRefillQueue(adUnitID, request);
         }
-        if (completionHandler) {
-            completionHandler(ad, error);
+        if (localHandler) {
+            localHandler(ad, error);
         }
     });
 }
