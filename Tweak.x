@@ -29,10 +29,6 @@ static NSString * GetAdUnitIDFromObject(id object) {
     return nil;
 }
 
-@interface GADRewardedAd : NSObject
-+ (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(id ad, NSError *error))completionHandler;
-@end
-
 static void UltraFastRefillQueue(NSString *adUnitID, id request) {
     if (!adUnitID) return;
     
@@ -46,22 +42,27 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
     if ([isFetchingMap[adUnitID] boolValue]) return;
     isFetchingMap[adUnitID] = @YES;
     
-    [GADRewardedAd loadWithAdUnitID:adUnitID request:request completionHandler:^(id ad, NSError *error) {
-        isFetchingMap[adUnitID] = @NO;
-        if (ad && !error) {
-            NSMutableArray *currentQueue = adQueuesMap[adUnitID];
-            if (currentQueue && currentQueue.count < MAX_PRELOADED_ADS_PER_ID) {
-                [currentQueue addObject:ad];
+    Class gadClass = NSClassFromString(@"GADRewardedAd");
+    if (gadClass && [gadClass respondsToSelector:@selector(loadWithAdUnitID:request:completionHandler:)]) {
+        [gadClass performSelector:@selector(loadWithAdUnitID:request:completionHandler:) withObject:adUnitID withObject:request withObject:^(id ad, NSError *error) {
+            isFetchingMap[adUnitID] = @NO;
+            if (ad && !error) {
+                NSMutableArray *currentQueue = adQueuesMap[adUnitID];
+                if (currentQueue && currentQueue.count < MAX_PRELOADED_ADS_PER_ID) {
+                    [currentQueue addObject:ad];
+                }
             }
-        }
-        
-        NSMutableArray *checkQueue = adQueuesMap[adUnitID];
-        if (checkQueue && checkQueue.count < MAX_PRELOADED_ADS_PER_ID) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                UltraFastRefillQueue(adUnitID, request);
-            });
-        }
-    }];
+            
+            NSMutableArray *checkQueue = adQueuesMap[adUnitID];
+            if (checkQueue && checkQueue.count < MAX_PRELOADED_ADS_PER_ID) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    UltraFastRefillQueue(adUnitID, request);
+                });
+            }
+        }];
+    } else {
+        isFetchingMap[adUnitID] = @NO;
+    }
 }
 
 %hook GADAdLoader
