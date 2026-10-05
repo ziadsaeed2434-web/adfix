@@ -8,7 +8,7 @@ static NSMutableDictionary *adQueuesMap = nil;
 static NSMutableDictionary *activeLoadersMap = nil;
 static NSMutableDictionary *isFetchingMap = nil;
 
-__attribute__((constructor)) static void initializeUltraFastPools() {
+__attribute__((constructor)) static void initializeFastReadyPools() {
     adQueuesMap = [[NSMutableDictionary alloc] init];
     activeLoadersMap = [[NSMutableDictionary alloc] init];
     isFetchingMap = [[NSMutableDictionary alloc] init];
@@ -29,8 +29,8 @@ static NSString * GetAdUnitIDFromObject(id object) {
     return nil;
 }
 
-// دالة آمنة تماماً تستخدم Runtime لاستدعاء دالة التحميل بدون أي رموز ربط مفقودة
-static void UltraFastRefillQueue(NSString *adUnitID, id request) {
+// دالة سريعة جداً لتعبئة الطابور خلفياً وبدون استهلاك موارد الواجهة
+static void FastBackgroundRefill(NSString *adUnitID, id request) {
     if (!adUnitID) return;
     
     NSMutableArray *queue = adQueuesMap[adUnitID];
@@ -47,7 +47,6 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
     if (gadClass) {
         SEL selector = NSSelectorFromString(@"loadWithAdUnitID:request:completionHandler:");
         if ([gadClass respondsToSelector:selector]) {
-            // استخدام IMP invocation أو تنفيذ الكتلة برمجياً لتجنب مشاكل الـ Linker
             NSMethodSignature *signature = [gadClass methodSignatureForSelector:selector];
             NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
             [invocation setTarget:gadClass];
@@ -66,8 +65,8 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
                 
                 NSMutableArray *checkQueue = adQueuesMap[adUnitID];
                 if (checkQueue && checkQueue.count < MAX_PRELOADED_ADS_PER_ID) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        UltraFastRefillQueue(adUnitID, request);
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        FastBackgroundRefill(adUnitID, request);
                     });
                 }
             };
@@ -108,42 +107,32 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
 
 %hook GADRewardedAd
 
+// إبقاء الإعلانات جاهزة ومخزنة بطلبك اليدوي السريع
 + (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(id, NSError *))arg3 {
-    
-    void (^localHandler)(id, NSError *) = [arg3 copy];
     
     if (adUnitID) {
         NSMutableArray *queue = adQueuesMap[adUnitID];
+        if (!queue) {
+            queue = [[NSMutableArray alloc] init];
+            adQueuesMap[adUnitID] = queue;
+        }
         
-        if (queue && queue.count > 0) {
-            id cachedAd = [queue firstObject];
-            [queue removeObjectAtIndex:0];
-            
-            if (localHandler) {
-                localHandler(cachedAd, nil);
-            }
-            
-            dispatch_async(dispatch_get_main_queue(), ^{
-                UltraFastRefillQueue(adUnitID, request);
+        if (queue.count < MAX_PRELOADED_ADS_PER_ID) {
+            %orig(adUnitID, request, ^(id ad, NSError *error) {
+                if (ad && !error) {
+                    [queue addObject:ad];
+                }
+                FastBackgroundRefill(adUnitID, request);
+                
+                if (arg3) {
+                    arg3(ad, error);
+                }
             });
             return;
         }
     }
     
-    %orig(adUnitID, request, ^(id ad, NSError *error) {
-        if (ad && !error && adUnitID) {
-            NSMutableArray *queue = adQueuesMap[adUnitID];
-            if (!queue) {
-                queue = [[NSMutableArray alloc] init];
-                adQueuesMap[adUnitID] = queue;
-            }
-            [queue addObject:ad];
-            UltraFastRefillQueue(adUnitID, request);
-        }
-        if (localHandler) {
-            localHandler(ad, error);
-        }
-    });
+    %orig;
 }
 
 %end
