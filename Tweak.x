@@ -1,12 +1,9 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import <WebKit/WebKit.h>
 #import <Security/Security.h>
-#import <AdSupport/AdSupport.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
-#import <netdb.h>
-#import <arpa/inet.h>
+#import <AdSupport/AdSupport.h>
 
 // --- الثوابت وإعدادات الحسابات الثلاثة ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
@@ -17,49 +14,9 @@ static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A595
 
 static BOOL isSwitchAlertShown = NO;
 
-// --- واجهة خدمة الإعلانات ---
-
-@interface ActivatorAdService : NSObject
-- (void)loadAd;
-- (BOOL)isReady;
-- (BOOL)isAdReady;
-- (BOOL)canShowAd;
-- (BOOL)hasAdLoaded;
-- (void)showRewardAd;
-- (void)presentAdFromViewController:(UIViewController *)viewController;
-@end
-
-// --- دوال مساعدة لإنشاء هويات عشوائية (بدون IP أو DNS) ---
+// --- دالة مساعدة لإنشاء معرف عشوائي جديد ---
 static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
-}
-
-static NSString *randomIMEI() {
-    int r1 = 10 + arc4random_uniform(89);
-    long long r2 = 10000000000LL + (long long)(arc4random_uniform(900000000));
-    return [NSString stringWithFormat:@"%d%lld", r1, r2];
-}
-
-static NSString *randomOSVersion() {
-    NSArray *versions = @[@"16.1", @"16.5", @"17.0", @"17.2", @"17.4", @"17.5.1", @"18.0"];
-    return versions[arc4random_uniform((uint32_t)[versions count])];
-}
-
-static NSString *randomDeviceModel() {
-    NSArray *models = @[@"iPhone14,2", @"iPhone14,3", @"iPhone15,2", @"iPhone15,3", @"iPhone16,1", @"iPhone16,2"];
-    return models[arc4random_uniform((uint32_t)[models count])];
-}
-
-static NSString *randomLocaleIdentifier() {
-    NSArray *locales = @[@"en_US", @"en_GB", @"en_CA", @"es_US", @"fr_FR"];
-    return locales[arc4random_uniform((uint32_t)[locales count])];
-}
-
-static NSString *generateTimestamp() {
-    NSDate *now = [NSDate date];
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"];
-    return [formatter stringFromDate:now];
 }
 
 // --- مسار حالة التبديل ---
@@ -404,98 +361,20 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %end
 
-// --- الخطافات لتزوير الهويات (بدون IP أو DNS) ---
-%hook UIDevice
-- (NSUUID *)identifierForVendor {
-    return [[NSUUID alloc] initWithUUIDString:randomUUID()];
-}
-- (NSString *)systemVersion {
-    return randomOSVersion();
-}
-- (NSString *)model {
-    return @"iPhone";
-}
-- (NSString *)localizedModel {
-    return @"iPhone";
-}
-- (NSString *)uniqueIdentifier {
-    return randomIMEI();
-}
-%end
-
-%hook NSLocale
-+ (NSLocale *)currentLocale {
-    return [[NSLocale alloc] initWithLocaleIdentifier:randomLocaleIdentifier()];
-}
-%end
-
+// --- منح موافقة التتبع وتوليد معرف تتبع عشوائي جديد في كل طلب ---
 %hook ATTrackingManager
 + (NSUInteger)trackingAuthorizationStatus {
-    return 3;
+    return 3; // Authorized
 }
 %end
 
 %hook ASIdentifierManager
 - (NSUUID *)advertisingIdentifier {
+    // إرجاع معرف تتبع عشوائي جديد كلياً في كل مرة يتم طلبه فيها
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
 }
 - (BOOL)isAdvertisingTrackingEnabled {
     return YES;
-}
-%end
-
-%hook NSMutableURLRequest
-- (void)setValue:(NSString * _Nullable)value forHTTPHeaderField:(NSString *)field {
-    NSString *dynIMEI = randomIMEI();
-    NSString *dynIDFA = randomUUID();
-    NSString *dynIDFV = randomUUID();
-    NSString *dynOS = randomOSVersion();
-    NSString *dynModel = randomDeviceModel();
-    
-    if ([field isEqualToString:@"X-Device-IMEI"] || [field isEqualToString:@"X-IMEI"] || [field isEqualToString:@"Device-Id"] || [field isEqualToString:@"IMEI"]) {
-        value = dynIMEI;
-    } else if ([field isEqualToString:@"X-Advertising-ID"] || [field isEqualToString:@"IDFA"] || [field isEqualToString:@"Advertising-Identifier"]) {
-        value = dynIDFA;
-    } else if ([field isEqualToString:@"X-Vendor-ID"] || [field isEqualToString:@"IDFV"]) {
-        value = dynIDFV;
-    } else if ([field isEqualToString:@"User-Agent"]) {
-        value = [NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 AppModel/%@", dynOS, dynModel];
-    } else if ([field isEqualToString:@"X-OS-Version"] || [field isEqualToString:@"OS-Version"]) {
-        value = dynOS;
-    } else if ([field isEqualToString:@"X-Device-Model"]) {
-        value = dynModel;
-    }
-
-    %orig(value, field);
-}
-%end
-
-%hook NSURLSession
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSMutableURLRequest *mutableReq = [request mutableCopy];
-    
-    NSString *dynIMEI = randomIMEI();
-    NSString *dynIDFA = randomUUID();
-    NSString *dynIDFV = randomUUID();
-    NSString *dynOS = randomOSVersion();
-    NSString *dynModel = randomDeviceModel();
-    NSString *timestamp = generateTimestamp();
-    
-    [mutableReq setValue:dynIMEI forHTTPHeaderField:@"X-Device-IMEI"];
-    [mutableReq setValue:dynIDFA forHTTPHeaderField:@"X-Advertising-ID"];
-    [mutableReq setValue:dynIDFV forHTTPHeaderField:@"X-Vendor-ID"];
-    [mutableReq setValue:timestamp forHTTPHeaderField:@"X-Request-Timestamp"];
-    [mutableReq setValue:dynOS forHTTPHeaderField:@"X-OS-Version"];
-    [mutableReq setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
-    [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
-    
-    void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        logGodModeEvent(@"NSURLSession", request.HTTPMethod, request.URL.absoluteString, httpResp.statusCode, data, error);
-        if (completionHandler) completionHandler(data, response, error);
-    };
-    
-    return %orig(mutableReq, wrappedHandler);
 }
 %end
 
@@ -509,51 +388,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
         config.protocolClasses = protocols;
     }
     return config;
-}
-%end
-
-// --- تحصين وتفعيل الإعلانات تلقائياً ---
-%hook ActivatorAdService
-- (BOOL)isReady { return YES; }
-- (BOOL)isAdReady { return YES; }
-- (BOOL)canShowAd { return YES; }
-- (BOOL)hasAdLoaded { return YES; }
-
-- (void)loadAd {
-    %orig;
-    id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    });
-}
-
-- (void)showRewardAd {
-    @try {
-        %orig;
-        id targetSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-                [targetSelf loadAd];
-            }
-        });
-    } @catch (NSException *exception) {}
-}
-
-- (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try { 
-        %orig; 
-    } @catch (NSException *exception) {}
-}
-
-- (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    @try {
-        id targetSelf = self;
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    } @catch (NSException *exception) {}
 }
 %end
 
