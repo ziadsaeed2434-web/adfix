@@ -304,7 +304,7 @@ NSData *modifyResponseDataIfNeeded(NSString *url, NSData *data) {
         }
     }
     
-    // 2. معالجة طلب الـ shake وتعديل canShake إلى true[span_0](start_span)[span_0](end_span)[span_1](start_span)[span_1](end_span)
+    // 2. معالجة طلب الـ shake وتعديل canShake إلى true
     if ([url containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
         NSError *jsonError = nil;
         NSMutableDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:&jsonError];
@@ -502,7 +502,7 @@ NSData *modifyResponseDataIfNeeded(NSString *url, NSData *data) {
     [mutableReq setValue:timestamp forHTTPHeaderField:@"X-Request-Timestamp"];
     [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
     [mutableReq setValue:dynOS forHTTPHeaderField:@"X-OS-Version"];
-    [mutableReq setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
+    [mutableReqsetValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
     [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
     
     void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -540,10 +540,62 @@ NSData *modifyResponseDataIfNeeded(NSString *url, NSData *data) {
 }
 %end
 
-// --- تهيئة التويك عند بدء التشغيل بدون أي مسح عشوائي للبيانات ---
+// --- دالة الانتقال التلقائي إلى صفحة Shake & Earn بعد 5 ثوانٍ من إقلاع التطبيق ---
+static void redirectToShakeAndEarnPage(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIWindow *keyWindow = nil;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    for (UIWindow *w in windowScene.windows) {
+                        if (w.isKeyWindow) {
+                            keyWindow = w;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!keyWindow) keyWindow = [UIApplication sharedApplication].keyWindow;
+        
+        UIViewController *rootVC = keyWindow.rootViewController;
+        while (rootVC.presentedViewController) {
+            rootVC = rootVC.presentedViewController;
+        }
+        
+        // البحث عن UINavigationController ضمن الهيكل الحالي للتنقل داخل الصفحة المستهدفة
+        UINavigationController *navController = nil;
+        if ([rootVC isKindOfClass:[UINavigationController class]]) {
+            navController = (UINavigationController *)rootVC;
+        } else if ([rootVC isKindOfClass:[UITabBarController class]]) {
+            UITabBarController *tabBar = (UITabBarController *)rootVC;
+            if ([tabBar.selectedViewController isKindOfClass:[UINavigationController class]]) {
+                navController = (UINavigationController *)tabBar.selectedViewController;
+            }
+        } else {
+            navController = rootVC.navigationController;
+        }
+        
+        // إذا وجدنا مسار تنقل SwiftUI / UIKit مدمج (مثل NavigationStack الموضح بالصور)
+        if (navController) {
+            for (UIViewController *vc in navController.viewControllers) {
+                NSString *className = NSStringFromClass([vc class]);
+                // البحث عن فئة الـ HostingController التي تدير واجهة SwiftUI الخاصة بالـ Shake
+                if ([className containsString:@"HostingController"] || [className containsString:@"NavigationStack"]) {
+                    [navController popToViewController:vc animated:YES];
+                    return;
+                }
+            }
+        }
+    });
+}
+
+// --- تهيئة التويك عند بدء التشغيل ---
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
         checkAndEnforceValidAccount();
+        redirectToShakeAndEarnPage();
     });
 }
