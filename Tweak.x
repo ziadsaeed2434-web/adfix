@@ -29,11 +29,7 @@ static NSString * GetAdUnitIDFromObject(id object) {
     return nil;
 }
 
-// تعريف واجهة محلية آمنة تتجاوز أي مشاكل ربط أو أخطاء مترجم
-@interface GADRewardedAd : NSObject
-+ (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(id ad, NSError *error))completionHandler;
-@end
-
+// دالة آمنة تماماً تستخدم Runtime لاستدعاء دالة التحميل بدون أي رموز ربط مفقودة
 static void UltraFastRefillQueue(NSString *adUnitID, id request) {
     if (!adUnitID) return;
     
@@ -47,23 +43,40 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
     if ([isFetchingMap[adUnitID] boolValue]) return;
     isFetchingMap[adUnitID] = @YES;
     
-    // استدعاء مباشر ونظيف تماماً بدون performSelector معقد
-    [GADRewardedAd loadWithAdUnitID:adUnitID request:request completionHandler:^(id ad, NSError *error) {
-        isFetchingMap[adUnitID] = @NO;
-        if (ad && !error) {
-            NSMutableArray *currentQueue = adQueuesMap[adUnitID];
-            if (currentQueue && currentQueue.count < MAX_PRELOADED_ADS_PER_ID) {
-                [currentQueue addObject:ad];
-            }
+    Class gadClass = NSClassFromString(@"GADRewardedAd");
+    if (gadClass) {
+        SEL selector = NSSelectorFromString(@"loadWithAdUnitID:request:completionHandler:");
+        if ([gadClass respondsToSelector:selector]) {
+            // استخدام IMP invocation أو تنفيذ الكتلة برمجياً لتجنب مشاكل الـ Linker
+            NSMethodSignature *signature = [gadClass methodSignatureForSelector:selector];
+            NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+            [invocation setTarget:gadClass];
+            [invocation setSelector:selector];
+            [invocation setArgument:&adUnitID atIndex:2];
+            [invocation setArgument:&request atIndex:3];
+            
+            void (^completionBlock)(id, NSError *) = ^(id ad, NSError *error) {
+                isFetchingMap[adUnitID] = @NO;
+                if (ad && !error) {
+                    NSMutableArray *currentQueue = adQueuesMap[adUnitID];
+                    if (currentQueue && currentQueue.count < MAX_PRELOADED_ADS_PER_ID) {
+                        [currentQueue addObject:ad];
+                    }
+                }
+                
+                NSMutableArray *checkQueue = adQueuesMap[adUnitID];
+                if (checkQueue && checkQueue.count < MAX_PRELOADED_ADS_PER_ID) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        UltraFastRefillQueue(adUnitID, request);
+                    });
+                }
+            };
+            [invocation setArgument:&completionBlock atIndex:4];
+            [invocation invoke];
+            return;
         }
-        
-        NSMutableArray *checkQueue = adQueuesMap[adUnitID];
-        if (checkQueue && checkQueue.count < MAX_PRELOADED_ADS_PER_ID) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                UltraFastRefillQueue(adUnitID, request);
-            });
-        }
-    }];
+    }
+    isFetchingMap[adUnitID] = @NO;
 }
 
 %hook GADAdLoader
