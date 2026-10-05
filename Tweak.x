@@ -1,3 +1,4 @@
+#import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
 @interface TempNumber_ShakeViewModel : NSObject
@@ -10,7 +11,7 @@
     if (origSelf) {
         Class cls = object_getClass(origSelf);
         
-        // 1. تصفير عدد الهزات الحالية _currentShakes عند الإزاحة الصحيحة
+        // 1. تصفير عدد الهزات الحالية _currentShakes
         Ivar currentShakesIvar = class_getInstanceVariable(cls, "_currentShakes");
         if (currentShakesIvar) {
             long *val = (long *)((__bridge void *)origSelf + ivar_getOffset(currentShakesIvar));
