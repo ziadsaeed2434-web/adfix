@@ -5,12 +5,12 @@
 #import <AdSupport/AdSupport.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 
-// --- الثوابت وإعدادات الحسابات الثلاثة الثابتة ---
+// --- الثوابت وإعدادات الحسابات الثلاثة بالتسلسل الثابت ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
-static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
-static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10A"; // الحساب الثاني
-static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A5956"; // الحساب الثالث
+static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول (1)
+static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10A"; // الحساب الثاني (2)
+static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A5956"; // الحساب الثالث (3)
 
 static BOOL isSwitchAlertShown = NO;
 
@@ -78,7 +78,7 @@ void saveUUIDToKeychain(NSString *uuidString) {
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
 }
 
-// --- مسح بيانات التطبيق كلياً وبشكل مضمون ---
+// --- مسح بيانات التطبيق كلياً ---
 void clearAllAppDataCompletely(void) {
     NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleDomain) {
@@ -123,20 +123,20 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
-// --- منطق التبديل التسلسلي المضمون (أقدم حساب غير مستخدم) ---
+// --- منطق التبديل التسلسلي الصارم 100% (1 -> 2 -> 3 -> 1) ---
 NSString *getNextAccountUUID(void) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
     
-    NSInteger lastAccountIndex = 1; 
+    NSInteger lastAccountIndex = 1; // الافتراضي البدء من الحساب الأول
     if (dict && dict[@"LastIndex"] != nil) {
         lastAccountIndex = [dict[@"LastIndex"] integerValue];
     }
     
-    NSString *currentKeychainUUID = getAppCurrentUUIDFromKeychain();
     NSString *nextUUID = nil;
     NSInteger newIndex = 1;
     
+    // التسلسل الدائري الثابت والدقيق تماماً كما طلبت
     if (lastAccountIndex == 1) {
         nextUUID = kAccount2_UUID;
         newIndex = 2;
@@ -148,25 +148,17 @@ NSString *getNextAccountUUID(void) {
         newIndex = 1;
     }
     
-    if (currentKeychainUUID && [nextUUID isEqualToString:currentKeychainUUID]) {
-        if ([currentKeychainUUID isEqualToString:kAccount1_UUID]) {
-            nextUUID = kAccount2_UUID; newIndex = 2;
-        } else if ([currentKeychainUUID isEqualToString:kAccount2_UUID]) {
-            nextUUID = kAccount3_UUID; newIndex = 3;
-        } else {
-            nextUUID = kAccount1_UUID; newIndex = 1;
-        }
-    }
-    
+    // حفظ الفهرس الجديد والحالة مع قفل النقاط
     NSMutableDictionary *newDict = [NSMutableDictionary dictionary];
     newDict[@"LastIndex"] = @(newIndex);
-    newDict[@"WaitingForPointsChange"] = @YES;
+    newDict[@"WaitingForPointsChange"] = @YES; // تفعيل القفل لحين تغير النقاط عن 395
     newDict[@"TargetUUID"] = nextUUID;
     [newDict writeToFile:path atomically:YES];
     
     return nextUUID;
 }
 
+// --- نظام قفل التبديل (لا يرجع يشتغل إلا لو تغيرت النقاط عن 395) ---
 BOOL shouldProcessPoints(NSInteger currentPoints) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -175,8 +167,10 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
         BOOL waiting = [dict[@"WaitingForPointsChange"] boolValue];
         if (waiting) {
             if (currentPoints == 395) {
+                // الحظر مستمر طالما النقاط ثابتة على 395
                 return NO;
             } else {
+                // فك الحظر بمجرد أن تتغير النقاط لتصبح شيئاً آخر (مثل 0 أو أي قيمة جديدة)
                 NSMutableDictionary *mutableDict = [dict mutableCopy];
                 mutableDict[@"WaitingForPointsChange"] = @NO;
                 [mutableDict writeToFile:path atomically:YES];
@@ -186,7 +180,7 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     return YES;
 }
 
-// --- تنفيذ روتين التبديل والتنظيف كاملاً ---
+// --- تنفيذ روتين التبديل والتنظيف الشامل ---
 void performCompleteSwitchRoutineForUUID(NSString *targetUUID) {
     clearAllAppDataCompletely();
     clearEntireKeychain();
@@ -248,7 +242,7 @@ void showSwitchAlertAndExitWithMessage(NSString *title, NSString *message) {
     });
 }
 
-// --- التحقق الصارم والذاتي عند فتح التطبيق مع التصحيح التنبيهي ---
+// --- نظام التحقق الصارم عند الفتح ---
 void checkAndEnforceValidAccount(void) {
     NSString *path = getStatePlistPath();
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -259,13 +253,17 @@ void checkAndEnforceValidAccount(void) {
                                      ![currentKeychainUUID isEqualToString:kAccount2_UUID] && 
                                      ![currentKeychainUUID isEqualToString:kAccount3_UUID])) {
             performCompleteSwitchRoutineForUUID(kAccount1_UUID);
-            showSwitchAlertAndExitWithMessage(@"🔄 تم تصحيح الحساب بنجاح", 
-                                              @"تم اكتشاف عدم مطابقة، وتم تطبيق روتين التبديل والتنظيف والانتقال للحساب الصحيح.\n\nسيتم إغلاق التطبيق الآن...");
+            showSwitchAlertAndExitWithMessage(@"🔄 تم ضبط الحساب الأول", 
+                                              @"تم ضبط الحساب الافتراضي الأول بنجاح.\n\nسيتم إغلاق التطبيق الآن...");
         } else {
+            NSInteger initialIndex = 1;
+            if ([currentKeychainUUID isEqualToString:kAccount2_UUID]) initialIndex = 2;
+            else if ([currentKeychainUUID isEqualToString:kAccount3_UUID]) initialIndex = 3;
+            
             NSDictionary *initialDict = @{
-                @"LastIndex": @(1),
+                @"LastIndex": @(initialIndex),
                 @"WaitingForPointsChange": @NO,
-                @"TargetUUID": currentKeychainUUID ?: kAccount1_UUID
+                @"TargetUUID": currentKeychainUUID
             };
             [initialDict writeToFile:path atomically:YES];
         }
@@ -275,19 +273,19 @@ void checkAndEnforceValidAccount(void) {
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
     NSString *targetUUID = dict[@"TargetUUID"];
     
-    // اكتشاف أي خطأ في الحساب -> تنفيذ الروتين الكامل + إظهار التنبيه والخروج
+    // إذا حصل أي خطأ أو اختلاف، يتم التصحيح فوراً بالتنبيه والخروج
     if (targetUUID && currentKeychainUUID && ![currentKeychainUUID isEqualToString:targetUUID]) {
         performCompleteSwitchRoutineForUUID(targetUUID);
         showSwitchAlertAndExitWithMessage(@"🔄 تم تصحيح الحساب بنجاح", 
-                                          @"تم اكتشاف خطأ في الحساب وتم تصحيحه والانتقال للحساب الصحيح بنجاح تام.\n\nسيتم إغلاق التطبيق الآن...");
+                                          @"تم اكتشاف خطأ في الحساب وتم تصحيحه والانتقال للحساب التسلسلي الصحيح.\n\nسيتم إغلاق التطبيق الآن...");
     } else if (!currentKeychainUUID && targetUUID) {
         performCompleteSwitchRoutineForUUID(targetUUID);
         showSwitchAlertAndExitWithMessage(@"🔄 تم تصحيح الحساب بنجاح", 
-                                          @"تم اكتشاف خطأ في الـ Keychain وتم تصحيحه والانتقال للحساب الصحيح بنجاح تام.\n\nسيتم إغلاق التطبيق الآن...");
+                                          @"تم تصحيح الـ Keychain والانتقال للحساب الصحيح.\n\nسيتم إغلاق التطبيق الآن...");
     } else if (!currentKeychainUUID) {
         performCompleteSwitchRoutineForUUID(kAccount1_UUID);
         showSwitchAlertAndExitWithMessage(@"🔄 تم تصحيح الحساب بنجاح", 
-                                          @"تم ضبط الحساب الافتراضي الأول بنجاح تام.\n\nسيتم إغلاق التطبيق الآن...");
+                                          @"تم ضبط الحساب الأول بنجاح تام.\n\nسيتم إغلاق التطبيق الآن...");
     }
 }
 
@@ -309,13 +307,13 @@ void checkAndWipeOnFreshLaunchIfNeeded(void) {
     [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
-// --- عملية التبديل العادية عند الوصول إلى 395 نقطة ---
+// --- التبديل عند بلوغ 395 نقطة ---
 void performAccountSwitchAndAlert(void) {
     NSString *nextUUID = getNextAccountUUID();
     performCompleteSwitchRoutineForUUID(nextUUID);
     
-    showSwitchAlertAndExitWithMessage(@"🔄 تم التبديل والحذف بنجاح", 
-                                      @"تم الوصول إلى 395 نقطة، حذف البيانات السابقة، والانتقال للحساب التالي بنجاح تام.\n\nسيتم إغلاق التطبيق الآن...");
+    showSwitchAlertAndExitWithMessage(@"🔄 تم التبديل التسلسلي بنجاح", 
+                                      @"تم الوصول إلى 395 نقطة، حذف البيانات، والانتقال للحساب التالي بالتسلسل.\n\nسيتم إغلاق التطبيق الآن...");
 }
 
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
@@ -335,7 +333,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
-                if (!shouldProcessPoints(currentPoints)) return;
+                if (!shouldProcessPoints(currentPoints)) return; // الحظر فعال إذا كانت النقاط 395
                 if (currentPoints >= 395) {
                     performAccountSwitchAndAlert();
                 }
@@ -382,7 +380,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// --- تخطي الشاشات الترحيبية تلقائياً ---
+// --- تخطي شاشات الترحيب تلقائياً ---
 %hook NSUserDefaults
 - (BOOL)boolForKey:(NSString *)defaultName {
     if ([defaultName isEqualToString:@"onboarding_completed"] ||
@@ -434,7 +432,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- دورة الحياة والتحقق المبكر ---
+// --- التحقق المبكر ودورة الحياة ---
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
