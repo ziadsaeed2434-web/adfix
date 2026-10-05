@@ -29,6 +29,11 @@ static NSString * GetAdUnitIDFromObject(id object) {
     return nil;
 }
 
+// تعريف Forward Declaration لكلاس GADRewardedAd لكي يتعرف عليه المترجم في الدوال العادية
+@interface GADRewardedAd : NSObject
++ (void)loadWithAdUnitID:(NSString *)adUnitID request:(id)request completionHandler:(void (^)(id ad, NSError *error))completionHandler;
+@end
+
 static void UltraFastRefillQueue(NSString *adUnitID, id request) {
     if (!adUnitID) return;
     
@@ -42,7 +47,8 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
     if ([isFetchingMap[adUnitID] boolValue]) return;
     isFetchingMap[adUnitID] = @YES;
     
-    %orig(adUnitID, request, ^(id ad, NSError *error) {
+    // استدعاء مباشر وصحيح لتجنب خطأ %orig خارج الـ Hook
+    [GADRewardedAd loadWithAdUnitID:adUnitID request:request completionHandler:^(id ad, NSError *error) {
         isFetchingMap[adUnitID] = @NO;
         if (ad && !error) {
             NSMutableArray *currentQueue = adQueuesMap[adUnitID];
@@ -57,7 +63,7 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
                 UltraFastRefillQueue(adUnitID, request);
             });
         }
-    });
+    }];
 }
 
 %hook GADAdLoader
@@ -94,7 +100,7 @@ static void UltraFastRefillQueue(NSString *adUnitID, id request) {
     if (adUnitID) {
         NSMutableArray *queue = adQueuesMap[adUnitID];
         
-        // تسليم الإعلان ب سرعة فائقة جداً وبدون أي تأخير من الذاكرة مباشرة
+        // تسليم الإعلان بسرعة فائقة جداً وبدون أي تأخير من الذاكرة مباشرة
         if (queue && queue.count > 0) {
             id cachedAd = [queue firstObject];
             [queue removeObjectAtIndex:0];
