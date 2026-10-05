@@ -8,7 +8,6 @@
 // --- إعدادات الـ Keychain والثوابت الأساسية ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
-static NSTimeInterval const kAccountCooldownInterval = 600.0; // 10 دقائق بالثواني
 
 static BOOL isSwitchAlertShown = NO;
 
@@ -17,7 +16,7 @@ static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// --- مسار ملف الـ Plist لحفظ الحالة والتسلسل والأوقات ---
+// --- مسار ملف الـ Plist لحفظ الحالة والتسلسل ---
 NSString *getStatePlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
@@ -121,7 +120,7 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
-// --- تهيئة ملف الـ Plist للتسلسل وأوقات الاستخدام ---
+// --- تهيئة ملف الـ Plist للتسلسل الدائري ---
 NSMutableDictionary *getOrCreateAccountStateDictionary(void) {
     NSString *path = getStatePlistPath();
     
@@ -138,56 +137,24 @@ NSMutableDictionary *getOrCreateAccountStateDictionary(void) {
         dict[@"LastIndex"] = @(0);
         dict[@"BlockedUUID"] = @"";
         dict[@"TargetUUID"] = defaultAccounts[0];
-        dict[@"AccountTimestamps"] = [NSMutableDictionary dictionary];
         [dict writeToFile:path atomically:YES];
     }
     return dict;
 }
 
-// --- التحقق مما إذا مر على الحساب 10 دقائق أو أكثر منذ اخر استخدام ---
-BOOL isAccountCooledDown(NSString *uuid) {
-    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
-    NSDictionary *timestamps = dict[@"AccountTimestamps"];
-    if (!timestamps || !timestamps[uuid]) return YES; 
-    
-    NSTimeInterval lastUsed = [timestamps[uuid] doubleValue];
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    
-    return (now - lastUsed) >= kAccountCooldownInterval;
-}
-
-// --- جلب الحساب التالي بالتسلسل مع الالتزام بشرط الـ 10 دقائق ---
+// --- جلب الحساب التالي بالتسلسل الدائري حصرياً ---
 NSString *getNextAccountUUIDFromPlist(void) {
     NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
     NSArray *accounts = dict[@"Accounts"];
     NSInteger lastIndex = dict[@"LastIndex"] ? [dict[@"LastIndex"] integerValue] : 0;
     
     NSInteger count = [accounts count];
-    NSInteger candidateIndex = lastIndex;
-    NSString *nextUUID = nil;
+    NSInteger nextIndex = (lastIndex + 1) % count;
+    NSString *nextUUID = accounts[nextIndex];
     
-    for (NSInteger i = 1; i <= count; i++) {
-        candidateIndex = (lastIndex + i) % count;
-        NSString *uuid = accounts[candidateIndex];
-        if (isAccountCooledDown(uuid)) {
-            nextUUID = uuid;
-            lastIndex = candidateIndex;
-            break;
-        }
-    }
-    
-    if (!nextUUID) {
-        lastIndex = (lastIndex + 1) % count;
-        nextUUID = accounts[lastIndex];
-    }
-    
-    dict[@"LastIndex"] = @(lastIndex);
+    dict[@"LastIndex"] = @(nextIndex);
     dict[@"TargetUUID"] = nextUUID;
     dict[@"BlockedUUID"] = nextUUID;
-    
-    NSMutableDictionary *timestamps = [NSMutableDictionary dictionaryWithDictionary:dict[@"AccountTimestamps"]];
-    timestamps[nextUUID] = @([[NSDate date] timeIntervalSince1970]);
-    dict[@"AccountTimestamps"] = timestamps;
     
     [dict writeToFile:getStatePlistPath() atomically:YES];
     return nextUUID;
@@ -227,122 +194,11 @@ void performCompleteSwitchRoutineForUUID(NSString *targetUUID) {
     dict[@"BlockedUUID"] = targetUUID;
     dict[@"TargetUUID"] = targetUUID;
     
-    NSMutableDictionary *timestamps = [NSMutableDictionary dictionaryWithDictionary:dict[@"AccountTimestamps"]];
-    timestamps[targetUUID] = @([[NSDate date] timeIntervalSince1970]);
-    dict[@"AccountTimestamps"] = timestamps;
-    
     [dict writeToFile:getStatePlistPath() atomically:YES];
 }
 
-// --- إظهار تنبيه مانع (بدون أزرار للخروج) ويغلق تلقائياً عند انتهاء الـ 10 دقائق ---
-void showCooldownBlockingAlertAndExitAfterTime(NSTimeInterval remainingSeconds) {
-    if (isSwitchAlertShown) return;
-    isSwitchAlertShown = YES;
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = nil;
-        if (@available(iOS 13.0, *)) {
-            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                    UIWindowScene *windowScene = (UIWindowScene *)scene;
-                    for (UIWindow *w in windowScene.windows) {
-                        if (w.isKeyWindow) {
-                            keyWindow = w;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (!keyWindow) keyWindow = [UIApplication sharedApplication].keyWindow;
-        
-        UIViewController *rootVC = keyWindow.rootViewController;
-        while (rootVC.presentedViewController) {
-            rootVC = rootVC.presentedViewController;
-        }
-        
-        int minutesLeft = (int)(remainingSeconds / 60) + 1;
-        NSString *message = [NSString stringWithFormat:@"⏳ لم تنقضِ فترة الـ 10 دقائق بعد لهذا الحساب.\n\nمتبقي تقريباً: %d دقيقة.\n\nسيتم إغلاق التطبيق تلقائياً فور اكتمال الوقت المخصص...", minutesLeft];
-        
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"حماية التسلسل (Cooldown)"
-                                                                   message:message
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-        
-        if (rootVC) {
-            [rootVC presentViewController:alert animated:YES completion:nil];
-        }
-    });
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(remainingSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        exit(0);
-    });
-}
-
-// --- التحقق من فترة الـ 10 دقائق لكل حساب عند التشغيل ---
-void checkAccountCooldownOnLaunch(void) {
-    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
-    NSDictionary *timestamps = dict[@"AccountTimestamps"];
-    NSString *currentUUID = getAppCurrentUUIDFromKeychain();
-    
-    if (!currentUUID || !timestamps || !timestamps[currentUUID]) {
-        NSMutableDictionary *mutableTimestamps = timestamps ? [NSMutableDictionary dictionaryWithDictionary:timestamps] : [NSMutableDictionary dictionary];
-        mutableTimestamps[currentUUID ?: @"default"] = @([[NSDate date] timeIntervalSince1970]);
-        dict[@"AccountTimestamps"] = mutableTimestamps;
-        [dict writeToFile:getStatePlistPath() atomically:YES];
-        return;
-    }
-    
-    NSTimeInterval lastUsed = [timestamps[currentUUID] doubleValue];
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    NSTimeInterval elapsed = now - lastUsed;
-    
-    if (elapsed < kAccountCooldownInterval) {
-        NSTimeInterval remaining = kAccountCooldownInterval - elapsed;
-        showCooldownBlockingAlertAndExitAfterTime(remaining);
-    }
-}
-
-// --- التحقق ومطابقة التسلسل الدائري ---
-void checkAndEnforceValidAccount(void) {
-    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
-    NSArray *accounts = dict[@"Accounts"];
-    NSString *currentKeychainUUID = getAppCurrentUUIDFromKeychain();
-    
-    NSInteger lastIndex = dict[@"LastIndex"] ? [dict[@"LastIndex"] integerValue] : 0;
-    if (lastIndex >= [accounts count]) lastIndex = 0;
-    
-    NSString *expectedUUID = accounts[lastIndex];
-    
-    if (!currentKeychainUUID || ![accounts containsObject:currentKeychainUUID] || ![currentKeychainUUID isEqualToString:expectedUUID]) {
-        NSString *nextUUID = getNextAccountUUIDFromPlist();
-        performCompleteSwitchRoutineForUUID(nextUUID);
-    }
-}
-
-void checkAndWipeOnFreshLaunchIfNeeded(void) {
-    checkAndEnforceValidAccount();
-    checkAccountCooldownOnLaunch();
-    
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *markerPath = getTerminationMarkerPath();
-    
-    if (![fm fileExistsAtPath:markerPath]) {
-        NSString *currentUUID = getAppCurrentUUIDFromKeychain();
-        clearAllAppDataCompletely();
-        if (currentUUID) {
-            clearEntireKeychain();
-            saveUUIDToKeychain(currentUUID);
-        }
-    }
-    
-    [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-}
-
-// --- التبديل عند بلوغ 395 نقطة ---
-void performAccountSwitchAndAlert(void) {
-    NSString *nextUUID = getNextAccountUUIDFromPlist();
-    performCompleteSwitchRoutineForUUID(nextUUID);
-    
+// --- دالة مساعدة لإظهار التنبيه وإغلاق التطبيق ---
+void showAlertAndExitApp(NSString *title, NSString *message) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (isSwitchAlertShown) return;
         isSwitchAlertShown = YES;
@@ -368,13 +224,13 @@ void performAccountSwitchAndAlert(void) {
             rootVC = rootVC.presentedViewController;
         }
         
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم التبديل التسلسلي بنجاح"
-                                                                   message:@"تم الوصول إلى 395 نقطة، والانتقال للحساب التالي بالتسلسل المحفوظ.\n\nسيتم إغلاق التطبيق الآن..."
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
         
         if (rootVC) {
             [rootVC presentViewController:alert animated:YES completion:^{
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     exit(0);
                 });
             }];
@@ -382,6 +238,53 @@ void performAccountSwitchAndAlert(void) {
             exit(0);
         }
     });
+}
+
+// --- التحقق ومطابقة التسلسل الدائري عند التشغيل (مع إظهار تنبيه عند التصحيح) ---
+void checkAndEnforceValidAccount(void) {
+    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
+    NSArray *accounts = dict[@"Accounts"];
+    NSString *currentKeychainUUID = getAppCurrentUUIDFromKeychain();
+    
+    NSInteger lastIndex = dict[@"LastIndex"] ? [dict[@"LastIndex"] integerValue] : 0;
+    if (lastIndex >= [accounts count]) lastIndex = 0;
+    
+    NSString *expectedUUID = accounts[lastIndex];
+    
+    if (!currentKeychainUUID || ![accounts containsObject:currentKeychainUUID] || ![currentKeychainUUID isEqualToString:expectedUUID]) {
+        NSString *nextUUID = getNextAccountUUIDFromPlist();
+        performCompleteSwitchRoutineForUUID(nextUUID);
+        
+        showAlertAndExitApp(@"⚠️ تصحيح التسلسل التلقائي",
+                            @"تم اكتشاف عدم مطابقة للحساب الحالي، وتم تصحيحه وإعادة ضبطه على الحساب الصحيح بالدور.\n\nسيتم إغلاق التطبيق الآن...");
+    }
+}
+
+void checkAndWipeOnFreshLaunchIfNeeded(void) {
+    checkAndEnforceValidAccount();
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *markerPath = getTerminationMarkerPath();
+    
+    if (![fm fileExistsAtPath:markerPath]) {
+        NSString *currentUUID = getAppCurrentUUIDFromKeychain();
+        clearAllAppDataCompletely();
+        if (currentUUID) {
+            clearEntireKeychain();
+            saveUUIDToKeychain(currentUUID);
+        }
+    }
+    
+    [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+// --- التبديل عند بلوغ 395 نقطة ---
+void performAccountSwitchAndAlert(void) {
+    NSString *nextUUID = getNextAccountUUIDFromPlist();
+    performCompleteSwitchRoutineForUUID(nextUUID);
+    
+    showAlertAndExitApp(@"🔄 تم التبديل التسلسلي بنجاح",
+                        @"تم الوصول إلى 395 نقطة، والانتقال للحساب التالي بالدور.\n\nسيتم إغلاق التطبيق الآن...");
 }
 
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
