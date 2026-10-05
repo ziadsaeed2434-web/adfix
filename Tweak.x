@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-// تخزين مؤقت للإعلانات الجاهزة لكل AdUnitID لضمان التكرار في أي وقت
+// تخزين مؤقت للإعلانات الجاهزة لكل AdUnitID
 static NSMutableDictionary *globalAdCache = nil;
 static NSMutableDictionary *activeLoadersMap = nil;
 
@@ -11,10 +11,27 @@ __attribute__((constructor)) static void initializeTweakPools() {
     activeLoadersMap = [[NSMutableDictionary alloc] init];
 }
 
+// دالة آمنة لاستخراج adUnitID من أي كائن دون مشاكل في التعريفات
+static NSString * GetAdUnitIDFromObject(id object) {
+    if (!object) return nil;
+    if ([object respondsToSelector:@selector(adUnitID)]) {
+        return [object performSelector:@selector(adUnitID)];
+    }
+    // استخدام Runtime في حال كانت الخاصية عبارة عن Instance Variable
+    Ivar ivar = class_getInstanceVariable(object_getClass(object), "_adUnitID");
+    if (ivar) {
+        id value = object_getIvar(object, ivar);
+        if ([value isKindOfClass:[NSString class]]) {
+            return (NSString *)value;
+        }
+    }
+    return nil;
+}
+
 %hook GADAdLoader
 
 - (void)loadRequest:(id)request {
-    NSString *adUnitID = [self valueForKey:@"adUnitID"];
+    NSString *adUnitID = GetAdUnitIDFromObject(self);
     if (adUnitID) {
         activeLoadersMap[adUnitID] = self;
         NSLog(@"[Tweak Pro] GADAdLoader registered for ID: %@", adUnitID);
@@ -23,7 +40,7 @@ __attribute__((constructor)) static void initializeTweakPools() {
 }
 
 - (void)receivePublicAd:(id)ad {
-    NSString *adUnitID = [self valueForKey:@"adUnitID"];
+    NSString *adUnitID = GetAdUnitIDFromObject(self);
     if (ad && adUnitID) {
         globalAdCache[adUnitID] = ad;
         NSLog(@"[Tweak Pro] Ad successfully cached via GADAdLoader for ID: %@", adUnitID);
@@ -32,7 +49,7 @@ __attribute__((constructor)) static void initializeTweakPools() {
 }
 
 - (void)failedToReceiveAdWithError:(NSError *)error {
-    NSString *adUnitID = [self valueForKey:@"adUnitID"];
+    NSString *adUnitID = GetAdUnitIDFromObject(self);
     NSLog(@"[Tweak Pro] GADAdLoader failed for ID: %@ - Error: %@", adUnitID, error.localizedDescription);
     %orig;
 }
@@ -53,7 +70,7 @@ __attribute__((constructor)) static void initializeTweakPools() {
             completionHandler(cachedAd, nil);
         }
         
-        // إعادة تعبئة الكاش في الخلفية تلقائياً ليكون الإعلان التالي جاهزاً دائماً في أي وقت
+        // إعادة تعبئة الكاش في الخلفية تلقائياً
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             id loader = activeLoadersMap[adUnitID];
             if (loader && [loader respondsToSelector:@selector(loadRequest:)]) {
