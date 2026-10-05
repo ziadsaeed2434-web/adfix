@@ -11,6 +11,7 @@ workflows:
         script: |
           rm -rf ~/theos
           git clone --recursive https://github.com/theos/theos.git ~/theos
+          rm -rf ~/theos/sdks
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
       - name: Build Tweak
         script: |
