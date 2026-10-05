@@ -12,9 +12,9 @@
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
 
-static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E1BB"; // الحساب الأول (1)
-static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC1BB"; // الحساب الثاني (2)
-static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A59BB"; // الحساب الثالث (3)
+static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CB5-AD39-593553C1E15C"; // الحساب الأول (1)
+static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879E-A98E2B8BC10A"; // الحساب الثاني (2)
+static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D4E-63FBCE2A5956"; // الحساب الثالث (3)
 
 static BOOL isSwitchAlertShown = NO;
 
@@ -189,33 +189,32 @@ NSString *getNextAccountUUID(void) {
     }
     
     dict[@"SequenceStep"] = @(nextStep);
+    dict[@"WaitingForPointsChange"] = @YES;
     [dict writeToFile:path atomically:YES];
     
     return nextUUID;
 }
 
-// --- فحص ما إذا كانت النقاط في نطاق حظر الصندوق (360 إلى 399) ---
-BOOL shouldBlockMysteryBox(void) {
+BOOL shouldProcessPoints(NSInteger currentPoints) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
-    if (dict && dict[@"LastKnownPoints"] != nil) {
-        NSInteger points = [dict[@"LastKnownPoints"] integerValue];
-        if (points >= 360 && points <= 399) {
-            return YES; // حظر فتح الصندوق خلال هذا النطاق[span_1](start_span)[span_1](end_span)
+    
+    if (dict && dict[@"WaitingForPointsChange"] != nil) {
+        BOOL waiting = [dict[@"WaitingForPointsChange"] boolValue];
+        if (waiting) {
+            if (currentPoints == 395) {
+                return NO;
+            } else {
+                NSMutableDictionary *mutableDict = [dict mutableCopy];
+                mutableDict[@"WaitingForPointsChange"] = @NO;
+                [mutableDict writeToFile:path atomically:YES];
+            }
         }
     }
-    return NO;
+    return YES;
 }
 
-void updateLastKnownPoints(NSInteger points) {
-    NSString *path = getStatePlistPath();
-    NSMutableDictionary *dict = [[NSMutableDictionary alloc] initWithContentsOfFile:path];
-    if (!dict) dict = [NSMutableDictionary dictionary];
-    dict[@"LastKnownPoints"] = @(points);
-    [dict writeToFile:path atomically:YES];
-}
-
-// --- تنفيذ عملية التبديل والحذف عند الوصول لنطاق 395 إلى 399 ---
+// --- تنفيذ عملية التبديل والحذف (تتم حصراً عند الوصول لـ 395 نقطة) ---
 void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
@@ -249,7 +248,7 @@ void performAccountSwitchAndAlert(void) {
         }
         
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم التبديل التسلسلي بنجاح"
-                                                                   message:@"تم الوصول إلى النطاق المطلوب للتبديل (395 - 399)، والانتقال للحساب التالي.\n\nسيتم إغلاق التطبيق الآن..."
+                                                                   message:@"تم الوصول إلى 395 نقطة، والانتقال للحساب التالي بالترتيب الدقيق.\n\nسيتم إغلاق التطبيق الآن..."
                                                             preferredStyle:UIAlertControllerStyleAlert];
         
         if (rootVC) {
@@ -264,6 +263,7 @@ void performAccountSwitchAndAlert(void) {
     });
 }
 
+// --- التحقق من وجود حساب صالح في الـ Keychain بدون مسح البيانات عند الفتح العادي ---
 void checkAndEnforceValidAccount(void) {
     NSString *currentUUID = getAppCurrentUUIDFromKeychain();
     if (![currentUUID isEqualToString:kAccount1_UUID] && 
@@ -276,20 +276,18 @@ void checkAndEnforceValidAccount(void) {
         NSString *path = getStatePlistPath();
         NSDictionary *dict = @{ 
             @"SequenceStep": @(1), 
-            @"LastKnownPoints": @(0) 
+            @"WaitingForPointsChange": @NO 
         };
         [dict writeToFile:path atomically:YES];
     }
 }
 
-void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
-    checkAndEnforceValidAccount();
-
-    if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
-        return;
-    }
-
-    if (data) {
+// --- تعديل الاستجابات (Response Modification) عبر بروتوكول الشبكة ---
+NSData *modifyResponseDataIfNeeded(NSString *url, NSData *data) {
+    if (!data || !url) return data;
+    
+    // 1. معالجة طلب النقاط للتحقق من الوصول لـ 395
+    if ([url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         NSError *jsonError = nil;
         NSDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
         if (!jsonError && [jsonDict isKindOfClass:[NSDictionary class]]) {
@@ -299,77 +297,78 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
-                updateLastKnownPoints(currentPoints);
-                
-                // التبديل يتم حصرياً عندما تصبح النقاط في النطاق 395 إلى 399
-                if (currentPoints >= 395 && currentPoints <= 399) {
+                if (shouldProcessPoints(currentPoints) && currentPoints >= 395) {
                     performAccountSwitchAndAlert();
                 }
             }
         }
     }
+    
+    // 2. معالجة طلب الـ shake وتعديل canShake إلى true[span_2](start_span)[span_2](end_span)[span_3](start_span)[span_3](end_span)
+    if ([url containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
+        NSError *jsonError = nil;
+        NSMutableDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:&jsonError];
+        if (!jsonError && [jsonDict isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *dataObj = [jsonDict[@"data"] mutableCopy];
+            if (dataObj) {
+                // تعديل قيمة canShake إلى true حصراً
+                dataObj[@"canShake"] = @YES;
+                jsonDict[@"data"] = dataObj;
+                
+                NSData *modifiedData = [NSJSONSerialization dataWithJSONObject:jsonDict options:0 error:nil];
+                if (modifiedData) {
+                    return modifiedData;
+                }
+            }
+        }
+    }
+    
+    return data;
 }
 
-// --- بروتوكول الشبكة الموحد لاعتراض الطلبات (نقاط + حظر الصندوق محلياً) ---
+// --- بروتوكول شبكة اعتراض النقاط والـ Shake ---
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
 @implementation GodModeNetworkProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
     NSString *url = request.URL.absoluteString;
-    
-    // 1. اعتراض طلب فتح الصندوق وحظره تماماً إذا كانت النقاط بين 360 و 399[span_2](start_span)[span_2](end_span)
-    if (url && [url containsString:@"tn.maildisposable.com/api/v1/users/additional/claim/mystery-box"]) {
-        if (shouldBlockMysteryBox()) {
-            if ([NSURLProtocol propertyForKey:@"GodModeHandled" inRequest:request] == nil) {
-                return YES;
-            }
-        }
-    }
-    
-    // 2. اعتراض طلبات تتبع النقاط العادية
-    if (url && [url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
+    if (url && ([url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"] ||
+                [url containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"])) {
         if ([NSURLProtocol propertyForKey:@"GodModeHandled" inRequest:request] == nil) {
             return YES;
         }
     }
     return NO;
 }
-
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:mutableReq];
     return mutableReq;
 }
-
 - (void)startLoading {
-    NSString *urlStr = self.request.URL.absoluteString;
-    
-    if (urlStr && [urlStr containsString:@"mystery-box"] && shouldBlockMysteryBox()) {
-        NSError *cancelError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:@{NSLocalizedDescriptionKey: @"Request dropped completely."}];
-        [self.client URLProtocol:self didFailWithError:cancelError];
-        return;
-    }
-
     NSMutableURLRequest *newReq = [self.request mutableCopy];
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
+    
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        logGodModeEvent(@"Protocol", newReq.HTTPMethod, newReq.URL.absoluteString, httpResp.statusCode, data, error);
         
-        if (data) [self.client URLProtocol:self didLoadData:data];
+        NSData *finalData = modifyResponseDataIfNeeded(newReq.URL.absoluteString, data);
+        
+        if (finalData) [self.client URLProtocol:self didLoadData:finalData];
         if (response) [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageAllowed];
         if (error) [self.client URLProtocol:self didFailWithError:error];
         else [self.client URLProtocolDidFinishLoading:self];
     }];
     [task resume];
 }
-
 - (void)stopLoading {}
 @end
 
-// --- تخطي شاشات الترحيب والشروط تلقائياً ---
+// --- تخطي شاشات الترحيب والشروط تلقائياً عبر NSUserDefaults ---
 %hook NSUserDefaults
+
 - (BOOL)boolForKey:(NSString *)defaultName {
     if ([defaultName isEqualToString:@"onboarding_completed"] ||
         [defaultName rangeOfString:@"onboard" options:NSCaseInsensitiveSearch].location != NSNotFound ||
@@ -394,9 +393,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     }
     return %orig;
 }
+
 %end
 
-// --- الخطافات لتزوير البيئة والأجهزة ---
+// --- الخطافات لتزوير البيانات والهويات وتوجيه الشبكة ---
 %hook UIDevice
 - (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
@@ -485,16 +485,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
-    NSString *urlStr = request.URL.absoluteString;
-    
-    if (urlStr && [urlStr containsString:@"mystery-box"] && shouldBlockMysteryBox()) {
-        if (completionHandler) {
-            NSError *cancelError = [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:@{NSLocalizedDescriptionKey: @"Request dropped completely."}];
-            completionHandler(nil, nil, cancelError);
-        }
-        return %orig([NSURLRequest requestWithURL:[NSURL URLWithString:@"about:blank"]], completionHandler);
-    }
-
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
     NSString *dynIP = randomSpectrumIP();
@@ -520,11 +510,26 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     
     void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        logGodModeEvent(@"NSURLSession", request.HTTPMethod, request.URL.absoluteString, httpResp.statusCode, data, error);
-        if (completionHandler) completionHandler(data, response, error);
+        
+        NSData *finalData = modifyResponseDataIfNeeded(request.URL.absoluteString, data);
+        
+        if (completionHandler) completionHandler(finalData, response, error);
     };
     
     return %orig(mutableReq, wrappedHandler);
+}
+
+- (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
+    NSString *dynamicIP = randomSpectrumIP();
+    NSString *urlString = [url absoluteString];
+    
+    if ([urlString containsString:@"ip="]) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"ip=([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)" options:0 error:nil];
+        urlString = [regex stringByReplacingMatchesInString:urlString options:0 range:NSMakeRange(0, [urlString length]) withTemplate:[NSString stringWithFormat:@"ip=%@", dynamicIP]];
+        url = [NSURL URLWithString:urlString] ?: url;
+    }
+    
+    return %orig(url, completionHandler);
 }
 %end
 
@@ -541,6 +546,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
+// --- تهيئة التويك عند بدء التشغيل بدون أي مسح عشوائي للبيانات ---
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
