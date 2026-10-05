@@ -304,14 +304,13 @@ NSData *modifyResponseDataIfNeeded(NSString *url, NSData *data) {
         }
     }
     
-    // 2. معالجة طلب الـ shake وتعديل canShake إلى true[span_2](start_span)[span_2](end_span)[span_3](start_span)[span_3](end_span)
+    // 2. معالجة طلب الـ shake وتعديل canShake إلى true[span_0](start_span)[span_0](end_span)[span_1](start_span)[span_1](end_span)
     if ([url containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
         NSError *jsonError = nil;
         NSMutableDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:&jsonError];
         if (!jsonError && [jsonDict isKindOfClass:[NSDictionary class]]) {
             NSMutableDictionary *dataObj = [jsonDict[@"data"] mutableCopy];
             if (dataObj) {
-                // تعديل قيمة canShake إلى true حصراً
                 dataObj[@"canShake"] = @YES;
                 jsonDict[@"data"] = dataObj;
                 
@@ -352,8 +351,6 @@ NSData *modifyResponseDataIfNeeded(NSString *url, NSData *data) {
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        
         NSData *finalData = modifyResponseDataIfNeeded(newReq.URL.absoluteString, data);
         
         if (finalData) [self.client URLProtocol:self didLoadData:finalData];
@@ -509,10 +506,7 @@ NSData *modifyResponseDataIfNeeded(NSString *url, NSData *data) {
     [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
     
     void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        
         NSData *finalData = modifyResponseDataIfNeeded(request.URL.absoluteString, data);
-        
         if (completionHandler) completionHandler(finalData, response, error);
     };
     
