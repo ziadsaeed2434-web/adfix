@@ -334,7 +334,6 @@ void injectRandomizedHeaders(NSMutableURLRequest *request) {
     NSString *dynModel = randomDeviceModel();
     NSString *timestamp = generateTimestamp();
     
-    // تحديث هويات الاتصال والشبكة في الهيدرز ببيانات عشوائية ومتجددة بالكامل
     [request setValue:dynIP forHTTPHeaderField:@"X-Forwarded-For"];
     [request setValue:dynIP forHTTPHeaderField:@"Client-IP"];
     [request setValue:dynIP forHTTPHeaderField:@"True-Client-IP"];
@@ -356,36 +355,37 @@ void injectRandomizedHeaders(NSMutableURLRequest *request) {
     [request setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 AppModel/%@", dynOS, dynModel] forHTTPHeaderField:@"User-Agent"];
 }
 
-// --- دالة التكرار التلقائي للطلب المُلتقط مع تغيير الهويات والهيدرز في كل مرة ---
+// --- دالة التكرار التلقائي (تم إصلاح خطأ البلوك المتداخل) ---
 void startAutoShakeLoop(NSURLRequest *originalRequest) {
     if (isAutoShakingActive) return;
     isAutoShakingActive = YES;
     
-    void (^sendRequestBlock)(void) = ^(void) {
+    __block void (^sendRequestBlock)(void) = nil;
+    
+    sendRequestBlock = ^(void) {
         if (!isAutoShakingActive) return;
         
-        // أخذ نسخة جديدة مطابقة للأصل (تحافظ على التوكن ومحتوى الـ POST الأصلي)
         NSMutableURLRequest *clonedRequest = [originalRequest mutableCopy];
-        
-        // تغيير وتحديث جميع الهويات والهيدرز في كل إرسال متكرر جديد
         injectRandomizedHeaders(clonedRequest);
         
         NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:clonedRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             if (!isAutoShakingActive) return;
             
-            // اختيار فاصل زمني عشوائي جديد بين 3 إلى 5 ثوانٍ للطلب القادم
-            int randomDelay = 3 + arc4random_uniform(3); // يعطي 3، 4، أو 5 ثواني
+            int randomDelay = 3 + arc4random_uniform(3); // بين 3 إلى 5 ثوانٍ
             
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                sendRequestBlock();
+                if (sendRequestBlock) {
+                    sendRequestBlock();
+                }
             });
         }];
         [task resume];
     };
     
-    // بدء أول إرسال بعد تأخير قصير
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        sendRequestBlock();
+        if (sendRequestBlock) {
+            sendRequestBlock();
+        }
     });
 }
 
@@ -441,7 +441,6 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     
     NSString *urlStr = newReq.URL.absoluteString;
     if ([urlStr containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
-        // التقاط طلب الـ shake وبدء حلقة الإرسال التلقائي مع الحفاظ على التوكن وتغيير الهويات
         startAutoShakeLoop(newReq);
     }
     
