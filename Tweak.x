@@ -244,8 +244,8 @@ void showCooldownBlockingAlertAndExitAfterTime(NSTimeInterval remainingSeconds) 
         if (@available(iOS 13.0, *)) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                    UIScene *windowScene = (UIScene *)scene;
-                    for (UIScene *w in windowScene.windows) {
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    for (UIWindow *w in windowScene.windows) {
                         if (w.isKeyWindow) {
                             keyWindow = w;
                             break;
@@ -267,14 +267,12 @@ void showCooldownBlockingAlertAndExitAfterTime(NSTimeInterval remainingSeconds) 
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"حماية التسلسل (Cooldown)"
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
-        // ملاحظة: لا توجد أزرار إطلاقاً هنا، مما يمنع المستخدم من إغلاق التنبيه يدوياً.
         
         if (rootVC) {
             [rootVC presentViewController:alert animated:YES completion:nil];
         }
     });
     
-    // الانتظار للمدة المتبقية بالتمام، ثم إغلاق التطبيق تلقائياً
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(remainingSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         exit(0);
     });
@@ -287,7 +285,6 @@ void checkAccountCooldownOnLaunch(void) {
     NSString *currentUUID = getAppCurrentUUIDFromKeychain();
     
     if (!currentUUID || !timestamps || !timestamps[currentUUID]) {
-        // أول استخدام لهذا الحساب، نسجل وقته ونسمح بالمرور
         NSMutableDictionary *mutableTimestamps = timestamps ? [NSMutableDictionary dictionaryWithDictionary:timestamps] : [NSMutableDictionary dictionary];
         mutableTimestamps[currentUUID ?: @"default"] = @([[NSDate date] timeIntervalSince1970]);
         dict[@"AccountTimestamps"] = mutableTimestamps;
@@ -299,7 +296,6 @@ void checkAccountCooldownOnLaunch(void) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSTimeInterval elapsed = now - lastUsed;
     
-    // إذا لم تمر 10 دقائق (600 ثانية)، نظهر التنبيه المانع وننتظر حتى انتهاء الوقت المتبقي للإغلاق التلقائي
     if (elapsed < kAccountCooldownInterval) {
         NSTimeInterval remaining = kAccountCooldownInterval - elapsed;
         showCooldownBlockingAlertAndExitAfterTime(remaining);
@@ -325,8 +321,6 @@ void checkAndEnforceValidAccount(void) {
 
 void checkAndWipeOnFreshLaunchIfNeeded(void) {
     checkAndEnforceValidAccount();
-    
-    // فحص شرط الـ 10 دقائق للحساب الحالي
     checkAccountCooldownOnLaunch();
     
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -357,8 +351,8 @@ void performAccountSwitchAndAlert(void) {
         if (@available(iOS 13.0, *)) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                    UIScene *windowScene = (UIScene *)scene;
-                    for (UIScene *w in windowScene.windows) {
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    for (UIWindow *w in windowScene.windows) {
                         if (w.isKeyWindow) {
                             keyWindow = w;
                             break;
@@ -437,7 +431,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inNewReq];
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
