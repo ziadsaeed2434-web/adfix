@@ -9,6 +9,7 @@ TWEAK_NAME = AdPurgeTweak
 AdPurgeTweak_FILES = Tweak.x FLEXNetworkObserver.m FLEXNetworkRecorder.m FLEXNetworkTransaction.m FLEXResources.m FLEXUtility.m
 AdPurgeTweak_FRAMEWORKS = Foundation UIKit Security AdSupport
 AdPurgeTweak_PRIVATE_FRAMEWORKS = AppTrackingTransparency
+AdPurgeTweak_EXTRA_FRAMEWORKS = GoogleMobileAds
 AdPurgeTweak_LIBRARIES = substrate
 AdPurgeTweak_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-gnu-folding-constant
 
