@@ -2,8 +2,8 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <Security/Security.h>
-#import <AppTrackingTransparency/AppTrackingTransparency.h>
 #import <AdSupport/AdSupport.h>
+#import <AppTrackingTransparency/AppTrackingTransparency.h>
 
 // --- الثوابت وإعدادات الحسابات الثلاثة ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
@@ -14,7 +14,7 @@ static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A595
 
 static BOOL isSwitchAlertShown = NO;
 
-// --- دالة مساعدة لإنشاء معرف عشوائي جديد ---
+// --- دالة مساعدة لإنشاء معرفات عشوائية متجددة ---
 static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
@@ -361,20 +361,16 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 
 %end
 
-// --- منح موافقة التتبع وتوليد معرف تتبع عشوائي جديد في كل طلب ---
-%hook ATTrackingManager
-+ (NSUInteger)trackingAuthorizationStatus {
-    return 3; // Authorized
+// --- تغيير معرفات IDFA و IDFV عشوائياً في كل مرة يطلبها التطبيق ---
+%hook ASIdentifierManager
+- (NSUUID *)advertisingIdentifier {
+    return [[NSUUID alloc] initWithUUIDString:randomUUID()];
 }
 %end
 
-%hook ASIdentifierManager
-- (NSUUID *)advertisingIdentifier {
-    // إرجاع معرف تتبع عشوائي جديد كلياً في كل مرة يتم طلبه فيها
+%hook UIDevice
+- (NSUUID *)identifierForVendor {
     return [[NSUUID alloc] initWithUUIDString:randomUUID()];
-}
-- (BOOL)isAdvertisingTrackingEnabled {
-    return YES;
 }
 %end
 
