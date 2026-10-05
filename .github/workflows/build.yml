@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-13  # استخدام macos-13 أسرع بكثير في الإقلاع وأرخص في استهلاك الدقائق من أحدث إصدار
 
     steps:
     - name: Checkout Code
@@ -16,11 +16,17 @@ jobs:
       run: |
         brew install ldid
 
+    - name: Cache Theos and SDKs
+      id: cache-theos
+      uses: actions/cache@v3
+      with:
+        path: ~/theos
+        key: ${{ runner.os }}-theos-v2
+
     - name: Setup Theos
+      if: steps.cache-theos.outputs.cache-hit != 'true'
       run: |
-        rm -rf ~/theos
         git clone --recursive https://github.com/theos/theos.git ~/theos
-        rm -rf ~/theos/sdks
         git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
 
     - name: Build Tweak
