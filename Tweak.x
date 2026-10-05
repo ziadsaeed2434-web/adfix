@@ -9,16 +9,17 @@
 #import <arpa/inet.h>
 
 // --- الثوابت وإعدادات الحسابات الثلاثة ---
-
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
-static NSString * const kKeychainGroup   = @"NT53G4TQG2.*";
-static NSString * const kAccount1_UUID   = @"5A82BE9A-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول
-static NSString * const kAccount2_UUID   = @"2BEE87EE-E20A-432B-879E-A98E2B8BC10A"; // الحساب الثاني
-static NSString * const kAccount3_UUID   = @"7F4D00E6-0107-44B6-9D43-63FBCE2A5956"; // الحساب الثالث
+static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
+static NSString * const kAccount1_UUID   = @"5A82BF9F-3EB4-4CA5-AD39-593553C1E15C"; // الحساب الأول
+static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432C-879D-A98E2B8BC10A"; // الحساب الثاني
+static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D41-63FBCE2A5956"; // الحساب الثالث
 
 static BOOL isSwitchAlertShown = NO;
+static BOOL isAutoShakingActive = NO; // متغير لمنع تداخل عمليات التكرار
 
 // --- واجهة خدمة الإعلانات ---
+
 @interface ActivatorAdService : NSObject
 - (void)loadAd;
 - (BOOL)isReady;
@@ -132,7 +133,7 @@ void saveUUIDToKeychain(NSString *uuidString) {
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
 }
 
-// --- مسح بيانات التطبيق كلياً وبشكل مضمون (مع استثناء ملف الحالة) ---
+// --- مسح بيانات التطبيق كلياً وبشكل مضمون ---
 void clearAllAppDataCompletely(void) {
     NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleDomain) {
@@ -177,7 +178,7 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
-// --- منطق التبديل التسلسلي المضمون 100% ---
+// --- منطق التبديل التسلسلي ---
 NSString *getNextAccountUUID(void) {
     NSString *path = getStatePlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
@@ -191,7 +192,6 @@ NSString *getNextAccountUUID(void) {
     NSString *nextUUID = nil;
     NSInteger newIndex = 1;
     
-    // الترتيب التسلسلي الصارم والدقيق (من الأول للثاني، ومن الثاني للثالث، ومن الثالث للأول)
     if (lastAccountIndex == 1) {
         nextUUID = kAccount2_UUID;
         newIndex = 2;
@@ -203,7 +203,6 @@ NSString *getNextAccountUUID(void) {
         newIndex = 1;
     }
     
-    // فحص إضافي يمنع أي تكرار محتمل بناءً على الـ Keychain الحالي
     if (currentKeychainUUID && [nextUUID isEqualToString:currentKeychainUUID]) {
         if ([currentKeychainUUID isEqualToString:kAccount1_UUID]) {
             nextUUID = kAccount2_UUID; newIndex = 2;
@@ -214,7 +213,6 @@ NSString *getNextAccountUUID(void) {
         }
     }
     
-    // حفظ المؤشر الجديد بشكل فوري ومؤكد في ملف الـ Plist
     NSMutableDictionary *newDict = [NSMutableDictionary dictionary];
     newDict[@"LastIndex"] = @(newIndex);
     newDict[@"WaitingForPointsChange"] = @YES; 
@@ -242,21 +240,15 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     return YES;
 }
 
-// --- عملية الحذف والتبديل المضمونة 100% وبدون أي أخطاء ---
+// --- عملية الحذف والتبديل المضمونة ---
 void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
+    isAutoShakingActive = NO; // إيقاف التكرار عند النجاح
     
-    // 1. تحديد الحساب التالي وحفظ الحالة فوراً في الملف
     NSString *nextUUID = getNextAccountUUID();
-    
-    // 2. مسح بيانات التطبيق بالكامل بشكل جذري
     clearAllAppDataCompletely();
-    
-    // 3. تفريغ الـ Keychain بالكامل من أي بصمات سابقة
     clearEntireKeychain();
-    
-    // 4. كتابة الحساب الجديد المضمون في الـ Keychain للتأكد من اعتماده فور إعادة التشغيل
     saveUUIDToKeychain(nextUUID);
     
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -331,6 +323,72 @@ void checkAndWipeOnFreshLaunchIfNeeded(void) {
     [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
+// --- دالة حقن وتغيير الهويات (الهيدرز) المتجددة لكل طلب تكرار ---
+void injectRandomizedHeaders(NSMutableURLRequest *request) {
+    NSString *dynIP = randomSpectrumIP();
+    NSString *dynDNS = randomSpectrumDNS();
+    NSString *dynIMEI = randomIMEI();
+    NSString *dynIDFA = randomUUID();
+    NSString *dynIDFV = randomUUID();
+    NSString *dynOS = randomOSVersion();
+    NSString *dynModel = randomDeviceModel();
+    NSString *timestamp = generateTimestamp();
+    
+    // تحديث هويات الاتصال والشبكة في الهيدرز ببيانات عشوائية ومتجددة بالكامل
+    [request setValue:dynIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [request setValue:dynIP forHTTPHeaderField:@"Client-IP"];
+    [request setValue:dynIP forHTTPHeaderField:@"True-Client-IP"];
+    [request setValue:dynIP forHTTPHeaderField:@"X-Client-IP"];
+    [request setValue:dynIP forHTTPHeaderField:@"Remote-IP"];
+    [request setValue:dynDNS forHTTPHeaderField:@"X-Custom-DNS"];
+    [request setValue:dynDNS forHTTPHeaderField:@"X-DNS-Server"];
+    [request setValue:dynIMEI forHTTPHeaderField:@"X-Device-IMEI"];
+    [request setValue:dynIMEI forHTTPHeaderField:@"X-IMEI"];
+    [request setValue:dynIMEI forHTTPHeaderField:@"Device-Id"];
+    [request setValue:dynIDFA forHTTPHeaderField:@"X-Advertising-ID"];
+    [request setValue:dynIDFA forHTTPHeaderField:@"IDFA"];
+    [request setValue:dynIDFV forHTTPHeaderField:@"X-Vendor-ID"];
+    [request setValue:dynIDFV forHTTPHeaderField:@"IDFV"];
+    [request setValue:timestamp forHTTPHeaderField:@"X-Request-Timestamp"];
+    [request setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
+    [request setValue:dynOS forHTTPHeaderField:@"X-OS-Version"];
+    [request setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
+    [request setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 AppModel/%@", dynOS, dynModel] forHTTPHeaderField:@"User-Agent"];
+}
+
+// --- دالة التكرار التلقائي للطلب المُلتقط مع تغيير الهويات والهيدرز في كل مرة ---
+void startAutoShakeLoop(NSURLRequest *originalRequest) {
+    if (isAutoShakingActive) return;
+    isAutoShakingActive = YES;
+    
+    void (^sendRequestBlock)(void) = ^(void) {
+        if (!isAutoShakingActive) return;
+        
+        // أخذ نسخة جديدة مطابقة للأصل (تحافظ على التوكن ومحتوى الـ POST الأصلي)
+        NSMutableURLRequest *clonedRequest = [originalRequest mutableCopy];
+        
+        // تغيير وتحديث جميع الهويات والهيدرز في كل إرسال متكرر جديد
+        injectRandomizedHeaders(clonedRequest);
+        
+        NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:clonedRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            if (!isAutoShakingActive) return;
+            
+            // اختيار فاصل زمني عشوائي جديد بين 3 إلى 5 ثوانٍ للطلب القادم
+            int randomDelay = 3 + arc4random_uniform(3); // يعطي 3، 4، أو 5 ثواني
+            
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                sendRequestBlock();
+            });
+        }];
+        [task resume];
+    };
+    
+    // بدء أول إرسال بعد تأخير قصير
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        sendRequestBlock();
+    });
+}
+
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
     checkAndEnforceValidAccount();
 
@@ -357,14 +415,15 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     }
 }
 
-// --- بروتوكول شبكة اعتراض النقاط ---
+// --- بروتوكول شبكة اعتراض النقاط وطلبات الـ Shake ---
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
 @implementation GodModeNetworkProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
     NSString *url = request.URL.absoluteString;
-    if (url && [url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
+    if (url && ([url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"] ||
+                [url containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"])) {
         if ([NSURLProtocol propertyForKey:@"GodModeHandled" inRequest:request] == nil) {
             return YES;
         }
@@ -379,6 +438,12 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
     [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
+    
+    NSString *urlStr = newReq.URL.absoluteString;
+    if ([urlStr containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
+        // التقاط طلب الـ shake وبدء حلقة الإرسال التلقائي مع الحفاظ على التوكن وتغيير الهويات
+        startAutoShakeLoop(newReq);
+    }
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -395,7 +460,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// --- تخطي شاشات الترحيب والشروط تلقائياً عبر NSUserDefaults ---
+// --- تخطي شاشات الترحيب والشروط تلقائياً ---
 %hook NSUserDefaults
 
 - (BOOL)boolForKey:(NSString *)defaultName {
@@ -516,26 +581,12 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
-    NSString *dynIP = randomSpectrumIP();
-    NSString *dynDNS = randomSpectrumDNS();
-    NSString *dynIMEI = randomIMEI();
-    NSString *dynIDFA = randomUUID();
-    NSString *dynIDFV = randomUUID();
-    NSString *dynOS = randomOSVersion();
-    NSString *dynModel = randomDeviceModel();
-    NSString *timestamp = generateTimestamp();
+    injectRandomizedHeaders(mutableReq);
     
-    [mutableReq setValue:dynIP forHTTPHeaderField:@"X-Forwarded-For"];
-    [mutableReq setValue:dynIP forHTTPHeaderField:@"Client-IP"];
-    [mutableReq setValue:dynDNS forHTTPHeaderField:@"X-DNS-Server"];
-    [mutableReq setValue:dynIMEI forHTTPHeaderField:@"X-Device-IMEI"];
-    [mutableReq setValue:dynIDFA forHTTPHeaderField:@"X-Advertising-ID"];
-    [mutableReq setValue:dynIDFV forHTTPHeaderField:@"X-Vendor-ID"];
-    [mutableReq setValue:timestamp forHTTPHeaderField:@"X-Request-Timestamp"];
-    [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
-    [mutableReq setValue:dynOS forHTTPHeaderField:@"X-OS-Version"];
-    [mutableReq setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
-    [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
+    NSString *urlString = request.URL.absoluteString;
+    if (urlString && [urlString containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
+        startAutoShakeLoop(mutableReq);
+    }
     
     void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
@@ -618,7 +669,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- مراقبة دورة حياة التطبيق لإدارة الخروج النهائي والكاش ---
+// --- مراقبة دورة حياة التطبيق وإدارة الخروج النهائي والكاش ---
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
