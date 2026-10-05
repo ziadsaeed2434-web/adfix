@@ -5,12 +5,10 @@
 #import <AdSupport/AdSupport.h>
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
 
-// --- الثوابت وإعدادات الحسابات الثلاثة بالتسلسل الثابت ---
+// --- إعدادات الـ Keychain والثوابت الأساسية ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
-static NSString * const kAccount1_UUID   = @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C"; // الحساب الأول (1)
-static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432B-879D-A98E2B8BC10A"; // الحساب الثاني (2)
-static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D43-63FBCE2A5956"; // الحساب الثالث (3)
+static NSTimeInterval const kAccountCooldownInterval = 600.0; // 10 دقائق بالثواني
 
 static BOOL isSwitchAlertShown = NO;
 
@@ -19,7 +17,7 @@ static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
 
-// --- مسار حالة التبديل (محمي في مكتبة التطبيق) ---
+// --- مسار ملف الـ Plist لحفظ الحالة والتسلسل والأوقات ---
 NSString *getStatePlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
@@ -123,60 +121,93 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
-// --- منطق التبديل التسلسلي الصارم 100% (1 -> 2 -> 3 -> 1) ---
-NSString *getNextAccountUUID(void) {
+// --- تهيئة ملف الـ Plist للتسلسل وأوقات الاستخدام ---
+NSMutableDictionary *getOrCreateAccountStateDictionary(void) {
     NSString *path = getStatePlistPath();
-    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
     
-    NSInteger lastAccountIndex = 1; // الافتراضي البدء من الحساب الأول
-    if (dict && dict[@"LastIndex"] != nil) {
-        lastAccountIndex = [dict[@"LastIndex"] integerValue];
+    NSArray *defaultAccounts = @[
+        @"5A82BF9F-3EA4-4CA5-AD39-593553C1E15C", // الحساب الأول
+        @"2BEE80E4-E20A-432B-879D-A98E2B8BC10A", // الحساب الثاني
+        @"7F4D0094-0107-44B6-9D43-63FBCE2A5956"  // الحساب الثالث
+    ];
+    
+    NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithContentsOfFile:path];
+    if (!dict || !dict[@"Accounts"] || ![dict[@"Accounts"] isKindOfClass:[NSArray class]] || [dict[@"Accounts"] count] < 3) {
+        dict = [NSMutableDictionary dictionary];
+        dict[@"Accounts"] = defaultAccounts;
+        dict[@"LastIndex"] = @(0);
+        dict[@"BlockedUUID"] = @"";
+        dict[@"TargetUUID"] = defaultAccounts[0];
+        dict[@"AccountTimestamps"] = [NSMutableDictionary dictionary];
+        [dict writeToFile:path atomically:YES];
     }
+    return dict;
+}
+
+// --- التحقق مما إذا مر على الحساب 10 دقائق أو أكثر منذ اخر استخدام ---
+BOOL isAccountCooledDown(NSString *uuid) {
+    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
+    NSDictionary *timestamps = dict[@"AccountTimestamps"];
+    if (!timestamps || !timestamps[uuid]) return YES; 
     
+    NSTimeInterval lastUsed = [timestamps[uuid] doubleValue];
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    
+    return (now - lastUsed) >= kAccountCooldownInterval;
+}
+
+// --- جلب الحساب التالي بالتسلسل مع الالتزام بشرط الـ 10 دقائق ---
+NSString *getNextAccountUUIDFromPlist(void) {
+    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
+    NSArray *accounts = dict[@"Accounts"];
+    NSInteger lastIndex = dict[@"LastIndex"] ? [dict[@"LastIndex"] integerValue] : 0;
+    
+    NSInteger count = [accounts count];
+    NSInteger candidateIndex = lastIndex;
     NSString *nextUUID = nil;
-    NSInteger newIndex = 1;
     
-    // التسلسل الدائري الثابت والدقيق تماماً كما طلبت
-    if (lastAccountIndex == 1) {
-        nextUUID = kAccount2_UUID;
-        newIndex = 2;
-    } else if (lastAccountIndex == 2) {
-        nextUUID = kAccount3_UUID;
-        newIndex = 3;
-    } else {
-        nextUUID = kAccount1_UUID;
-        newIndex = 1;
+    for (NSInteger i = 1; i <= count; i++) {
+        candidateIndex = (lastIndex + i) % count;
+        NSString *uuid = accounts[candidateIndex];
+        if (isAccountCooledDown(uuid)) {
+            nextUUID = uuid;
+            lastIndex = candidateIndex;
+            break;
+        }
     }
     
-    // حفظ الفهرس الجديد والحالة مع قفل النقاط
-    NSMutableDictionary *newDict = [NSMutableDictionary dictionary];
-    newDict[@"LastIndex"] = @(newIndex);
-    newDict[@"WaitingForPointsChange"] = @YES; // تفعيل القفل لحين تغير النقاط عن 395
-    newDict[@"TargetUUID"] = nextUUID;
-    [newDict writeToFile:path atomically:YES];
+    if (!nextUUID) {
+        lastIndex = (lastIndex + 1) % count;
+        nextUUID = accounts[lastIndex];
+    }
     
+    dict[@"LastIndex"] = @(lastIndex);
+    dict[@"TargetUUID"] = nextUUID;
+    dict[@"BlockedUUID"] = nextUUID;
+    
+    NSMutableDictionary *timestamps = [NSMutableDictionary dictionaryWithDictionary:dict[@"AccountTimestamps"]];
+    timestamps[nextUUID] = @([[NSDate date] timeIntervalSince1970]);
+    dict[@"AccountTimestamps"] = timestamps;
+    
+    [dict writeToFile:getStatePlistPath() atomically:YES];
     return nextUUID;
 }
 
-// --- نظام قفل التبديل (لا يرجع يشتغل إلا لو تغيرت النقاط عن 395) ---
+// --- منع الحلقة المفرغة عند بلوغ 395 نقطة ---
 BOOL shouldProcessPoints(NSInteger currentPoints) {
-    NSString *path = getStatePlistPath();
-    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
+    NSString *currentUUID = getAppCurrentUUIDFromKeychain();
+    NSString *blockedUUID = dict[@"BlockedUUID"];
     
-    if (dict && dict[@"WaitingForPointsChange"] != nil) {
-        BOOL waiting = [dict[@"WaitingForPointsChange"] boolValue];
-        if (waiting) {
-            if (currentPoints == 395) {
-                // الحظر مستمر طالما النقاط ثابتة على 395
-                return NO;
-            } else {
-                // فك الحظر بمجرد أن تتغير النقاط لتصبح شيئاً آخر (مثل 0 أو أي قيمة جديدة)
-                NSMutableDictionary *mutableDict = [dict mutableCopy];
-                mutableDict[@"WaitingForPointsChange"] = @NO;
-                [mutableDict writeToFile:path atomically:YES];
-            }
-        }
+    if (blockedUUID && [currentUUID isEqualToString:blockedUUID] && currentPoints >= 395) {
+        return NO; 
     }
+    
+    if (currentPoints < 395) {
+        dict[@"BlockedUUID"] = @"";
+        [dict writeToFile:getStatePlistPath() atomically:YES];
+    }
+    
     return YES;
 }
 
@@ -186,21 +217,25 @@ void performCompleteSwitchRoutineForUUID(NSString *targetUUID) {
     clearEntireKeychain();
     saveUUIDToKeychain(targetUUID);
     
-    NSString *path = getStatePlistPath();
-    NSInteger index = 1;
-    if ([targetUUID isEqualToString:kAccount2_UUID]) index = 2;
-    else if ([targetUUID isEqualToString:kAccount3_UUID]) index = 3;
+    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
+    NSArray *accounts = dict[@"Accounts"];
     
-    NSDictionary *dict = @{
-        @"LastIndex": @(index),
-        @"WaitingForPointsChange": @NO,
-        @"TargetUUID": targetUUID
-    };
-    [dict writeToFile:path atomically:YES];
+    NSInteger index = [accounts indexOfObject:targetUUID];
+    if (index == NSNotFound) index = 0;
+    
+    dict[@"LastIndex"] = @(index);
+    dict[@"BlockedUUID"] = targetUUID;
+    dict[@"TargetUUID"] = targetUUID;
+    
+    NSMutableDictionary *timestamps = [NSMutableDictionary dictionaryWithDictionary:dict[@"AccountTimestamps"]];
+    timestamps[targetUUID] = @([[NSDate date] timeIntervalSince1970]);
+    dict[@"AccountTimestamps"] = timestamps;
+    
+    [dict writeToFile:getStatePlistPath() atomically:YES];
 }
 
-// --- إظهار شعار التنبيه والخروج من التطبيق ---
-void showSwitchAlertAndExitWithMessage(NSString *title, NSString *message) {
+// --- إظهار تنبيه مانع (بدون أزرار للخروج) ويغلق تلقائياً عند انتهاء الـ 10 دقائق ---
+void showCooldownBlockingAlertAndExitAfterTime(NSTimeInterval remainingSeconds) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
     
@@ -209,8 +244,8 @@ void showSwitchAlertAndExitWithMessage(NSString *title, NSString *message) {
         if (@available(iOS 13.0, *)) {
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
                 if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-                    UIWindowScene *windowScene = (UIWindowScene *)scene;
-                    for (UIWindow *w in windowScene.windows) {
+                    UIScene *windowScene = (UIScene *)scene;
+                    for (UIScene *w in windowScene.windows) {
                         if (w.isKeyWindow) {
                             keyWindow = w;
                             break;
@@ -226,71 +261,73 @@ void showSwitchAlertAndExitWithMessage(NSString *title, NSString *message) {
             rootVC = rootVC.presentedViewController;
         }
         
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+        int minutesLeft = (int)(remainingSeconds / 60) + 1;
+        NSString *message = [NSString stringWithFormat:@"⏳ لم تنقضِ فترة الـ 10 دقائق بعد لهذا الحساب.\n\nمتبقي تقريباً: %d دقيقة.\n\nسيتم إغلاق التطبيق تلقائياً فور اكتمال الوقت المخصص...", minutesLeft];
+        
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"حماية التسلسل (Cooldown)"
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
+        // ملاحظة: لا توجد أزرار إطلاقاً هنا، مما يمنع المستخدم من إغلاق التنبيه يدوياً.
         
         if (rootVC) {
-            [rootVC presentViewController:alert animated:YES completion:^{
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    exit(0);
-                });
-            }];
-        } else {
-            exit(0);
+            [rootVC presentViewController:alert animated:YES completion:nil];
         }
+    });
+    
+    // الانتظار للمدة المتبقية بالتمام، ثم إغلاق التطبيق تلقائياً
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(remainingSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        exit(0);
     });
 }
 
-// --- نظام التحقق الصارم عند الفتح ---
-void checkAndEnforceValidAccount(void) {
-    NSString *path = getStatePlistPath();
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *currentKeychainUUID = getAppCurrentUUIDFromKeychain();
+// --- التحقق من فترة الـ 10 دقائق لكل حساب عند التشغيل ---
+void checkAccountCooldownOnLaunch(void) {
+    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
+    NSDictionary *timestamps = dict[@"AccountTimestamps"];
+    NSString *currentUUID = getAppCurrentUUIDFromKeychain();
     
-    if (![fm fileExistsAtPath:path]) {
-        if (!currentKeychainUUID || (![currentKeychainUUID isEqualToString:kAccount1_UUID] && 
-                                     ![currentKeychainUUID isEqualToString:kAccount2_UUID] && 
-                                     ![currentKeychainUUID isEqualToString:kAccount3_UUID])) {
-            performCompleteSwitchRoutineForUUID(kAccount1_UUID);
-            showSwitchAlertAndExitWithMessage(@"🔄 تم ضبط الحساب الأول", 
-                                              @"تم ضبط الحساب الافتراضي الأول بنجاح.\n\nسيتم إغلاق التطبيق الآن...");
-        } else {
-            NSInteger initialIndex = 1;
-            if ([currentKeychainUUID isEqualToString:kAccount2_UUID]) initialIndex = 2;
-            else if ([currentKeychainUUID isEqualToString:kAccount3_UUID]) initialIndex = 3;
-            
-            NSDictionary *initialDict = @{
-                @"LastIndex": @(initialIndex),
-                @"WaitingForPointsChange": @NO,
-                @"TargetUUID": currentKeychainUUID
-            };
-            [initialDict writeToFile:path atomically:YES];
-        }
+    if (!currentUUID || !timestamps || !timestamps[currentUUID]) {
+        // أول استخدام لهذا الحساب، نسجل وقته ونسمح بالمرور
+        NSMutableDictionary *mutableTimestamps = timestamps ? [NSMutableDictionary dictionaryWithDictionary:timestamps] : [NSMutableDictionary dictionary];
+        mutableTimestamps[currentUUID ?: @"default"] = @([[NSDate date] timeIntervalSince1970]);
+        dict[@"AccountTimestamps"] = mutableTimestamps;
+        [dict writeToFile:getStatePlistPath() atomically:YES];
         return;
     }
     
-    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
-    NSString *targetUUID = dict[@"TargetUUID"];
+    NSTimeInterval lastUsed = [timestamps[currentUUID] doubleValue];
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    NSTimeInterval elapsed = now - lastUsed;
     
-    // إذا حصل أي خطأ أو اختلاف، يتم التصحيح فوراً بالتنبيه والخروج
-    if (targetUUID && currentKeychainUUID && ![currentKeychainUUID isEqualToString:targetUUID]) {
-        performCompleteSwitchRoutineForUUID(targetUUID);
-        showSwitchAlertAndExitWithMessage(@"🔄 تم تصحيح الحساب بنجاح", 
-                                          @"تم اكتشاف خطأ في الحساب وتم تصحيحه والانتقال للحساب التسلسلي الصحيح.\n\nسيتم إغلاق التطبيق الآن...");
-    } else if (!currentKeychainUUID && targetUUID) {
-        performCompleteSwitchRoutineForUUID(targetUUID);
-        showSwitchAlertAndExitWithMessage(@"🔄 تم تصحيح الحساب بنجاح", 
-                                          @"تم تصحيح الـ Keychain والانتقال للحساب الصحيح.\n\nسيتم إغلاق التطبيق الآن...");
-    } else if (!currentKeychainUUID) {
-        performCompleteSwitchRoutineForUUID(kAccount1_UUID);
-        showSwitchAlertAndExitWithMessage(@"🔄 تم تصحيح الحساب بنجاح", 
-                                          @"تم ضبط الحساب الأول بنجاح تام.\n\nسيتم إغلاق التطبيق الآن...");
+    // إذا لم تمر 10 دقائق (600 ثانية)، نظهر التنبيه المانع وننتظر حتى انتهاء الوقت المتبقي للإغلاق التلقائي
+    if (elapsed < kAccountCooldownInterval) {
+        NSTimeInterval remaining = kAccountCooldownInterval - elapsed;
+        showCooldownBlockingAlertAndExitAfterTime(remaining);
+    }
+}
+
+// --- التحقق ومطابقة التسلسل الدائري ---
+void checkAndEnforceValidAccount(void) {
+    NSMutableDictionary *dict = getOrCreateAccountStateDictionary();
+    NSArray *accounts = dict[@"Accounts"];
+    NSString *currentKeychainUUID = getAppCurrentUUIDFromKeychain();
+    
+    NSInteger lastIndex = dict[@"LastIndex"] ? [dict[@"LastIndex"] integerValue] : 0;
+    if (lastIndex >= [accounts count]) lastIndex = 0;
+    
+    NSString *expectedUUID = accounts[lastIndex];
+    
+    if (!currentKeychainUUID || ![accounts containsObject:currentKeychainUUID] || ![currentKeychainUUID isEqualToString:expectedUUID]) {
+        NSString *nextUUID = getNextAccountUUIDFromPlist();
+        performCompleteSwitchRoutineForUUID(nextUUID);
     }
 }
 
 void checkAndWipeOnFreshLaunchIfNeeded(void) {
     checkAndEnforceValidAccount();
+    
+    // فحص شرط الـ 10 دقائق للحساب الحالي
+    checkAccountCooldownOnLaunch();
     
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *markerPath = getTerminationMarkerPath();
@@ -309,11 +346,48 @@ void checkAndWipeOnFreshLaunchIfNeeded(void) {
 
 // --- التبديل عند بلوغ 395 نقطة ---
 void performAccountSwitchAndAlert(void) {
-    NSString *nextUUID = getNextAccountUUID();
+    NSString *nextUUID = getNextAccountUUIDFromPlist();
     performCompleteSwitchRoutineForUUID(nextUUID);
     
-    showSwitchAlertAndExitWithMessage(@"🔄 تم التبديل التسلسلي بنجاح", 
-                                      @"تم الوصول إلى 395 نقطة، حذف البيانات، والانتقال للحساب التالي بالتسلسل.\n\nسيتم إغلاق التطبيق الآن...");
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (isSwitchAlertShown) return;
+        isSwitchAlertShown = YES;
+        
+        UIWindow *keyWindow = nil;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                    UIScene *windowScene = (UIScene *)scene;
+                    for (UIScene *w in windowScene.windows) {
+                        if (w.isKeyWindow) {
+                            keyWindow = w;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!keyWindow) keyWindow = [UIApplication sharedApplication].keyWindow;
+        
+        UIViewController *rootVC = keyWindow.rootViewController;
+        while (rootVC.presentedViewController) {
+            rootVC = rootVC.presentedViewController;
+        }
+        
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم التبديل التسلسلي بنجاح"
+                                                                   message:@"تم الوصول إلى 395 نقطة، والانتقال للحساب التالي بالتسلسل المحفوظ.\n\nسيتم إغلاق التطبيق الآن..."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+        
+        if (rootVC) {
+            [rootVC presentViewController:alert animated:YES completion:^{
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    exit(0);
+                });
+            }];
+        } else {
+            exit(0);
+        }
+    });
 }
 
 void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
@@ -333,7 +407,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
-                if (!shouldProcessPoints(currentPoints)) return; // الحظر فعال إذا كانت النقاط 395
+                if (!shouldProcessPoints(currentPoints)) return; 
                 if (currentPoints >= 395) {
                     performAccountSwitchAndAlert();
                 }
@@ -363,7 +437,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 - (void)startLoading {
     NSMutableURLRequest *newReq = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
+    [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inNewReq];
     
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
