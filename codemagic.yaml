@@ -9,6 +9,7 @@ workflows:
           brew install ldid
       - name: Setup Theos
         script: |
+          rm -rf ~/theos
           git clone --recursive https://github.com/theos/theos.git ~/theos
           git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
       - name: Build Tweak
