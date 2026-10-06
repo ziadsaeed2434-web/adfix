@@ -8,29 +8,18 @@
 #import <netdb.h>
 #import <arpa/inet.h>
 
-// --- الثوابت وإعدادات الحسابات الثلاثة ---
+// --- الثوابت وإعدادات الحسابات الأربعة الجديدة كلياً ---
 static NSString * const kKeychainAccount = @"com.tempnum.virtualnumber.deviceUUID";
 static NSString * const kKeychainGroup   = @"3J96GNXKKU.*";
-static NSString * const kAccount1_UUID   = @"5A82BF9F-3EB4-4CA5-AD39-593553C1E15C"; // الحساب الأول
-static NSString * const kAccount2_UUID   = @"2BEE80E4-E20A-432C-879D-A98E2B8BC10A"; // الحساب الثاني
-static NSString * const kAccount3_UUID   = @"7F4D0094-0107-44B6-9D41-63FBCE2A5956"; // الحساب الثالث
+
+static NSString * const kAccount1_UUID   = @"1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D"; // الحساب الأول (1)
+static NSString * const kAccount2_UUID   = @"2B3C4D5E-6F7A-8B9C-0D1E-2F3A4B5C6D7E"; // الحساب الثاني (2)
+static NSString * const kAccount3_UUID   = @"3C4D5E6F-7A8B-9C0D-1E2F-3A4B5C6D7E8F"; // الحساب الثالث (3)
+static NSString * const kAccount4_UUID   = @"4D5E6F7A-8B9C-0D1E-2F3A-4B5C6D7E8F9A"; // الحساب الرابع (4)
 
 static BOOL isSwitchAlertShown = NO;
-static BOOL isAutoShakingActive = NO; // متغير لمنع تداخل عمليات التكرار
 
-// --- واجهة خدمة الإعلانات ---
-
-@interface ActivatorAdService : NSObject
-- (void)loadAd;
-- (BOOL)isReady;
-- (BOOL)isAdReady;
-- (BOOL)canShowAd;
-- (BOOL)hasAdLoaded;
-- (void)showRewardAd;
-- (void)presentAdFromViewController:(UIViewController *)viewController;
-@end
-
-// --- دوال مساعدة لإنشاء هويات عشوائية ---
+// --- دوال مساعدة لإنشاء هويات عشوائية وتزوير البيئة ---
 static NSString *randomUUID() {
     return [[NSUUID UUID] UUIDString];
 }
@@ -74,17 +63,11 @@ static NSString *generateTimestamp() {
     return [formatter stringFromDate:now];
 }
 
-// --- مسار حالة التبديل ---
+// --- مسار حالة التبديل والتسلسل ---
 NSString *getStatePlistPath(void) {
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *libraryDirectory = [paths firstObject];
     return [libraryDirectory stringByAppendingPathComponent:@"AccountSwitchState.plist"];
-}
-
-// --- مسار علامة الخروج النهائي ---
-NSString *getTerminationMarkerPath(void) {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-    return [[paths firstObject] stringByAppendingPathComponent:@"AppWasTerminated.flag"];
 }
 
 // --- إدارة الـ Keychain المدمجة ---
@@ -133,7 +116,7 @@ void saveUUIDToKeychain(NSString *uuidString) {
     SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
 }
 
-// --- مسح بيانات التطبيق كلياً وبشكل مضمون ---
+// --- مسح بيانات التطبيق كلياً عند الوصول للهدف فقط (مع استثناء ملف الحالة) ---
 void clearAllAppDataCompletely(void) {
     NSString *bundleDomain = [[NSBundle mainBundle] bundleIdentifier];
     if (bundleDomain) {
@@ -178,45 +161,40 @@ void clearAllAppDataCompletely(void) {
     }
 }
 
-// --- منطق التبديل التسلسلي ---
+// --- المنطق التسلسلي الجديد للأربعة حسابات (1 -> 2 -> 3 -> 4 -> 1) ---
 NSString *getNextAccountUUID(void) {
     NSString *path = getStatePlistPath();
-    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+    NSMutableDictionary *dict = [[NSMutableDictionary alloc] initWithContentsOfFile:path];
     
-    NSInteger lastAccountIndex = 1; 
-    if (dict && dict[@"LastIndex"] != nil) {
-        lastAccountIndex = [dict[@"LastIndex"] integerValue];
+    if (!dict) {
+        dict = [NSMutableDictionary dictionary];
     }
     
-    NSString *currentKeychainUUID = getAppCurrentUUIDFromKeychain();
-    NSString *nextUUID = nil;
-    NSInteger newIndex = 1;
+    NSInteger currentStep = 1;
+    if (dict[@"SequenceStep"] != nil) {
+        currentStep = [dict[@"SequenceStep"] integerValue];
+    }
     
-    if (lastAccountIndex == 1) {
+    NSString *nextUUID = nil;
+    NSInteger nextStep = 1;
+    
+    if (currentStep == 1) {
         nextUUID = kAccount2_UUID;
-        newIndex = 2;
-    } else if (lastAccountIndex == 2) {
+        nextStep = 2;
+    } else if (currentStep == 2) {
         nextUUID = kAccount3_UUID;
-        newIndex = 3;
+        nextStep = 3;
+    } else if (currentStep == 3) {
+        nextUUID = kAccount4_UUID;
+        nextStep = 4;
     } else {
         nextUUID = kAccount1_UUID;
-        newIndex = 1;
+        nextStep = 1;
     }
     
-    if (currentKeychainUUID && [nextUUID isEqualToString:currentKeychainUUID]) {
-        if ([currentKeychainUUID isEqualToString:kAccount1_UUID]) {
-            nextUUID = kAccount2_UUID; newIndex = 2;
-        } else if ([currentKeychainUUID isEqualToString:kAccount2_UUID]) {
-            nextUUID = kAccount3_UUID; newIndex = 3;
-        } else {
-            nextUUID = kAccount1_UUID; newIndex = 1;
-        }
-    }
-    
-    NSMutableDictionary *newDict = [NSMutableDictionary dictionary];
-    newDict[@"LastIndex"] = @(newIndex);
-    newDict[@"WaitingForPointsChange"] = @YES; 
-    [newDict writeToFile:path atomically:YES];
+    dict[@"SequenceStep"] = @(nextStep);
+    dict[@"WaitingForPointsChange"] = @YES;
+    [dict writeToFile:path atomically:YES];
     
     return nextUUID;
 }
@@ -240,13 +218,13 @@ BOOL shouldProcessPoints(NSInteger currentPoints) {
     return YES;
 }
 
-// --- عملية الحذف والتبديل المضمونة ---
+// --- تنفيذ عملية التبديل والحذف (تتم حصراً عند الوصول لـ 395 نقطة) ---
 void performAccountSwitchAndAlert(void) {
     if (isSwitchAlertShown) return;
     isSwitchAlertShown = YES;
-    isAutoShakingActive = NO; // إيقاف التكرار عند النجاح
     
     NSString *nextUUID = getNextAccountUUID();
+    
     clearAllAppDataCompletely();
     clearEntireKeychain();
     saveUUIDToKeychain(nextUUID);
@@ -273,8 +251,8 @@ void performAccountSwitchAndAlert(void) {
             rootVC = rootVC.presentedViewController;
         }
         
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم التبديل والحذف بنجاح"
-                                                                   message:@"تم الوصول إلى 395 نقطة، حذف البيانات السابقة، والانتقال للحساب التالي بنجاح تام.\n\nسيتم إغلاق التطبيق الآن..."
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🔄 تم التبديل التسلسلي بنجاح"
+                                                                   message:@"تم الوصول إلى 395 نقطة، والانتقال للحساب التالي بين الحسابات الأربعة.\n\nسيتم إغلاق التطبيق الآن..."
                                                             preferredStyle:UIAlertControllerStyleAlert];
         
         if (rootVC) {
@@ -289,117 +267,32 @@ void performAccountSwitchAndAlert(void) {
     });
 }
 
+// --- التحقق من وجود حساب صالح ضمن الأربعة حسابات في الـ Keychain ---
 void checkAndEnforceValidAccount(void) {
     NSString *currentUUID = getAppCurrentUUIDFromKeychain();
     if (![currentUUID isEqualToString:kAccount1_UUID] && 
         ![currentUUID isEqualToString:kAccount2_UUID] && 
-        ![currentUUID isEqualToString:kAccount3_UUID]) {
+        ![currentUUID isEqualToString:kAccount3_UUID] &&
+        ![currentUUID isEqualToString:kAccount4_UUID]) {
+        
         clearEntireKeychain();
         saveUUIDToKeychain(kAccount1_UUID);
         
         NSString *path = getStatePlistPath();
-        NSDictionary *dict = @{ @"LastIndex": @(1), @"WaitingForPointsChange": @NO };
+        NSDictionary *dict = @{ 
+            @"SequenceStep": @(1), 
+            @"WaitingForPointsChange": @NO 
+        };
         [dict writeToFile:path atomically:YES];
-        
-        clearAllAppDataCompletely();
     }
 }
 
-void checkAndWipeOnFreshLaunchIfNeeded(void) {
-    checkAndEnforceValidAccount();
+// --- تعديل الاستجابات (Response Modification) عبر بروتوكول الشبكة ---
+NSData *modifyResponseDataIfNeeded(NSString *url, NSData *data) {
+    if (!data || !url) return data;
     
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *markerPath = getTerminationMarkerPath();
-    
-    if (![fm fileExistsAtPath:markerPath]) {
-        NSString *currentUUID = getAppCurrentUUIDFromKeychain();
-        clearAllAppDataCompletely();
-        if (currentUUID) {
-            clearEntireKeychain();
-            saveUUIDToKeychain(currentUUID);
-        }
-    }
-    
-    [@"active" writeToFile:markerPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-}
-
-// --- دالة حقن وتغيير الهويات (الهيدرز) المتجددة لكل طلب تكرار ---
-void injectRandomizedHeaders(NSMutableURLRequest *request) {
-    NSString *dynIP = randomSpectrumIP();
-    NSString *dynDNS = randomSpectrumDNS();
-    NSString *dynIMEI = randomIMEI();
-    NSString *dynIDFA = randomUUID();
-    NSString *dynIDFV = randomUUID();
-    NSString *dynOS = randomOSVersion();
-    NSString *dynModel = randomDeviceModel();
-    NSString *timestamp = generateTimestamp();
-    
-    [request setValue:dynIP forHTTPHeaderField:@"X-Forwarded-For"];
-    [request setValue:dynIP forHTTPHeaderField:@"Client-IP"];
-    [request setValue:dynIP forHTTPHeaderField:@"True-Client-IP"];
-    [request setValue:dynIP forHTTPHeaderField:@"X-Client-IP"];
-    [request setValue:dynIP forHTTPHeaderField:@"Remote-IP"];
-    [request setValue:dynDNS forHTTPHeaderField:@"X-Custom-DNS"];
-    [request setValue:dynDNS forHTTPHeaderField:@"X-DNS-Server"];
-    [request setValue:dynIMEI forHTTPHeaderField:@"X-Device-IMEI"];
-    [request setValue:dynIMEI forHTTPHeaderField:@"X-IMEI"];
-    [request setValue:dynIMEI forHTTPHeaderField:@"Device-Id"];
-    [request setValue:dynIDFA forHTTPHeaderField:@"X-Advertising-ID"];
-    [request setValue:dynIDFA forHTTPHeaderField:@"IDFA"];
-    [request setValue:dynIDFV forHTTPHeaderField:@"X-Vendor-ID"];
-    [request setValue:dynIDFV forHTTPHeaderField:@"IDFV"];
-    [request setValue:timestamp forHTTPHeaderField:@"X-Request-Timestamp"];
-    [request setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
-    [request setValue:dynOS forHTTPHeaderField:@"X-OS-Version"];
-    [request setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
-    [request setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 AppModel/%@", dynOS, dynModel] forHTTPHeaderField:@"User-Agent"];
-}
-
-// --- دالة التكرار التلقائي (محدثة لتفادي حلقة الاحتجاز وتحذيرات ARC) ---
-void startAutoShakeLoop(NSURLRequest *originalRequest) {
-    if (isAutoShakingActive) return;
-    isAutoShakingActive = YES;
-    
-    __block void (^sendRequestBlock)(void) = nil;
-    __weak __block void (^weakSendRequestBlock)(void) = nil;
-    
-    weakSendRequestBlock = sendRequestBlock = ^(void) {
-        if (!isAutoShakingActive) return;
-        
-        NSMutableURLRequest *clonedRequest = [originalRequest mutableCopy];
-        injectRandomizedHeaders(clonedRequest);
-        
-        NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:clonedRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            if (!isAutoShakingActive) return;
-            
-            int randomDelay = 3 + arc4random_uniform(3); // بين 3 إلى 5 ثوانٍ
-            
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(randomDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                void (^strongBlock)(void) = weakSendRequestBlock;
-                if (strongBlock) {
-                    strongBlock();
-                }
-            });
-        }];
-        [task resume];
-    };
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        void (^strongBlock)(void) = weakSendRequestBlock;
-        if (strongBlock) {
-            strongBlock();
-        }
-    });
-}
-
-void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSInteger statusCode, NSData *data, NSError *error) {
-    checkAndEnforceValidAccount();
-
-    if (!url || ![url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
-        return;
-    }
-
-    if (data) {
+    // 1. معالجة طلب النقاط للتحقق من الوصول لـ 395
+    if ([url containsString:@"tn.maildisposable.com/api/v1/users/additional/points/data"]) {
         NSError *jsonError = nil;
         NSDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
         if (!jsonError && [jsonDict isKindOfClass:[NSDictionary class]]) {
@@ -409,16 +302,36 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
             
             if (pointsVal) {
                 NSInteger currentPoints = [pointsVal integerValue];
-                if (!shouldProcessPoints(currentPoints)) return;
-                if (currentPoints >= 395) {
+                if (shouldProcessPoints(currentPoints) && currentPoints >= 395) {
                     performAccountSwitchAndAlert();
                 }
             }
         }
     }
+    
+    // 2. معالجة طلب الـ shake وتعديل canShake إلى true و nextShake إلى 100
+    if ([url containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
+        NSError *jsonError = nil;
+        NSMutableDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:&jsonError];
+        if (!jsonError && [jsonDict isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *dataObj = [jsonDict[@"data"] mutableCopy];
+            if (dataObj) {
+                dataObj[@"canShake"] = @YES;
+                dataObj[@"nextShake"] = @100;
+                jsonDict[@"data"] = dataObj;
+                
+                NSData *modifiedData = [NSJSONSerialization dataWithJSONObject:jsonDict options:0 error:nil];
+                if (modifiedData) {
+                    return modifiedData;
+                }
+            }
+        }
+    }
+    
+    return data;
 }
 
-// --- بروتوكول شبكة اعتراض النقاط وطلبات الـ Shake ---
+// --- بروتوكول شبكة اعتراض النقاط والـ Shake ---
 @interface GodModeNetworkProtocol : NSURLProtocol
 @end
 
@@ -442,17 +355,11 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
     NSMutableURLRequest *newReq = [self.request mutableCopy];
     [NSURLProtocol setProperty:@YES forKey:@"GodModeHandled" inRequest:newReq];
     
-    NSString *urlStr = newReq.URL.absoluteString;
-    if ([urlStr containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
-        startAutoShakeLoop(newReq);
-    }
-    
     NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:newReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        logGodModeEvent(@"Protocol", newReq.HTTPMethod, newReq.URL.absoluteString, httpResp.statusCode, data, error);
+        NSData *finalData = modifyResponseDataIfNeeded(newReq.URL.absoluteString, data);
         
-        if (data) [self.client URLProtocol:self didLoadData:data];
+        if (finalData) [self.client URLProtocol:self didLoadData:finalData];
         if (response) [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageAllowed];
         if (error) [self.client URLProtocol:self didFailWithError:error];
         else [self.client URLProtocolDidFinishLoading:self];
@@ -462,7 +369,7 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (void)stopLoading {}
 @end
 
-// --- تخطي شاشات الترحيب والشروط تلقائياً ---
+// --- تخطي شاشات الترحيب والشروط تلقائياً عبر NSUserDefaults ---
 %hook NSUserDefaults
 
 - (BOOL)boolForKey:(NSString *)defaultName {
@@ -583,17 +490,30 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completionHandler {
     NSMutableURLRequest *mutableReq = [request mutableCopy];
     
-    injectRandomizedHeaders(mutableReq);
+    NSString *dynIP = randomSpectrumIP();
+    NSString *dynDNS = randomSpectrumDNS();
+    NSString *dynIMEI = randomIMEI();
+    NSString *dynIDFA = randomUUID();
+    NSString *dynIDFV = randomUUID();
+    NSString *dynOS = randomOSVersion();
+    NSString *dynModel = randomDeviceModel();
+    NSString *timestamp = generateTimestamp();
     
-    NSString *urlString = request.URL.absoluteString;
-    if (urlString && [urlString containsString:@"tn.maildisposable.com/api/v1/users/additional/shake"]) {
-        startAutoShakeLoop(mutableReq);
-    }
+    [mutableReq setValue:dynIP forHTTPHeaderField:@"X-Forwarded-For"];
+    [mutableReq setValue:dynIP forHTTPHeaderField:@"Client-IP"];
+    [mutableReq setValue:dynDNS forHTTPHeaderField:@"X-DNS-Server"];
+    [mutableReq setValue:dynIMEI forHTTPHeaderField:@"X-Device-IMEI"];
+    [mutableReq setValue:dynIDFA forHTTPHeaderField:@"X-Advertising-ID"];
+    [mutableReq setValue:dynIDFV forHTTPHeaderField:@"X-Vendor-ID"];
+    [mutableReq setValue:timestamp forHTTPHeaderField:@"X-Request-Timestamp"];
+    [mutableReq setValue:@"Charter Communications" forHTTPHeaderField:@"X-ISP"];
+    [mutableReq setValue:dynOS forHTTPHeaderField:@"X-OS-Version"];
+    [mutableReq setValue:dynModel forHTTPHeaderField:@"X-Device-Model"];
+    [mutableReq setValue:[NSString stringWithFormat:@"Mozilla/5.0 (iPhone; CPU iPhone OS %@ like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", dynOS] forHTTPHeaderField:@"User-Agent"];
     
     void (^wrappedHandler)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable) = ^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-        logGodModeEvent(@"NSURLSession", request.HTTPMethod, request.URL.absoluteString, httpResp.statusCode, data, error);
-        if (completionHandler) completionHandler(data, response, error);
+        NSData *finalData = modifyResponseDataIfNeeded(request.URL.absoluteString, data);
+        if (completionHandler) completionHandler(finalData, response, error);
     };
     
     return %orig(mutableReq, wrappedHandler);
@@ -626,61 +546,10 @@ void logGodModeEvent(NSString *engine, NSString *method, NSString *url, NSIntege
 }
 %end
 
-// --- تحصين وتفعيل الإعلانات تلقائياً ---
-%hook ActivatorAdService
-- (BOOL)isReady { return YES; }
-- (BOOL)isAdReady { return YES; }
-- (BOOL)canShowAd { return YES; }
-- (BOOL)hasAdLoaded { return YES; }
-
-- (void)loadAd {
-    %orig;
-    id targetSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    });
-}
-
-- (void)showRewardAd {
-    @try {
-        %orig;
-        id targetSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-                [targetSelf loadAd];
-            }
-        });
-    } @catch (NSException *exception) {}
-}
-
-- (void)presentAdFromViewController:(UIViewController *)viewController {
-    @try { 
-        %orig; 
-    } @catch (NSException *exception) {}
-}
-
-- (void)ad:(id)arg1 didFailToPresentFullScreenContentWithError:(id)arg2 {
-    @try {
-        id targetSelf = self;
-        if ([targetSelf respondsToSelector:@selector(loadAd)]) {
-            [targetSelf loadAd];
-        }
-    } @catch (NSException *exception) {}
-}
-%end
-
-// --- مراقبة دورة حياة التطبيق وإدارة الخروج النهائي والكاش ---
+// --- تهيئة التويك عند بدء التشغيل ---
 %ctor {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [NSURLProtocol registerClass:[GodModeNetworkProtocol class]];
-        
-        checkAndWipeOnFreshLaunchIfNeeded();
-        
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            NSFileManager *fm = [NSFileManager defaultManager];
-            [fm removeItemAtPath:getTerminationMarkerPath() error:nil];
-        }];
+        checkAndEnforceValidAccount();
     });
 }
